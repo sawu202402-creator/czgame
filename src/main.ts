@@ -59,20 +59,24 @@ async function bootstrap() {
   let hudTick = 0;
 
   const loop = (now: number) => {
-    const dt = Math.min(0.05, (now - lastTime) / 1000);
+    requestAnimationFrame(loop);
+
+    const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
     lastTime = now;
 
-    if (engine.state) {
-      engine.update(dt, viewW, viewH);
-      engine.render(viewW, viewH);
-      hudTick += dt;
-      if (hudTick >= 0.08) {
-        hudTick = 0;
-        ui.syncHUD();
+    try {
+      if (engine.state) {
+        engine.update(dt, viewW, viewH);
+        engine.render(viewW, viewH);
+        hudTick += dt;
+        if (hudTick >= 0.08) {
+          hudTick = 0;
+          ui.syncHUD();
+        }
       }
+    } catch (err) {
+      console.error('[GameLoop Recovered]', err);
     }
-
-    requestAnimationFrame(loop);
   };
 
   requestAnimationFrame(loop);

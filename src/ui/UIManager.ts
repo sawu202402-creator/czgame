@@ -28,6 +28,8 @@ export class UIManager {
   public showHomeHub(): void {
     cancelAnimationFrame(this.needleAnimId);
     this.armoryOpen = false;
+    this.engine.modalPaused = false;
+    this.engine.paused = false;
     this.hudRoot?.remove();
     this.hudRoot = null;
     this.engine.state = null;
@@ -256,7 +258,7 @@ export class UIManager {
 
     (hud.querySelector('#btn-ad-turret') as HTMLButtonElement).onclick = async () => {
       const s = this.engine.state;
-      if (!s || s.hqSupportCooldown > 0) return;
+      if (!s || s.hqSupportCooldown > 0 || this.engine.modalPaused) return;
       const save = SaveManager.get();
       if (!save.freeHqSupportUsed) {
         save.freeHqSupportUsed = true;
@@ -264,6 +266,7 @@ export class UIManager {
         this.engine.applyHqAmmoAndTurret();
       } else {
         this.engine.modalPaused = true;
+        this.engine.input.resetStates();
         const ok = await PlatformSDK.showRewardedAd('hq_ammo_turret', '满弹药 + 自动哨戒机枪塔');
         this.engine.modalPaused = false;
         if (ok) this.engine.applyHqAmmoAndTurret();
@@ -272,8 +275,9 @@ export class UIManager {
 
     (hud.querySelector('#btn-ad-elec') as HTMLButtonElement).onclick = async () => {
       const s = this.engine.state;
-      if (!s || s.electricFortifyWaves > 0) return;
+      if (!s || s.electricFortifyWaves > 0 || this.engine.modalPaused) return;
       this.engine.modalPaused = true;
+      this.engine.input.resetStates();
       const ok = await PlatformSDK.showRewardedAd('electric_fortify', '全图高压电网加固 (持续2波)');
       this.engine.modalPaused = false;
       if (ok) this.engine.applyElectricFortify();
@@ -290,6 +294,7 @@ export class UIManager {
       this.armoryOpen = false;
       this.modalRoot.innerHTML = '';
       this.engine.modalPaused = false;
+      this.engine.flushQueuedModals();
       return;
     }
 
@@ -693,7 +698,7 @@ export class UIManager {
   public showTreasureChestModal(
     choices: RelicDef[],
     onPickOne: (r: RelicDef) => void,
-    onTakeAllAd: () => void
+    onTakeAllAd: () => Promise<boolean>
   ): void {
     this.armoryOpen = false;
     const cards = choices
@@ -738,9 +743,14 @@ export class UIManager {
 
     const allBtn = this.modalRoot.querySelector('#btn-relic-all') as HTMLButtonElement | null;
     if (allBtn) {
-      allBtn.onclick = () => {
-        this.modalRoot.innerHTML = '';
-        onTakeAllAd();
+      allBtn.onclick = async () => {
+        allBtn.disabled = true;
+        const ok = await onTakeAllAd();
+        if (ok) {
+          this.modalRoot.innerHTML = '';
+        } else {
+          allBtn.disabled = false;
+        }
       };
     }
   }
@@ -782,6 +792,7 @@ export class UIManager {
         this.modalRoot.innerHTML = '';
         this.engine.modalPaused = false;
         this.engine.applyTacticalRevive();
+        this.engine.flushQueuedModals();
       }
     };
 

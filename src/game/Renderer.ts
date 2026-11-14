@@ -1622,16 +1622,17 @@ export class CartoonRenderer {
     ctx.save();
     ctx.translate(p.x, p.y);
 
-    // 0. 开火瞬间枪口照亮地面的动态战术火光池！
+    // 0. 开火瞬间枪口照亮地面的零GC双层动态战术火光池！
     if (p.muzzleFlashTimer > 0) {
       const fx = Math.cos(p.angle) * 28;
       const fy = Math.sin(p.angle) * 28;
-      const mg = ctx.createRadialGradient(fx, fy, 4, fx, fy, 108);
-      mg.addColorStop(0, activeWep.evolved ? 'rgba(56, 189, 248, 0.32)' : 'rgba(251, 191, 36, 0.32)');
-      mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = mg;
+      ctx.fillStyle = activeWep.evolved ? 'rgba(56, 189, 248, 0.13)' : 'rgba(251, 191, 36, 0.13)';
       ctx.beginPath();
-      ctx.arc(fx, fy, 108, 0, Math.PI * 2);
+      ctx.arc(fx, fy, 92, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = activeWep.evolved ? 'rgba(56, 189, 248, 0.22)' : 'rgba(251, 191, 36, 0.22)';
+      ctx.beginPath();
+      ctx.arc(fx, fy, 46, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -2263,8 +2264,10 @@ export class CartoonRenderer {
     const key = `${fontSize}|${fill}|${text}`;
     let badge = this.labelCache.get(key);
     if (!badge) {
-      if (this.labelCache.size > 320) {
-        this.labelCache.clear();
+      while (this.labelCache.size >= 380) {
+        const oldestKey = this.labelCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        this.labelCache.delete(oldestKey);
       }
       badge = document.createElement('canvas');
       const bctx = badge.getContext('2d')!;

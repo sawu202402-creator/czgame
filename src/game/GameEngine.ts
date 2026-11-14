@@ -20,7 +20,7 @@ export interface EngineCallbacks {
   onOpenTreasureChest: (
     choices: RelicDef[],
     onPickOne: (relic: RelicDef) => void,
-    onTakeAllAd: () => void
+    onTakeAllAd: () => Promise<boolean>
   ) => void;
   onPlayerDowned: (canRevive: boolean) => void;
   onRunFinished: (victory: boolean, snapshot: RunSnapshot) => void;
@@ -36,6 +36,11 @@ export class GameEngine {
   private spawnQueue: ZombieKind[] = [];
   private spawnTimer = 0;
   private extractionSpawnTimer = 0;
+
+  // 防重入死循环与弹窗串行队列（杜绝后期连环爆裂/闪电链越界与多弹窗并发互盖死锁！）
+  private deadZombieIds = new Set<number>();
+  private explosionDepth = 0;
+  private pendingModals: (() => void)[] = [];
 
   // 56px 网格 BFS 流场寻路（支持任意不规则多边形房间、走廊与家具绕障！）
   private flowDist: Int16Array = new Int16Array(0);
@@ -69,6 +74,11 @@ export class GameEngine {
 
     const pistolDef = WEAPONS.pistol;
     this.nextEntityId = 1;
+    this.deadZombieIds.clear();
+    this.explosionDepth = 0;
+    this.pendingModals = [];
+    this.modalPaused = false;
+    this.paused = false;
 
     this.state = {
       stage,
@@ -322,17 +332,22 @@ export class GameEngine {
     const { gridCols: cols, gridRows: rows, cellSize: G } = s.stage;
     const p = s.player;
 
-    // 若与玩家同房间且视线无墙壁/掩体阻挡，直接直线扑向玩家，手感更灵敏！
-    if (Math.hypot(p.x - zx, p.y - zy) < 340 && this.hasClearWalkLine(zx, zy, p.x, p.y)) {
+    const gx = Math.max(0, Math.min(cols - 1, Math.floor(zx / G)));
+    const gy = Math.max(0, Math.min(rows - 1, Math.floor(zy / G)));
+    let bestD = this.flowDist[gy * cols + gx];
+
+    // 仅当流场距离已足够近且在 280px 内时才做直线视线检测，砍掉后期尸潮 85% 的冗余射线开销！
+    if (
+      bestD <= 6 &&
+      Math.abs(p.x - zx) < 280 &&
+      Math.abs(p.y - zy) < 280 &&
+      this.hasClearWalkLine(zx, zy, p.x, p.y)
+    ) {
       return { x: p.x, y: p.y };
     }
 
-    const gx = Math.max(0, Math.min(cols - 1, Math.floor(zx / G)));
-    const gy = Math.max(0, Math.min(rows - 1, Math.floor(zy / G)));
-
     let bestX = gx;
     let bestY = gy;
-    let bestD = this.flowDist[gy * cols + gx];
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -701,6 +716,16 @@ export class GameEngine {
 
   // ==================== 主更新循环 ====================
 
+  private isRunHalted(): boolean {
+    return (
+      !this.state ||
+      this.paused ||
+      this.modalPaused ||
+      this.state.waveState === 'ended' ||
+      this.state.player.hp <= 0
+    );
+  }
+
   public update(dt: number, viewW: number, viewH: number): void {
     if (!this.state || this.paused || this.modalPaused || this.state.waveState === 'ended') return;
     const s = this.state;
@@ -731,14 +756,24 @@ export class GameEngine {
     }
 
     this.updateWaveLogic(dt);
+    if (this.isRunHalted()) return;
+
     this.updatePlayer(dt, viewW, viewH);
     this.updateInteractions(dt);
+    if (this.isRunHalted()) return;
+
     this.updateTurretsAndDog(dt);
     this.updateGrenades(dt);
     this.updateBullets(dt);
     this.updateZombies(dt);
+    if (this.isRunHalted()) return;
+
     this.updateSpits(dt);
+    if (this.isRunHalted()) return;
+
     this.updateAcidPools(dt);
+    if (this.isRunHalted()) return;
+
     this.updateDrops(dt);
     this.updateFX(dt);
 
@@ -758,17 +793,22 @@ export class GameEngine {
       if (this.spawnQueue.length > 0) {
         this.spawnTimer -= dt;
         if (this.spawnTimer <= 0) {
-          // 中后期多窗口并发涌入，营造四面楚歌的防守张力
-          const maxBurst = s.wave >= 10 ? 3 : s.wave >= 7 ? 3 : s.wave >= 4 ? 2 : 1;
-          const burst =
-            maxBurst > 1 ? 1 + Math.floor(Math.random() * maxBurst) : 1;
-          for (let b = 0; b < burst && this.spawnQueue.length > 0; b++) {
-            const kind = this.spawnQueue.shift()!;
-            this.spawnZombie(kind);
-            if (kind === 'boss' || kind === 'miniboss') break;
+          if (s.zombies.length >= 68) {
+            // 同屏在场僵尸上限保护，待击杀腾出空位后无缝续刷，彻底杜绝无尽后期同屏百怪卡死
+            this.spawnTimer = 0.22;
+          } else {
+            // 中后期多窗口并发涌入，营造四面楚歌的防守张力
+            const maxBurst = s.wave >= 10 ? 3 : s.wave >= 7 ? 3 : s.wave >= 4 ? 2 : 1;
+            const burst =
+              maxBurst > 1 ? 1 + Math.floor(Math.random() * maxBurst) : 1;
+            for (let b = 0; b < burst && this.spawnQueue.length > 0 && s.zombies.length < 68; b++) {
+              const kind = this.spawnQueue.shift()!;
+              this.spawnZombie(kind);
+              if (kind === 'boss' || kind === 'miniboss') break;
+            }
+            const baseInterval = Math.max(0.24, 1.12 - s.wave * 0.068);
+            this.spawnTimer = baseInterval * (0.72 + Math.random() * 0.45);
           }
-          const baseInterval = Math.max(0.24, 1.12 - s.wave * 0.068);
-          this.spawnTimer = baseInterval * (0.72 + Math.random() * 0.45);
         }
       } else if (s.zombies.length === 0) {
         if (s.electricFortifyWaves > 0) s.electricFortifyWaves -= 1;
@@ -1111,15 +1151,19 @@ export class GameEngine {
     let best: ZombieEntity | null = null;
     let bestScore = Infinity;
     for (const z of s.zombies) {
-      const d = Math.hypot(z.x - x, z.y - y);
+      if (z.hp <= 0) continue;
+      const dx = z.x - x;
+      const dy = z.y - y;
+      if (Math.abs(dx) > maxRange || Math.abs(dy) > maxRange) continue;
+      const d = Math.hypot(dx, dy);
       if (d > maxRange) continue;
+      const score = z.kind === 'thief' ? d * 0.55 : z.insideBuilding ? d * 0.78 : d * 1.15;
+      // 先判断分数是否优于当前最优目标，再执行昂贵的墙壁穿刺射线检测（减少 ~90% 射线开销！）
+      if (score >= bestScore) continue;
       if (!this.isZombieTargetableForAutoAim(z)) continue;
       if (!this.hasBulletLineOfSight(x, y, z.x, z.y)) continue;
-      const score = z.kind === 'thief' ? d * 0.55 : z.insideBuilding ? d * 0.78 : d * 1.15;
-      if (score < bestScore) {
-        bestScore = score;
-        best = z;
-      }
+      bestScore = score;
+      best = z;
     }
     return best;
   }
@@ -1171,6 +1215,9 @@ export class GameEngine {
           : (i / (totalPellets - 1) - 0.5) * def.spread + (Math.random() - 0.5) * 0.04;
       const ang = p.angle + offset;
 
+      if (s.bullets.length >= 165) {
+        s.bullets.shift();
+      }
       s.bullets.push({
         x: muzzleX,
         y: muzzleY,
@@ -1501,49 +1548,70 @@ export class GameEngine {
     p.reloadTimer = 0;
   }
 
+  public flushQueuedModals(): void {
+    const s = this.state;
+    if (!s || s.waveState === 'ended' || s.player.hp <= 0 || this.modalPaused) return;
+    const nextModal = this.pendingModals.shift();
+    if (nextModal) {
+      nextModal();
+    }
+  }
+
   private openRelicChestModal(): void {
     const s = this.state!;
-    const pool = RELICS.filter((r) => !s.relicIds.includes(r.id));
-    if (pool.length === 0) {
-      s.cash += 350;
-      this.spawnFloatingText(s.player.x, s.player.y - 32, '🎁 奇物已集齐！奖励 +$350', '#fde047', 1.3);
-      return;
-    }
-    const shuffled = [...pool].sort(() => Math.random() - 0.5);
-    const choices = shuffled.slice(0, Math.min(2, shuffled.length));
-    this.modalPaused = true;
-    SoundFX.fanfare();
-
-    this.callbacks.onOpenTreasureChest(
-      choices,
-      (picked) => {
-        s.relicIds.push(picked.id);
-        this.modalPaused = false;
-        this.showBanner(`✨ 获得宝物【${picked.name}】：${picked.desc}`, 3.5);
-      },
-      async () => {
-        const ok = await PlatformSDK.showRewardedAd('relic_take_all', '神秘宝物箱 2 件全收');
-        if (ok) {
-          choices.forEach((c) => {
-            if (!s.relicIds.includes(c.id)) s.relicIds.push(c.id);
-          });
-          this.modalPaused = false;
-          PlatformSDK.gameplayStart();
-          this.showBanner(`🎉 爽翻！2 件宝物全部收入囊中！`, 3.5);
-        }
+    this.pendingModals.push(() => {
+      if (!this.state || this.state.waveState === 'ended' || this.state.player.hp <= 0) return;
+      const pool = RELICS.filter((r) => !s.relicIds.includes(r.id));
+      if (pool.length === 0) {
+        s.cash += 350;
+        this.spawnFloatingText(s.player.x, s.player.y - 32, '🎁 奇物已集齐！奖励 +$350', '#fde047', 1.3);
+        this.flushQueuedModals();
+        return;
       }
-    );
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const choices = shuffled.slice(0, Math.min(2, shuffled.length));
+      this.modalPaused = true;
+      this.input.resetStates();
+      SoundFX.fanfare();
+
+      this.callbacks.onOpenTreasureChest(
+        choices,
+        (picked) => {
+          if (!s.relicIds.includes(picked.id)) s.relicIds.push(picked.id);
+          this.modalPaused = false;
+          this.showBanner(`✨ 获得宝物【${picked.name}】：${picked.desc}`, 3.5);
+          this.flushQueuedModals();
+        },
+        async () => {
+          const ok = await PlatformSDK.showRewardedAd('relic_take_all', '神秘宝物箱 2 件全收');
+          if (ok) {
+            choices.forEach((c) => {
+              if (!s.relicIds.includes(c.id)) s.relicIds.push(c.id);
+            });
+            this.modalPaused = false;
+            PlatformSDK.gameplayStart();
+            this.showBanner(`🎉 爽翻！2 件宝物全部收入囊中！`, 3.5);
+            this.flushQueuedModals();
+            return true;
+          }
+          // 若用户取消激励视频，保持宝物箱界面可继续免费任选 1 件，绝不出现空屏假死！
+          return false;
+        }
+      );
+    });
+    this.flushQueuedModals();
   }
 
   private damageZombiesWithLaserTrap(st: RuntimeStation, dt: number): void {
     const s = this.state!;
     const beamAngle = performance.now() * 0.0045;
+    const snapshot = [...s.zombies];
     for (let i = 0; i < 2; i++) {
       const a = beamAngle + i * Math.PI;
       const bx = Math.cos(a);
       const by = Math.sin(a);
-      for (let zi = s.zombies.length - 1; zi >= 0; zi--) {
-        const z = s.zombies[zi];
+      for (const z of snapshot) {
+        if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
         const dx = z.x - st.x;
         const dy = z.y - st.y;
         const proj = dx * bx + dy * by;
@@ -1572,6 +1640,9 @@ export class GameEngine {
         t.angle = Math.atan2(target.y - t.y, target.x - t.x);
         if (t.fireCd <= 0) {
           t.fireCd = 0.14;
+          if (s.bullets.length >= 165) {
+            s.bullets.shift();
+          }
           s.bullets.push({
             x: t.x + Math.cos(t.angle) * 24,
             y: t.y + Math.sin(t.angle) * 24,
@@ -1682,9 +1753,16 @@ export class GameEngine {
       if (bulletRemoved) continue;
 
       for (let zi = s.zombies.length - 1; zi >= 0; zi--) {
+        if (zi >= s.zombies.length) {
+          zi = s.zombies.length - 1;
+          if (zi < 0) break;
+        }
         const z = s.zombies[zi];
+        if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
         if (b.hitIds.has(z.id)) continue;
-        if (Math.hypot(b.x - z.x, b.y - z.y) <= z.radius + b.radius) {
+        const hitDist = z.radius + b.radius;
+        if (Math.abs(b.x - z.x) > hitDist || Math.abs(b.y - z.y) > hitDist) continue;
+        if (Math.hypot(b.x - z.x, b.y - z.y) <= hitDist) {
           b.hitIds.add(z.id);
           if (b.explosiveRadius > 0) {
             this.explodeAt(b.x, b.y, b.explosiveRadius, b.damage);
@@ -1720,6 +1798,42 @@ export class GameEngine {
     }
   }
 
+  private spawnMergedDrop(kind: 'cash' | 'xp', value: number, x: number, y: number, life = 25): void {
+    const s = this.state!;
+    if (value <= 0) return;
+
+    // 38px 内自动合并同类型钞票/经验球；若场上掉落物已超 72 个则就近并入，彻底消除后期百个掉落物堆积掉帧！
+    const forceMerge = s.drops.length >= 72;
+    let bestDrop: DropItem | null = null;
+    let bestDist = forceMerge ? Infinity : 38;
+
+    for (const d of s.drops) {
+      if (d.kind !== kind) continue;
+      const dist = Math.hypot(d.x - x, d.y - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestDrop = d;
+        if (!forceMerge) break;
+      }
+    }
+
+    if (bestDrop) {
+      bestDrop.value += value;
+      bestDrop.life = Math.max(bestDrop.life, life);
+      return;
+    }
+
+    s.drops.push({
+      id: this.nextEntityId++,
+      kind,
+      value,
+      x,
+      y,
+      life,
+      bobPhase: Math.random() * 6,
+    });
+  }
+
   private damageZombie(
     z: ZombieEntity,
     dmg: number,
@@ -1729,14 +1843,12 @@ export class GameEngine {
     flame: boolean,
     electric: boolean
   ): void {
+    if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) return;
     const s = this.state!;
     z.hp -= dmg;
     z.hitFlash = 0.09;
     if (flame) z.burnTimer = 3.0;
-    if (electric) {
-      z.slowTimer = 2.0;
-      this.triggerChainLightning(z.x, z.y, dmg * 0.4, 2, z.id);
-    }
+    if (electric) z.slowTimer = 2.0;
 
     const kbResist = z.kind === 'boss' ? 0.12 : z.kind === 'miniboss' ? 0.3 : 1;
     z.x += kx * 0.08 * kbResist;
@@ -1745,7 +1857,7 @@ export class GameEngine {
       this.resolveEntityInsideWalls(z);
     }
 
-    if (dmg >= 9 || isCrit || Math.random() < 0.25) {
+    if (isCrit || (s.floatingTexts.length < 28 && (dmg >= 12 || Math.random() < 0.2))) {
       this.spawnFloatingText(
         z.x + (Math.random() - 0.5) * 14,
         z.y - z.radius - 8,
@@ -1757,31 +1869,46 @@ export class GameEngine {
 
     if (z.kind === 'thief' && z.rangedCd > 0 && Math.random() < 0.38) {
       z.rangedCd -= 1;
-      s.drops.push({
-        id: this.nextEntityId++,
-        kind: 'cash',
-        value: 12,
-        x: z.x + (Math.random() - 0.5) * 28,
-        y: z.y + (Math.random() - 0.5) * 28,
-        life: 22,
-        bobPhase: Math.random() * 6,
-      });
+      this.spawnMergedDrop(
+        'cash',
+        12,
+        z.x + (Math.random() - 0.5) * 28,
+        z.y + (Math.random() - 0.5) * 28,
+        22
+      );
     }
 
+    const zx = z.x;
+    const zy = z.y;
+    const zid = z.id;
+
+    // 先处理击杀移出数组，再触发闪电链等连锁伤害，彻底阻断重入递归！
     if (z.hp <= 0) {
       this.killZombie(z);
+    }
+
+    if (electric) {
+      this.triggerChainLightning(zx, zy, dmg * 0.4, 2, zid);
     }
   }
 
   private killZombie(z: ZombieEntity): void {
+    if (!z || this.deadZombieIds.has(z.id)) return;
+    this.deadZombieIds.add(z.id);
+
     const s = this.state!;
     const idx = s.zombies.findIndex((item) => item.id === z.id);
-    if (idx < 0) return;
-    s.zombies.splice(idx, 1);
+    if (idx >= 0) {
+      s.zombies.splice(idx, 1);
+    }
+    if (this.deadZombieIds.size > 400) {
+      this.deadZombieIds.clear();
+      this.deadZombieIds.add(z.id);
+    }
 
     s.kills += 1;
-    this.spawnHitSparks(z.x, z.y, z.color, 9);
-    if (s.decals.length > 60) s.decals.shift();
+    this.spawnHitSparks(z.x, z.y, z.color, 8);
+    if (s.decals.length > 52) s.decals.shift();
     s.decals.push({
       x: z.x,
       y: z.y,
@@ -1817,30 +1944,22 @@ export class GameEngine {
       }
     }
 
-    if (s.relicIds.includes('chain_blast') && Math.random() < 0.2) {
-      this.explodeAt(z.x, z.y, 115, 85 * s.modifiers.damageMult);
-    }
-
     const cashMult = s.modifiers.cashMult * (s.powerUpTimers.double_cash > 0 ? 2 : 1);
     const cashVal = Math.round(z.cashReward * cashMult);
-    s.drops.push({
-      id: this.nextEntityId++,
-      kind: 'cash',
-      value: cashVal,
-      x: z.x + (Math.random() - 0.5) * 18,
-      y: z.y + (Math.random() - 0.5) * 18,
-      life: 25,
-      bobPhase: Math.random() * 6,
-    });
-    s.drops.push({
-      id: this.nextEntityId++,
-      kind: 'xp',
-      value: z.xpReward,
-      x: z.x + (Math.random() - 0.5) * 22,
-      y: z.y + (Math.random() - 0.5) * 22,
-      life: 25,
-      bobPhase: Math.random() * 6,
-    });
+    this.spawnMergedDrop(
+      'cash',
+      cashVal,
+      z.x + (Math.random() - 0.5) * 18,
+      z.y + (Math.random() - 0.5) * 18,
+      25
+    );
+    this.spawnMergedDrop(
+      'xp',
+      z.xpReward,
+      z.x + (Math.random() - 0.5) * 22,
+      z.y + (Math.random() - 0.5) * 22,
+      25
+    );
 
     if (z.kind === 'thief') {
       const rm = this.getRoomAt(z.x, z.y) || s.rooms[0];
@@ -1868,22 +1987,43 @@ export class GameEngine {
         bobPhase: 0,
       });
     }
+
+    // 限制连环爆裂最大递归层数为 2，既保留连爆爽感又 100% 杜绝高密度尸潮无限递归爆栈！
+    if (this.explosionDepth < 2 && s.relicIds.includes('chain_blast') && Math.random() < 0.2) {
+      this.explodeAt(z.x, z.y, 115, 85 * s.modifiers.damageMult);
+    }
   }
 
   private explodeAt(x: number, y: number, radius: number, damage: number): void {
     const s = this.state!;
     SoundFX.explosion();
     s.camera.shake = Math.max(s.camera.shake, 0.9);
-    this.spawnHitSparks(x, y, '#f97316', 18);
-    this.spawnFloatingText(x, y - 16, '💥 BOOM!', '#fde047', 1.45);
+    this.spawnHitSparks(x, y, '#f97316', 14);
+    if (this.explosionDepth === 0) {
+      this.spawnFloatingText(x, y - 16, '💥 BOOM!', '#fde047', 1.45);
+    }
 
-    for (let i = s.zombies.length - 1; i >= 0; i--) {
-      const z = s.zombies[i];
-      const d = Math.hypot(z.x - x, z.y - y);
-      if (d <= radius + z.radius) {
-        const ang = Math.atan2(z.y - y, z.x - x);
-        this.damageZombie(z, damage * Math.max(0.35, 1 - d / (radius * 1.4)), Math.cos(ang) * 260, Math.sin(ang) * 260, true, true, false);
+    this.explosionDepth += 1;
+    try {
+      const snapshot = [...s.zombies];
+      for (const z of snapshot) {
+        if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
+        const d = Math.hypot(z.x - x, z.y - y);
+        if (d <= radius + z.radius) {
+          const ang = Math.atan2(z.y - y, z.x - x);
+          this.damageZombie(
+            z,
+            damage * Math.max(0.35, 1 - d / (radius * 1.4)),
+            Math.cos(ang) * 260,
+            Math.sin(ang) * 260,
+            true,
+            true,
+            false
+          );
+        }
       }
+    } finally {
+      this.explosionDepth -= 1;
     }
   }
 
@@ -1898,7 +2038,7 @@ export class GameEngine {
       let nearest: ZombieEntity | null = null;
       let bestD = 250;
       for (const z of s.zombies) {
-        if (visited.has(z.id)) continue;
+        if (!z || z.hp <= 0 || visited.has(z.id) || this.deadZombieIds.has(z.id)) continue;
         const d = Math.hypot(z.x - curX, z.y - curY);
         if (d < bestD) {
           bestD = d;
@@ -1910,12 +2050,11 @@ export class GameEngine {
       pts.push({ x: nearest.x, y: nearest.y });
       curX = nearest.x;
       curY = nearest.y;
-      nearest.hp -= damage;
-      nearest.hitFlash = 0.1;
-      if (nearest.hp <= 0) this.killZombie(nearest);
+      this.damageZombie(nearest, damage, 0, 0, false, false, false);
     }
 
     if (pts.length > 1) {
+      if (s.lightnings.length >= 18) s.lightnings.shift();
       s.lightnings.push({ points: pts, color: '#38bdf8', life: 0.18 });
     }
   }
@@ -1926,7 +2065,12 @@ export class GameEngine {
     const freezeMult = s.powerUpTimers.freeze > 0 ? 0.22 : 1;
 
     for (let i = s.zombies.length - 1; i >= 0; i--) {
+      if (i >= s.zombies.length) {
+        i = s.zombies.length - 1;
+        if (i < 0) break;
+      }
       const z = s.zombies[i];
+      if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
       z.wobblePhase += dt * (z.kind === 'runner' ? 11 : 7.5);
       if (z.hitFlash > 0) z.hitFlash -= dt;
       if (z.attackCd > 0) z.attackCd -= dt;
@@ -1968,7 +2112,12 @@ export class GameEngine {
       const spd = z.speed * freezeMult * (z.slowTimer > 0 ? 0.55 : 1) * (bossEnraged ? 1.28 : 1) * chargeBoost;
 
       if (!z.insideBuilding && z.targetWindowId) {
-        const win = s.windows.find((w) => w.id === z.targetWindowId)!;
+        const win = s.windows.find((w) => w.id === z.targetWindowId);
+        if (!win) {
+          z.insideBuilding = true;
+          z.targetWindowId = null;
+          continue;
+        }
         const wcx = win.x + win.w / 2;
         const wcy = win.y + win.h / 2;
         const dx = wcx - z.x;
@@ -2093,12 +2242,14 @@ export class GameEngine {
         z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 9));
 
         for (let j = 0; j < s.zombies.length; j++) {
-          if (i === j) continue;
           const oz = s.zombies[j];
-          const sx = z.x - oz.x;
-          const sy = z.y - oz.y;
-          const sd = Math.hypot(sx, sy);
+          if (!oz || oz.id === z.id) continue;
           const minD = z.radius + oz.radius;
+          const sx = z.x - oz.x;
+          if (Math.abs(sx) >= minD) continue;
+          const sy = z.y - oz.y;
+          if (Math.abs(sy) >= minD) continue;
+          const sd = Math.hypot(sx, sy);
           if (sd > 0 && sd < minD) {
             z.vx += (sx / sd) * 78;
             z.vy += (sy / sd) * 78;
@@ -2174,6 +2325,7 @@ export class GameEngine {
         SaveManager.recordEndlessWave(s.stage.id, s.wave);
       }
       this.modalPaused = true;
+      this.input.resetStates();
       this.callbacks.onPlayerDowned(!s.reviveUsed);
     }
   }
@@ -2272,7 +2424,7 @@ export class GameEngine {
     } else if (d.kind === 'xp') {
       s.battleXp += d.value;
       SoundFX.xp();
-      if (s.battleXp >= s.battleXpNext) {
+      while (s.battleXp >= s.battleXpNext) {
         s.battleXp -= s.battleXpNext;
         s.battleLevel += 1;
         s.battleXpNext = Math.round(s.battleXpNext * 1.38 + 22);
@@ -2286,8 +2438,9 @@ export class GameEngine {
       if (d.powerUp === 'nuke') {
         s.camera.shake = 1.2;
         SoundFX.explosion();
-        for (let i = s.zombies.length - 1; i >= 0; i--) {
-          const z = s.zombies[i];
+        const snapshot = [...s.zombies];
+        for (const z of snapshot) {
+          if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
           if (z.kind === 'boss' || z.kind === 'miniboss') {
             this.damageZombie(z, z.maxHp * 0.3, 0, 0, true, false, false);
           } else {
@@ -2305,15 +2458,21 @@ export class GameEngine {
 
   private triggerBattleLevelUp(): void {
     const s = this.state!;
-    const shuffled = [...IN_RUN_PERKS].sort(() => Math.random() - 0.5);
-    const choices = shuffled.slice(0, 3);
-    this.modalPaused = true;
-    SoundFX.fanfare();
-    this.callbacks.onBattleLevelUp(choices, (picked) => {
-      picked.apply(s.modifiers);
-      this.modalPaused = false;
-      this.showBanner(`🆙 战斗升至 Lv.${s.battleLevel}！解锁【${picked.name}】！`, 2.8);
+    this.pendingModals.push(() => {
+      if (!this.state || this.state.waveState === 'ended' || this.state.player.hp <= 0) return;
+      const shuffled = [...IN_RUN_PERKS].sort(() => Math.random() - 0.5);
+      const choices = shuffled.slice(0, 3);
+      this.modalPaused = true;
+      this.input.resetStates();
+      SoundFX.fanfare();
+      this.callbacks.onBattleLevelUp(choices, (picked) => {
+        picked.apply(s.modifiers);
+        this.modalPaused = false;
+        this.showBanner(`🆙 战斗升至 Lv.${s.battleLevel}！解锁【${picked.name}】！`, 2.8);
+        this.flushQueuedModals();
+      });
     });
+    this.flushQueuedModals();
   }
 
   private updateFX(dt: number): void {

@@ -6,6 +6,8 @@ class SoundFXManager {
   private userMuted = false;
   private lastShootAt = 0;
   private lastPickupAt = 0;
+  private lastExplosionAt = 0;
+  private lastRepairAt = 0;
 
   private ensureCtx(): AudioContext | null {
     if (this.muted || this.userMuted) return null;
@@ -148,6 +150,10 @@ class SoundFXManager {
   }
 
   public repair(): void {
+    const perfNow = performance.now();
+    if (perfNow - this.lastRepairAt < 55) return;
+    this.lastRepairAt = perfNow;
+
     const ctx = this.ensureCtx();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -181,6 +187,10 @@ class SoundFXManager {
   }
 
   public explosion(): void {
+    const perfNow = performance.now();
+    if (perfNow - this.lastExplosionAt < 55) return;
+    this.lastExplosionAt = perfNow;
+
     const ctx = this.ensureCtx();
     if (!ctx || !this.noiseBufferLong) return;
     const now = ctx.currentTime;
