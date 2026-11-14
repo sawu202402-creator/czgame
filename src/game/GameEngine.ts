@@ -688,8 +688,9 @@ export class GameEngine {
     if (!this.state || this.paused || this.modalPaused || this.state.waveState === 'ended') return;
     const s = this.state;
 
-    // 宽敞室内视野缩放（兼顾灵巧小特工、压迫感大僵尸与开阔拉扯空间）
-    s.camera.zoom = Math.max(0.95, Math.min(1.12, viewW / 1380));
+    // 自适应桌面与手机横竖屏视野缩放（手机端自动拉远镜头，完整看清宽敞房间与四面窗户！）
+    const fitZoom = Math.min(viewW / 1180, viewH / 680);
+    s.camera.zoom = Math.max(0.54, Math.min(1.1, fitZoom));
 
     if (s.bannerTimer > 0) s.bannerTimer -= dt;
     if (s.hqSupportCooldown > 0) s.hqSupportCooldown -= dt;

@@ -1211,14 +1211,15 @@ export class CartoonRenderer {
 
   private drawTacticalMinimap(
     ctx: CanvasRenderingContext2D,
-    _viewW: number,
+    viewW: number,
     viewH: number,
     state: RunSnapshot
   ): void {
-    const mapW = 142;
-    const mapH = 102;
-    const mx = 12;
-    const my = viewH - mapH - 12;
+    const compact = viewW < 760 || viewH < 500;
+    const mapW = compact ? 102 : 142;
+    const mapH = compact ? 74 : 102;
+    const mx = compact ? 8 : 12;
+    const my = compact ? viewH - mapH - 54 : viewH - mapH - 12;
     const bb = state.stage.buildingBounds;
     const scale = Math.min((mapW - 14) / bb.w, (mapH - 14) / bb.h);
     const ox = mx + (mapW - bb.w * scale) / 2 - bb.x * scale;
