@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Logs & temp files
+*.log
+*.tmp
+
+# System & IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.wrangler/
