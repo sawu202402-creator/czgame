@@ -17,6 +17,9 @@ export type SpriteKey =
   | 'prop_swat_van'
   | 'prop_fountain'
   | 'prop_armory_kiosk'
+  | 'prop_ammo_box'
+  | 'prop_vending'
+  | 'prop_laser_tower'
   | 'gun_pistol'
   | 'gun_smg'
   | 'gun_shotgun'
@@ -54,6 +57,9 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   prop_swat_van: './assets/prop_swat_van.png',
   prop_fountain: './assets/prop_fountain.png',
   prop_armory_kiosk: './assets/prop_armory_kiosk.png',
+  prop_ammo_box: './assets/prop_ammo_box.png',
+  prop_vending: './assets/prop_vending.png',
+  prop_laser_tower: './assets/prop_laser_tower.png',
   gun_pistol: './assets/gun_pistol.png',
   gun_smg: './assets/gun_smg.png',
   gun_shotgun: './assets/gun_shotgun.png',
@@ -78,7 +84,7 @@ class GameAssetManager {
   private sprites = new Map<SpriteKey, HTMLImageElement>();
   private whiteSilhouettes = new Map<SpriteKey, HTMLCanvasElement>();
   private tiles = new Map<TileKey, HTMLImageElement>();
-  private patterns = new Map<TileKey, CanvasPattern>();
+  private patterns = new Map<string, CanvasPattern>();
 
   public async preloadAll(): Promise<void> {
     const tasks: Promise<void>[] = [];
@@ -134,15 +140,19 @@ class GameAssetManager {
     return this.whiteSilhouettes.get(key);
   }
 
-  public getPattern(ctx: CanvasRenderingContext2D, key: TileKey): CanvasPattern | null {
-    if (this.patterns.has(key)) {
-      return this.patterns.get(key)!;
+  public getPattern(ctx: CanvasRenderingContext2D, key: TileKey, scale = 0.72): CanvasPattern | null {
+    const cacheKey = `${key}@${scale}`;
+    if (this.patterns.has(cacheKey)) {
+      return this.patterns.get(cacheKey)!;
     }
     const img = this.tiles.get(key);
     if (!img) return null;
     const pat = ctx.createPattern(img, 'repeat');
     if (pat) {
-      this.patterns.set(key, pat);
+      if (scale !== 1 && typeof pat.setTransform === 'function' && typeof DOMMatrix !== 'undefined') {
+        pat.setTransform(new DOMMatrix().scale(scale, scale));
+      }
+      this.patterns.set(cacheKey, pat);
     }
     return pat;
   }

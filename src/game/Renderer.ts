@@ -1,7 +1,7 @@
 import { POWERUP_META } from '../data/perksAndRelics';
 import { WEAPONS } from '../data/weapons';
 import { SaveManager } from '../meta/SaveManager';
-import { FloorTheme, PropKind } from '../types';
+import { FloorTheme, PropKind, Rect } from '../types';
 import { Assets, SpriteKey, TileKey } from './AssetLoader';
 import { RunSnapshot, ZombieKind } from './Entities';
 import { InputManager } from './InputManager';
@@ -30,17 +30,41 @@ const PROP_SPRITE_MAP: Record<PropKind, SpriteKey> = {
   fountain: 'prop_fountain',
 };
 
-const MAP_PAD = 420;
+const MAP_PAD = 440;
+
+function hash2D(x: number, y: number, seed = 1337): number {
+  let h = (Math.imul(Math.floor(x), 374761393) + Math.imul(Math.floor(y), 668265263) + seed) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+function shadeHex(hex: string, delta: number): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return hex;
+  const r = Math.max(0, Math.min(255, parseInt(clean.slice(0, 2), 16) + delta));
+  const g = Math.max(0, Math.min(255, parseInt(clean.slice(2, 4), 16) + delta));
+  const b = Math.max(0, Math.min(255, parseInt(clean.slice(4, 6), 16) + delta));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function pointInAnyRect(px: number, py: number, rects: Rect[], pad = 0): boolean {
+  for (const r of rects) {
+    if (px >= r.x - pad && px <= r.x + r.w + pad && py >= r.y - pad && py <= r.y + r.h + pad) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export class CartoonRenderer {
-  // 静态世界地图离屏烘焙缓存（围绕建筑有效边界紧凑烘焙，省显存且帧率提升 10 倍！）
+  // 静态世界地图离屏烘焙缓存（包含多层立体墙体、四向环境光遮蔽AO、室内战术灯光、线缆、防爆地垫与户外工事，零帧率损耗！）
   private mapCanvas: HTMLCanvasElement | null = null;
   private mapOriginX = 0;
   private mapOriginY = 0;
   private cachedStageId = '';
   private cachedMapRevision = -1;
 
-  // 描边文字微缓存（避免每帧在 Canvas 上反复调用昂贵的 strokeText）
+  // 描边文字微缓存
   private labelCache = new Map<string, HTMLCanvasElement>();
 
   // 当前帧视口世界坐标边界（用于实体视锥剔除 Frustum Culling）
@@ -85,22 +109,22 @@ export class CartoonRenderer {
     ctx.scale(zoom, zoom);
     ctx.translate(-camX, -camY);
 
-    // 1. 单次极速 Blit 预烘焙的静态世界地图（仅拷贝当前视野矩形！）
+    // 1. 单次极速 Blit 预烘焙的高精度立体战术地图
     this.blitStaticMapViewport(ctx);
 
-    // 2. 地面爆汁贴花
+    // 2. 地面爆汁贴花与冒泡腐蚀毒潭
     this.drawDecals(ctx, state);
 
     // 3. 停机坪标志 & 直升机撤离光圈
     this.drawHelipad(ctx, state);
 
-    // 4. 紧凑精致的房间互动站点
+    // 4. 90° 纯正俯视高精度互动站点设备
     this.drawStations(ctx, state);
 
-    // 5. 动态窗户木板与可解锁安全门
+    // 5. 立体防爆钢门与钉木板破窗防线
     this.drawWindowsAndDoors(ctx, state);
 
-    // 6. 掉落物、神秘宝物箱、紧凑爆炸红油桶
+    // 6. 掉落物、空投武器箱、做旧工业爆炸红油桶
     this.drawDropsAndChests(ctx, state);
     this.drawBarrels(ctx, state);
 
@@ -111,7 +135,7 @@ export class CartoonRenderer {
     this.drawZombies(ctx, state);
     this.drawSpits(ctx, state);
 
-    // 9. 全身骨骼分体特工主角（独立步态双脚 + 呼吸摆臂 + 9把真实枪械俯视建模 + 射击后坐力 + 换弹动作）
+    // 9. 特种部队主角（夜视仪头盔躯干 + 战术护肘双臂 + 9把枪械俯视建模 + 枪口地面火光）
     this.drawPlayer(ctx, state);
 
     // 10. 抛物线手雷、流光曳光弹、闪电链、粒子与跳字
@@ -126,7 +150,7 @@ export class CartoonRenderer {
     this.drawTouchSticks(ctx, input);
   }
 
-  // ==================== 离屏静态地图烘焙（仅在开局和开门瞬间执行 1 次） ====================
+  // ==================== 离屏高精度建筑地图烘焙（仅在开局与开门瞬间执行 1 次） ====================
 
   private ensureStaticMapCache(state: RunSnapshot): void {
     if (
@@ -155,38 +179,76 @@ export class CartoonRenderer {
     }
 
     const mctx = this.mapCanvas.getContext('2d')!;
+    const allRoomRects: Rect[] = [];
+    for (const rm of state.rooms) {
+      for (const r of rm.rects) allRoomRects.push(r);
+    }
+
     mctx.save();
     mctx.clearRect(0, 0, totalW, totalH);
     mctx.translate(-this.mapOriginX, -this.mapOriginY);
 
-    // A. 户外草坪背景
-    const grassPat = Assets.getPattern(mctx, 'tile_grass');
-    mctx.fillStyle = grassPat || '#4ade80';
+    // A. 末世暗调苔藓荒地背景 + 自然明暗斑驳层（彻底消除平铺重复感）
+    const grassPat = Assets.getPattern(mctx, 'tile_grass', 0.74);
+    mctx.fillStyle = grassPat || '#1e3124';
     mctx.fillRect(this.mapOriginX, this.mapOriginY, totalW, totalH);
 
-    // B. 建筑外侧石板路裙边
-    mctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
-    for (const room of state.rooms) {
-      for (const r of room.rects) {
+    const stageSeed = state.stage.index * 9173;
+    for (let py = this.mapOriginY + 80; py < this.mapOriginY + totalH - 80; py += 150) {
+      for (let px = this.mapOriginX + 80; px < this.mapOriginX + totalW - 80; px += 150) {
+        const jx = px + (hash2D(px, py, stageSeed) - 0.5) * 110;
+        const jy = py + (hash2D(py, px, stageSeed + 7) - 0.5) * 110;
+        if (pointInAnyRect(jx, jy, allRoomRects, 55)) continue;
+        const rad = 65 + hash2D(px, py, stageSeed + 19) * 85;
+        const g = mctx.createRadialGradient(jx, jy, 6, jx, jy, rad);
+        const darkPatch = hash2D(px, py, stageSeed + 31) > 0.45;
+        g.addColorStop(0, darkPatch ? 'rgba(6, 12, 10, 0.26)' : 'rgba(42, 68, 44, 0.16)');
+        g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        mctx.fillStyle = g;
         mctx.beginPath();
-        mctx.roundRect(r.x - 36, r.y - 34, r.w + 76, r.h + 72, 16);
-        mctx.fill();
-      }
-    }
-    const asphaltPat = Assets.getPattern(mctx, 'tile_asphalt');
-    mctx.fillStyle = asphaltPat || '#475569';
-    for (const room of state.rooms) {
-      for (const r of room.rects) {
-        mctx.beginPath();
-        mctx.roundRect(r.x - 30, r.y - 30, r.w + 60, r.h + 60, 12);
+        mctx.arc(jx, jy, rad, 0, Math.PI * 2);
         mctx.fill();
       }
     }
 
-    // C. 各房间无缝地板与锁定迷雾遮罩
+    // B. 建筑整体厚重接地大投影 + 户外钢筋混凝土战备护坡道与路缘石
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.48)';
+    for (const r of allRoomRects) {
+      mctx.beginPath();
+      mctx.roundRect(r.x - 42, r.y - 38, r.w + 98, r.h + 94, 22);
+      mctx.fill();
+    }
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.34)';
+    for (const r of allRoomRects) {
+      mctx.beginPath();
+      mctx.roundRect(r.x - 48, r.y - 44, r.w + 104, r.h + 100, 24);
+      mctx.fill();
+    }
+
+    // 户外外圈混凝土路基与路缘石高光/切缝
+    const asphaltPat = Assets.getPattern(mctx, 'tile_asphalt', 0.68);
+    for (const r of allRoomRects) {
+      mctx.save();
+      mctx.beginPath();
+      mctx.roundRect(r.x - 42, r.y - 42, r.w + 84, r.h + 84, 14);
+      mctx.fillStyle = asphaltPat || '#2c3543';
+      mctx.fill();
+      mctx.lineWidth = 4;
+      mctx.strokeStyle = '#0f172a';
+      mctx.stroke();
+      mctx.lineWidth = 1.6;
+      mctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+      mctx.strokeRect(r.x - 39, r.y - 39, r.w + 78, r.h + 78);
+      mctx.restore();
+    }
+
+    // B2. 破窗外侧丧尸突袭泥泞血迹通道、碎玻璃渣与两侧沙袋掩体
+    this.bakeExteriorSiegeDetails(mctx, state, allRoomRects, stageSeed);
+
+    // C. 各房间高精度石材/钢板/实验室地砖 + 内嵌地脚线 + 战术标线 + 排水格栅 + 地面动力线缆
     for (const room of state.rooms) {
       const tileKey = FLOOR_THEME_TILE[room.floorTheme];
-      const pat = Assets.getPattern(mctx, tileKey);
+      const pat = Assets.getPattern(mctx, tileKey, 0.68);
 
       mctx.save();
       mctx.beginPath();
@@ -196,36 +258,77 @@ export class CartoonRenderer {
       mctx.clip();
 
       for (const r of room.rects) {
-        mctx.fillStyle = pat || '#fef3c7';
+        mctx.fillStyle = pat || '#475569';
         mctx.fillRect(r.x, r.y, r.w, r.h);
 
-        const gt = mctx.createLinearGradient(0, r.y, 0, r.y + 24);
-        gt.addColorStop(0, 'rgba(15, 23, 42, 0.24)');
-        gt.addColorStop(1, 'rgba(15, 23, 42, 0)');
-        mctx.fillStyle = gt;
-        mctx.fillRect(r.x, r.y, r.w, 24);
+        // 房间内侧战术装饰地垫/警戒标线/地漏格栅
+        this.bakeRoomFloorMarkings(mctx, room.floorTheme, r, stageSeed);
       }
 
       if (room.unlocked) {
-        mctx.font = '900 18px system-ui, sans-serif';
+        // 站点连接至最近墙体的橡胶护线槽电缆（让军火终端与改造台真正锚定在地面建筑中！）
+        for (const st of state.stations) {
+          if (st.roomId !== room.id) continue;
+          if (st.type === 'starter_airdrop' || st.type === 'ammo_box') continue;
+          this.bakeStationFloorCable(mctx, st.x, st.y, room.rects);
+        }
+
+        // 四向立体墙根环境光遮蔽（4-Sided Wall Contact AO）——赋予室内极强的立体空间纵深！
+        this.bakeWallAmbientOcclusion(mctx, state.walls);
+
+        // 顶部战术吊灯柔和暖白/冷白光池 + 互动设施地面环境反光
+        this.bakeRoomTacticalLighting(mctx, room, state);
+
+        // 低调蚀刻地面战术区域编号与名称水印
+        mctx.font = '900 17px system-ui, sans-serif';
         mctx.textAlign = 'center';
         mctx.textBaseline = 'middle';
+        mctx.fillStyle = 'rgba(2, 6, 23, 0.34)';
+        mctx.fillText(room.name, room.labelPos.x + 1, room.labelPos.y + 1.5);
         mctx.fillStyle =
-          room.floorTheme === 'asphalt' || room.floorTheme === 'lab'
-            ? 'rgba(255, 255, 255, 0.16)'
-            : 'rgba(15, 23, 42, 0.14)';
+          room.floorTheme === 'lobby'
+            ? 'rgba(15, 23, 42, 0.24)'
+            : 'rgba(226, 232, 240, 0.16)';
         mctx.fillText(room.name, room.labelPos.x, room.labelPos.y);
       } else {
-        mctx.fillStyle = 'rgba(15, 23, 42, 0.68)';
+        // 未解锁区域：深邃战术蓝图迷雾 + 扫描斜纹 + 锁定徽章
+        mctx.fillStyle = 'rgba(7, 11, 22, 0.84)';
         for (const r of room.rects) {
           mctx.fillRect(r.x, r.y, r.w, r.h);
         }
-        this.drawCachedLabel(mctx, `未开启 · ${room.name}`, room.labelPos.x, room.labelPos.y, '#cbd5e1', 16);
+        const minX = Math.min(...room.rects.map((r) => r.x));
+        const minY = Math.min(...room.rects.map((r) => r.y));
+        const maxX = Math.max(...room.rects.map((r) => r.x + r.w));
+        const maxY = Math.max(...room.rects.map((r) => r.y + r.h));
+
+        mctx.strokeStyle = 'rgba(56, 189, 248, 0.07)';
+        mctx.lineWidth = 1;
+        mctx.beginPath();
+        for (let gx = minX; gx <= maxX; gx += 28) {
+          mctx.moveTo(gx, minY);
+          mctx.lineTo(gx, maxY);
+        }
+        for (let gy = minY; gy <= maxY; gy += 28) {
+          mctx.moveTo(minX, gy);
+          mctx.lineTo(maxX, gy);
+        }
+        mctx.stroke();
+
+        this.bakeWallAmbientOcclusion(mctx, state.walls);
+        this.drawCachedLabel(mctx, `🔒 未开启 · ${room.name}`, room.labelPos.x, room.labelPos.y, '#94a3b8', 15);
       }
       mctx.restore();
     }
 
-    // D. 室内静态战术掩体家具
+    // D. 门框与窗框底部嵌入式防滑钢制门槛踏板（Threshold Plates）
+    for (const door of state.doors) {
+      this.bakeSteelThreshold(mctx, door.x, door.y, door.w, door.h, door.orientation);
+    }
+    for (const win of state.windows) {
+      this.bakeSteelThreshold(mctx, win.x, win.y, win.w, win.h, win.orientation);
+    }
+
+    // E. 室内静态战术掩体家具（双层柔和接地阴影 + 警车/喷泉环境光晕 + 90°高清俯视贴图）
     for (const pr of state.props) {
       const room = state.rooms.find((r) => r.id === pr.roomId);
       if (!room?.unlocked) continue;
@@ -236,42 +339,625 @@ export class CartoonRenderer {
       mctx.translate(pr.x, pr.y);
       if (pr.rotation) mctx.rotate(pr.rotation);
 
-      mctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
+      // 特警装甲车红蓝爆闪灯地面环境反光 / 喷泉水波蓝光晕
+      if (pr.kind === 'swat_van') {
+        const rg = mctx.createRadialGradient(8, -26, 4, 8, -26, 68);
+        rg.addColorStop(0, 'rgba(239, 68, 68, 0.22)');
+        rg.addColorStop(1, 'rgba(239, 68, 68, 0)');
+        mctx.fillStyle = rg;
+        mctx.fillRect(-70, -95, 150, 140);
+
+        const bg = mctx.createRadialGradient(8, 26, 4, 8, 26, 68);
+        bg.addColorStop(0, 'rgba(59, 130, 246, 0.22)');
+        bg.addColorStop(1, 'rgba(59, 130, 246, 0)');
+        mctx.fillStyle = bg;
+        mctx.fillRect(-70, -45, 150, 140);
+      } else if (pr.kind === 'fountain') {
+        const fg = mctx.createRadialGradient(0, 0, pr.w * 0.2, 0, 0, pr.w * 0.72);
+        fg.addColorStop(0, 'rgba(56, 189, 248, 0.16)');
+        fg.addColorStop(1, 'rgba(56, 189, 248, 0)');
+        mctx.fillStyle = fg;
+        mctx.beginPath();
+        mctx.arc(0, 0, pr.w * 0.72, 0, Math.PI * 2);
+        mctx.fill();
+      }
+
+      // 柔和接地 AO + 定向投影
+      mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
       mctx.beginPath();
       if (pr.kind === 'fountain') {
-        mctx.arc(3, 5, pr.w * 0.46, 0, Math.PI * 2);
+        mctx.arc(5, 7, pr.w * 0.49, 0, Math.PI * 2);
       } else {
-        mctx.roundRect(-pr.w / 2 + 4, -pr.h / 2 + 6, pr.w, pr.h, 10);
+        mctx.roundRect(-pr.w / 2 + 5, -pr.h / 2 + 7, pr.w + 2, pr.h + 2, 10);
       }
       mctx.fill();
 
-      const drawDim = Math.max(pr.w, pr.h) * 1.05;
+      const scaleMult = pr.kind === 'desk' ? 1.24 : pr.kind === 'swat_van' ? 1.12 : 1.08;
+      const drawDim = Math.max(pr.w, pr.h) * scaleMult;
       if (img) {
         mctx.drawImage(img, -drawDim / 2, -drawDim / 2, drawDim, drawDim);
       } else {
-        mctx.fillStyle = '#64748b';
+        mctx.fillStyle = '#475569';
         mctx.fillRect(-pr.w / 2, -pr.h / 2, pr.w, pr.h);
       }
       mctx.restore();
     }
 
-    // E. 全部实心立体墙体与投影
-    for (const w of state.walls) {
-      mctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
-      mctx.fillRect(w.x + 4, w.y + 6, w.w, w.h);
+    // F. 3D 倒角装甲混凝土立体墙体 + 铆钉切缝面板 + 转角/门框重型钢柱帽
+    this.bake3DArchitecturalWalls(mctx, state);
 
-      mctx.fillStyle = state.stage.wallColor;
-      mctx.fillRect(w.x, w.y, w.w, w.h);
+    // G. 户外远景暗角氛围压暗（聚焦建筑防线视觉中心！）
+    const cx = bb.x + bb.w / 2;
+    const cy = bb.y + bb.h / 2;
+    const outerR = Math.hypot(totalW, totalH) * 0.52;
+    const vig = mctx.createRadialGradient(cx, cy, Math.min(bb.w, bb.h) * 0.42, cx, cy, outerR);
+    vig.addColorStop(0, 'rgba(2, 6, 23, 0)');
+    vig.addColorStop(0.72, 'rgba(2, 6, 23, 0.14)');
+    vig.addColorStop(1, 'rgba(2, 6, 23, 0.56)');
+    mctx.fillStyle = vig;
+    mctx.fillRect(this.mapOriginX, this.mapOriginY, totalW, totalH);
 
-      mctx.fillStyle = state.stage.wallTopColor;
-      mctx.fillRect(w.x + 4, w.y + 3, Math.max(0, w.w - 8), Math.max(0, w.h - 9));
+    mctx.restore();
+  }
 
-      mctx.strokeStyle = '#0f172a';
+  private bakeExteriorSiegeDetails(
+    mctx: CanvasRenderingContext2D,
+    state: RunSnapshot,
+    allRoomRects: Rect[],
+    stageSeed: number
+  ): void {
+    // 1. 每扇破窗外侧：丧尸冲锋泥泞血痕路径、散落碎玻璃与两侧战术沙袋堆
+    for (const win of state.windows) {
+      const wcx = win.x + win.w / 2;
+      const wcy = win.y + win.h / 2;
+      const ox = wcx + win.spawnOutsideOffset.dx;
+      const oy = wcy + win.spawnOutsideOffset.dy;
+
+      // 泥泞踩踏冲锋痕迹
+      const mudGrad = mctx.createLinearGradient(ox, oy, wcx, wcy);
+      mudGrad.addColorStop(0, 'rgba(15, 12, 10, 0)');
+      mudGrad.addColorStop(0.45, 'rgba(24, 18, 14, 0.36)');
+      mudGrad.addColorStop(1, 'rgba(38, 16, 16, 0.46)');
+      mctx.strokeStyle = mudGrad;
+      mctx.lineWidth = 48;
+      mctx.lineCap = 'round';
+      mctx.beginPath();
+      mctx.moveTo(ox, oy);
+      mctx.lineTo(wcx, wcy);
+      mctx.stroke();
+
+      // 窗台内外散落的反光碎玻璃碴
+      const nx = Math.sign(win.spawnOutsideOffset.dx);
+      const ny = Math.sign(win.spawnOutsideOffset.dy);
+      for (let i = 0; i < 9; i++) {
+        const s1 = hash2D(wcx + i * 13, wcy, stageSeed);
+        const s2 = hash2D(wcy + i * 17, wcx, stageSeed + 5);
+        const gx = wcx + (nx !== 0 ? (s1 - 0.35) * 44 * nx : (s1 - 0.5) * (win.w * 0.75));
+        const gy = wcy + (ny !== 0 ? (s1 - 0.35) * 44 * ny : (s1 - 0.5) * (win.h * 0.75));
+        mctx.fillStyle = i % 2 === 0 ? 'rgba(186, 230, 253, 0.45)' : 'rgba(226, 232, 240, 0.32)';
+        mctx.beginPath();
+        mctx.moveTo(gx, gy);
+        mctx.lineTo(gx + 4 + s2 * 3, gy + 1.5);
+        mctx.lineTo(gx + 1.5, gy + 4 + s1 * 3);
+        mctx.closePath();
+        mctx.fill();
+      }
+
+      // 窗外两侧沙袋残骸掩体 + 警戒路灯暖光池
+      const perpX = ny !== 0 ? 1 : 0;
+      const perpY = nx !== 0 ? 1 : 0;
+      for (const side of [-1, 1]) {
+        const sbx = wcx + nx * 46 + perpX * side * 66;
+        const sby = wcy + ny * 46 + perpY * side * 66;
+        if (!pointInAnyRect(sbx, sby, allRoomRects, 14)) {
+          this.bakeSandbagCluster(mctx, sbx, sby, Math.atan2(ny, nx) + side * 0.35);
+        }
+      }
+
+      const lampX = wcx + nx * 58;
+      const lampY = wcy + ny * 58;
+      const lg = mctx.createRadialGradient(lampX, lampY, 4, lampX, lampY, 96);
+      lg.addColorStop(0, 'rgba(251, 191, 36, 0.16)');
+      lg.addColorStop(0.6, 'rgba(245, 158, 11, 0.05)');
+      lg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      mctx.fillStyle = lg;
+      mctx.beginPath();
+      mctx.arc(lampX, lampY, 96, 0, Math.PI * 2);
+      mctx.fill();
+    }
+
+    // 2. 户外远端荒野：俯视暗调针叶灌木丛与战术混凝土拒马（严格避开所有房间与破窗通道）
+    const bb = state.stage.buildingBounds;
+    for (let gy = bb.y - 310; gy <= bb.y + bb.h + 310; gy += 165) {
+      for (let gx = bb.x - 310; gx <= bb.x + bb.w + 310; gx += 165) {
+        const r1 = hash2D(gx, gy, stageSeed + 101);
+        if (r1 < 0.42) continue;
+        const tx = gx + (hash2D(gx, gy, stageSeed + 109) - 0.5) * 95;
+        const ty = gy + (hash2D(gy, gx, stageSeed + 113) - 0.5) * 95;
+        if (pointInAnyRect(tx, ty, allRoomRects, 96)) continue;
+
+        let nearWindowLane = false;
+        for (const win of state.windows) {
+          const wx = win.x + win.w / 2 + win.spawnOutsideOffset.dx * 0.55;
+          const wy = win.y + win.h / 2 + win.spawnOutsideOffset.dy * 0.55;
+          if (Math.hypot(tx - wx, ty - wy) < 115) {
+            nearWindowLane = true;
+            break;
+          }
+        }
+        if (nearWindowLane) continue;
+
+        if (r1 > 0.76) {
+          this.bakeTopDownShrubCluster(mctx, tx, ty, 24 + r1 * 18, stageSeed + gx);
+        } else if (r1 > 0.58) {
+          this.bakeJerseyBarrier(mctx, tx, ty, r1 * Math.PI);
+        }
+      }
+    }
+  }
+
+  private bakeSandbagCluster(mctx: CanvasRenderingContext2D, x: number, y: number, angle: number): void {
+    mctx.save();
+    mctx.translate(x, y);
+    mctx.rotate(angle);
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+    mctx.beginPath();
+    mctx.roundRect(-10, -20, 22, 42, 8);
+    mctx.fill();
+
+    const offsets = [
+      { dx: -2, dy: -11, rot: -0.12 },
+      { dx: 1, dy: 0, rot: 0.06 },
+      { dx: -2, dy: 11, rot: 0.14 },
+      { dx: 4, dy: -5, rot: 0.08 },
+    ];
+    for (const o of offsets) {
+      mctx.save();
+      mctx.translate(o.dx, o.dy);
+      mctx.rotate(o.rot);
+      mctx.fillStyle = '#6b6650';
+      mctx.strokeStyle = '#1e2019';
+      mctx.lineWidth = 1.8;
+      mctx.beginPath();
+      mctx.roundRect(-6.5, -7.5, 13, 15, 4.5);
+      mctx.fill();
+      mctx.stroke();
+      mctx.strokeStyle = 'rgba(214, 211, 196, 0.25)';
+      mctx.lineWidth = 1;
+      mctx.beginPath();
+      mctx.moveTo(-3, -4);
+      mctx.lineTo(-3, 4);
+      mctx.stroke();
+      mctx.restore();
+    }
+    mctx.restore();
+  }
+
+  private bakeJerseyBarrier(mctx: CanvasRenderingContext2D, x: number, y: number, angle: number): void {
+    mctx.save();
+    mctx.translate(x, y);
+    mctx.rotate(angle);
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+    mctx.fillRect(-24, -7, 52, 18);
+
+    mctx.fillStyle = '#475569';
+    mctx.strokeStyle = '#0f172a';
+    mctx.lineWidth = 2.2;
+    mctx.beginPath();
+    mctx.roundRect(-25, -9, 50, 16, 3);
+    mctx.fill();
+    mctx.stroke();
+
+    // 顶部混凝土脊梁高光与警示黄黑边标
+    mctx.fillStyle = '#64748b';
+    mctx.fillRect(-23, -4, 46, 6);
+    mctx.fillStyle = '#eab308';
+    mctx.fillRect(-22, -7, 8, 2.5);
+    mctx.fillRect(14, -7, 8, 2.5);
+    mctx.restore();
+  }
+
+  private bakeTopDownShrubCluster(
+    mctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    radius: number,
+    seed: number
+  ): void {
+    mctx.save();
+    mctx.translate(x, y);
+    // 树冠接地软投影
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.45)';
+    mctx.beginPath();
+    mctx.arc(7, 9, radius * 1.04, 0, Math.PI * 2);
+    mctx.fill();
+
+    const shades = ['#132419', '#1c3323', '#26422d', '#315137'];
+    for (let layer = 0; layer < 4; layer++) {
+      const count = 6 - layer;
+      const lr = radius * (1 - layer * 0.2);
+      mctx.fillStyle = shades[layer];
+      mctx.strokeStyle = '#0a140e';
+      mctx.lineWidth = 1.6;
+      for (let i = 0; i < count; i++) {
+        const ang = (i / count) * Math.PI * 2 + hash2D(i, layer, seed) * 0.9;
+        const dist = lr * 0.36;
+        const lx = Math.cos(ang) * dist;
+        const ly = Math.sin(ang) * dist;
+        mctx.beginPath();
+        mctx.arc(lx, ly, lr * 0.68, 0, Math.PI * 2);
+        mctx.fill();
+        if (layer < 2) mctx.stroke();
+      }
+    }
+    mctx.restore();
+  }
+
+  private bakeRoomFloorMarkings(
+    mctx: CanvasRenderingContext2D,
+    theme: FloorTheme,
+    r: Rect,
+    seed: number
+  ): void {
+    // 室内外周内嵌暗色金属收边条（让地板拥有建筑镶边细节）
+    mctx.strokeStyle = 'rgba(15, 23, 42, 0.32)';
+    mctx.lineWidth = 2;
+    mctx.strokeRect(r.x + 18, r.y + 18, Math.max(0, r.w - 36), Math.max(0, r.h - 36));
+
+    if (theme === 'lobby' && r.w >= 300 && r.h >= 240) {
+      // 接待大厅中央深蓝战术防尘地毯边框与徽记线
+      const rw = Math.min(250, r.w * 0.42);
+      const rh = Math.min(150, r.h * 0.36);
+      const rx = r.x + (r.w - rw) / 2;
+      const ry = r.y + (r.h - rh) / 2;
+      mctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
+      mctx.beginPath();
+      mctx.roundRect(rx, ry, rw, rh, 6);
+      mctx.fill();
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.32)';
+      mctx.lineWidth = 2;
+      mctx.strokeRect(rx + 6, ry + 6, rw - 12, rh - 12);
+    } else if (theme === 'armory' || theme === 'asphalt') {
+      // 工业区与停机坪黄黑安全警戒虚线与金属排水地漏
+      mctx.save();
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.22)';
       mctx.lineWidth = 3;
-      mctx.strokeRect(w.x, w.y, w.w, w.h);
+      mctx.setLineDash([16, 12]);
+      mctx.strokeRect(r.x + 28, r.y + 28, Math.max(0, r.w - 56), Math.max(0, r.h - 56));
+      mctx.restore();
+
+      if (r.w >= 220 && r.h >= 200) {
+        const gx = r.x + r.w * 0.5 - 26;
+        const gy = r.y + r.h * 0.78 - 9;
+        this.bakeFloorGrate(mctx, gx, gy, 52, 18);
+      }
+    } else if (theme === 'lab') {
+      // 实验室高能蓝光导流槽节点
+      mctx.strokeStyle = 'rgba(56, 189, 248, 0.16)';
+      mctx.lineWidth = 2;
+      mctx.strokeRect(r.x + 26, r.y + 26, Math.max(0, r.w - 52), Math.max(0, r.h - 52));
+    }
+
+    // 自然地面微磨损暗斑（2~3处极柔和做旧痕迹，提升真实战场质感）
+    const wearCount = Math.min(4, Math.floor((r.w * r.h) / 95000) + 1);
+    for (let i = 0; i < wearCount; i++) {
+      const wx = r.x + 45 + hash2D(r.x + i * 31, r.y, seed) * Math.max(20, r.w - 90);
+      const wy = r.y + 45 + hash2D(r.y + i * 47, r.x, seed + 13) * Math.max(20, r.h - 90);
+      const wr = 28 + hash2D(wx, wy, seed + 29) * 38;
+      const wg = mctx.createRadialGradient(wx, wy, 2, wx, wy, wr);
+      wg.addColorStop(0, 'rgba(9, 13, 22, 0.18)');
+      wg.addColorStop(1, 'rgba(9, 13, 22, 0)');
+      mctx.fillStyle = wg;
+      mctx.beginPath();
+      mctx.arc(wx, wy, wr, 0, Math.PI * 2);
+      mctx.fill();
+    }
+  }
+
+  private bakeFloorGrate(mctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    mctx.fillStyle = '#0f172a';
+    mctx.strokeStyle = '#475569';
+    mctx.lineWidth = 1.8;
+    mctx.fillRect(x, y, w, h);
+    mctx.strokeRect(x, y, w, h);
+    mctx.fillStyle = '#334155';
+    for (let sx = x + 5; sx < x + w - 4; sx += 6) {
+      mctx.fillRect(sx, y + 3, 2.5, h - 6);
+    }
+  }
+
+  private bakeStationFloorCable(
+    mctx: CanvasRenderingContext2D,
+    sx: number,
+    sy: number,
+    rects: Rect[]
+  ): void {
+    // 寻找最近的一面房间边界墙，铺设重型橡胶过线槽
+    let bestX = sx;
+    let bestY = sy - 90;
+    let bestDist = 9999;
+    for (const r of rects) {
+      if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) {
+        const candidates = [
+          { x: sx, y: r.y + 6, d: Math.abs(sy - r.y) },
+          { x: sx, y: r.y + r.h - 6, d: Math.abs(r.y + r.h - sy) },
+          { x: r.x + 6, y: sy, d: Math.abs(sx - r.x) },
+          { x: r.x + r.w - 6, y: sy, d: Math.abs(r.x + r.w - sx) },
+        ];
+        for (const c of candidates) {
+          if (c.d < bestDist) {
+            bestDist = c.d;
+            bestX = c.x;
+            bestY = c.y;
+          }
+        }
+      }
+    }
+    if (bestDist > 260) return;
+
+    mctx.save();
+    mctx.strokeStyle = '#0f172a';
+    mctx.lineWidth = 8;
+    mctx.lineCap = 'round';
+    mctx.beginPath();
+    mctx.moveTo(sx, sy);
+    mctx.lineTo(bestX, bestY);
+    mctx.stroke();
+
+    mctx.strokeStyle = '#334155';
+    mctx.lineWidth = 4;
+    mctx.stroke();
+
+    // 中段黄黑防踩踏过线桥板
+    const mx = (sx + bestX) * 0.5;
+    const my = (sy + bestY) * 0.5;
+    if (bestDist > 55) {
+      mctx.translate(mx, my);
+      mctx.rotate(Math.atan2(bestY - sy, bestX - sx));
+      mctx.fillStyle = '#eab308';
+      mctx.strokeStyle = '#0f172a';
+      mctx.lineWidth = 1.6;
+      mctx.fillRect(-9, -6, 18, 12);
+      mctx.strokeRect(-9, -6, 18, 12);
+      mctx.fillStyle = '#0f172a';
+      mctx.fillRect(-5, -5, 4, 10);
+      mctx.fillRect(2, -5, 4, 10);
+    }
+    mctx.restore();
+  }
+
+  private bakeWallAmbientOcclusion(mctx: CanvasRenderingContext2D, walls: Rect[]): void {
+    const aoSize = 30;
+    for (const w of walls) {
+      // 东南向主光源墙体厚投影
+      mctx.fillStyle = 'rgba(2, 6, 23, 0.34)';
+      mctx.fillRect(w.x + 7, w.y + 10, w.w, w.h);
+
+      // 南侧柔和墙根 AO
+      const gs = mctx.createLinearGradient(0, w.y + w.h, 0, w.y + w.h + aoSize);
+      gs.addColorStop(0, 'rgba(2, 6, 23, 0.48)');
+      gs.addColorStop(1, 'rgba(2, 6, 23, 0)');
+      mctx.fillStyle = gs;
+      mctx.fillRect(w.x - 4, w.y + w.h, w.w + 8, aoSize);
+
+      // 北侧柔和墙根 AO
+      const gn = mctx.createLinearGradient(0, w.y, 0, w.y - aoSize * 0.72);
+      gn.addColorStop(0, 'rgba(2, 6, 23, 0.36)');
+      gn.addColorStop(1, 'rgba(2, 6, 23, 0)');
+      mctx.fillStyle = gn;
+      mctx.fillRect(w.x - 4, w.y - aoSize * 0.72, w.w + 8, aoSize * 0.72);
+
+      // 东侧柔和墙根 AO
+      const ge = mctx.createLinearGradient(w.x + w.w, 0, w.x + w.w + aoSize, 0);
+      ge.addColorStop(0, 'rgba(2, 6, 23, 0.44)');
+      ge.addColorStop(1, 'rgba(2, 6, 23, 0)');
+      mctx.fillStyle = ge;
+      mctx.fillRect(w.x + w.w, w.y - 4, aoSize, w.h + 8);
+
+      // 西侧柔和墙根 AO
+      const gw = mctx.createLinearGradient(w.x, 0, w.x - aoSize * 0.72, 0);
+      gw.addColorStop(0, 'rgba(2, 6, 23, 0.34)');
+      gw.addColorStop(1, 'rgba(2, 6, 23, 0)');
+      mctx.fillStyle = gw;
+      mctx.fillRect(w.x - aoSize * 0.72, w.y - 4, aoSize * 0.72, w.h + 8);
+    }
+  }
+
+  private bakeRoomTacticalLighting(
+    mctx: CanvasRenderingContext2D,
+    room: RunSnapshot['rooms'][number],
+    state: RunSnapshot
+  ): void {
+    mctx.save();
+    mctx.globalCompositeOperation = 'screen';
+
+    // 1. 每个矩形区域中心顶部战术吸顶灯柔和照明池（让房间中央通透明亮、墙角深邃有层次）
+    for (const r of room.rects) {
+      const lcx = r.x + r.w / 2;
+      const lcy = r.y + r.h / 2;
+      const rad = Math.max(r.w, r.h) * 0.62;
+      const lg = mctx.createRadialGradient(lcx, lcy, 12, lcx, lcy, rad);
+      const tint =
+        room.floorTheme === 'lab'
+          ? 'rgba(125, 211, 252, 0.11)'
+          : room.floorTheme === 'mall'
+            ? 'rgba(199, 210, 254, 0.11)'
+            : 'rgba(254, 243, 199, 0.12)';
+      lg.addColorStop(0, tint);
+      lg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      mctx.fillStyle = lg;
+      mctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+
+    // 2. 房间内战术终端、改装台、贩卖机的彩色环境地面反光
+    for (const st of state.stations) {
+      if (st.roomId !== room.id) continue;
+      if (st.used && (st.type === 'starter_airdrop' || st.type === 'mech_dog_cage')) continue;
+      const glowColor =
+        st.type === 'armory_kiosk'
+          ? 'rgba(52, 211, 153, 0.22)'
+          : st.type === 'pack_a_punch'
+            ? 'rgba(192, 132, 252, 0.25)'
+            : st.type === 'vending_machine'
+              ? 'rgba(244, 114, 182, 0.22)'
+              : st.type === 'laser_trap'
+                ? 'rgba(248, 113, 113, 0.2)'
+                : 'rgba(251, 191, 36, 0.18)';
+      const sg = mctx.createRadialGradient(st.x, st.y, 6, st.x, st.y, 92);
+      sg.addColorStop(0, glowColor);
+      sg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      mctx.fillStyle = sg;
+      mctx.beginPath();
+      mctx.arc(st.x, st.y, 92, 0, Math.PI * 2);
+      mctx.fill();
     }
 
     mctx.restore();
+  }
+
+  private bakeSteelThreshold(
+    mctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    orientation: 'horizontal' | 'vertical'
+  ): void {
+    mctx.save();
+    const pad = 5;
+    const tx = orientation === 'horizontal' ? x : x - pad;
+    const ty = orientation === 'horizontal' ? y - pad : y;
+    const tw = orientation === 'horizontal' ? w : w + pad * 2;
+    const th = orientation === 'horizontal' ? h + pad * 2 : h;
+
+    mctx.fillStyle = '#1e293b';
+    mctx.strokeStyle = '#090d16';
+    mctx.lineWidth = 2;
+    mctx.fillRect(tx, ty, tw, th);
+    mctx.strokeRect(tx, ty, tw, th);
+
+    // 防滑金属凹槽纹理
+    mctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+    mctx.lineWidth = 1.2;
+    mctx.beginPath();
+    if (orientation === 'horizontal') {
+      for (let gx = tx + 10; gx < tx + tw - 6; gx += 12) {
+        mctx.moveTo(gx, ty + 4);
+        mctx.lineTo(gx, ty + th - 4);
+      }
+    } else {
+      for (let gy = ty + 10; gy < ty + th - 6; gy += 12) {
+        mctx.moveTo(tx + 4, gy);
+        mctx.lineTo(tx + tw - 4, gy);
+      }
+    }
+    mctx.stroke();
+    mctx.restore();
+  }
+
+  private bake3DArchitecturalWalls(mctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    const baseDark = state.stage.wallColor;
+    const capMain = state.stage.wallTopColor;
+    const capHighlight = shadeHex(capMain, 32);
+    const capShadow = shadeHex(capMain, -24);
+
+    // 1. 先绘制所有墙段外部投影
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.5)';
+    for (const w of state.walls) {
+      mctx.fillRect(w.x + 6, w.y + 8, w.w, w.h);
+    }
+
+    // 2. 绘制多层 3D 倒角墙体结构与装甲接缝铆钉
+    const pillarMap = new Map<string, { x: number; y: number }>();
+
+    for (const w of state.walls) {
+      const isHoriz = w.w >= w.h;
+
+      // 外壳黑钢底座
+      mctx.fillStyle = '#090e17';
+      mctx.fillRect(w.x, w.y, w.w, w.h);
+
+      // 墙体斜坡立面
+      mctx.fillStyle = baseDark;
+      mctx.fillRect(w.x + 2, w.y + 2, Math.max(0, w.w - 4), Math.max(0, w.h - 4));
+
+      // 顶部装甲混凝土盖板（带北西向受光高光边与南东向背光暗边）
+      const inset = 4.5;
+      const cx = w.x + inset;
+      const cy = w.y + inset - 1;
+      const cw = Math.max(0, w.w - inset * 2);
+      const ch = Math.max(0, w.h - inset * 2 - 1);
+
+      mctx.fillStyle = capShadow;
+      mctx.fillRect(cx, cy, cw, ch);
+
+      mctx.fillStyle = capMain;
+      mctx.fillRect(cx, cy, Math.max(0, cw - 2), Math.max(0, ch - 2));
+
+      // 受光亮边
+      mctx.fillStyle = capHighlight;
+      mctx.fillRect(cx, cy, cw, 2);
+      mctx.fillRect(cx, cy, 2, ch);
+
+      // 每隔 56px 网格绘制装甲墙顶伸缩接缝与双铆钉
+      mctx.strokeStyle = 'rgba(9, 14, 23, 0.55)';
+      mctx.lineWidth = 1.6;
+      mctx.fillStyle = 'rgba(226, 232, 240, 0.34)';
+      if (isHoriz) {
+        const startX = Math.ceil((w.x + 24) / 56) * 56;
+        for (let sx = startX; sx < w.x + w.w - 20; sx += 56) {
+          mctx.beginPath();
+          mctx.moveTo(sx, cy + 1);
+          mctx.lineTo(sx, cy + ch - 1);
+          mctx.stroke();
+          mctx.fillRect(sx - 4, cy + 3, 2, 2);
+          mctx.fillRect(sx + 2, cy + ch - 5, 2, 2);
+        }
+        // 记录两端门框/转角钢柱坐标
+        const py = w.y + w.h / 2;
+        const p1x = w.x + 14;
+        const p2x = w.x + w.w - 14;
+        pillarMap.set(`${Math.round(p1x / 8)},${Math.round(py / 8)}`, { x: p1x, y: py });
+        pillarMap.set(`${Math.round(p2x / 8)},${Math.round(py / 8)}`, { x: p2x, y: py });
+      } else {
+        const startY = Math.ceil((w.y + 24) / 56) * 56;
+        for (let sy = startY; sy < w.y + w.h - 20; sy += 56) {
+          mctx.beginPath();
+          mctx.moveTo(cx + 1, sy);
+          mctx.lineTo(cx + cw - 1, sy);
+          mctx.stroke();
+          mctx.fillRect(cx + 3, sy - 4, 2, 2);
+          mctx.fillRect(cx + cw - 5, sy + 2, 2, 2);
+        }
+        const px = w.x + w.w / 2;
+        const p1y = w.y + 14;
+        const p2y = w.y + w.h - 14;
+        pillarMap.set(`${Math.round(px / 8)},${Math.round(p1y / 8)}`, { x: px, y: p1y });
+        pillarMap.set(`${Math.round(px / 8)},${Math.round(p2y / 8)}`, { x: px, y: p2y });
+      }
+    }
+
+    // 3. 在所有墙体转角、门框立柱、窗框立柱处加盖重型铆接钢结构承重柱帽！
+    const pHalf = 15.5;
+    for (const p of pillarMap.values()) {
+      mctx.fillStyle = '#090e17';
+      mctx.fillRect(p.x - pHalf, p.y - pHalf, pHalf * 2, pHalf * 2);
+
+      mctx.fillStyle = shadeHex(capMain, 10);
+      mctx.fillRect(p.x - pHalf + 2.5, p.y - pHalf + 2.5, pHalf * 2 - 5, pHalf * 2 - 6);
+
+      mctx.fillStyle = shadeHex(capMain, 38);
+      mctx.fillRect(p.x - pHalf + 2.5, p.y - pHalf + 2.5, pHalf * 2 - 5, 2.2);
+      mctx.fillRect(p.x - pHalf + 2.5, p.y - pHalf + 2.5, 2.2, pHalf * 2 - 6);
+
+      // 四角重型螺栓钉头
+      mctx.fillStyle = '#cbd5e1';
+      const bo = pHalf - 6.5;
+      mctx.fillRect(p.x - bo - 1, p.y - bo - 1, 2.4, 2.4);
+      mctx.fillRect(p.x + bo - 1, p.y - bo - 1, 2.4, 2.4);
+      mctx.fillRect(p.x - bo - 1, p.y + bo - 2, 2.4, 2.4);
+      mctx.fillRect(p.x + bo - 1, p.y + bo - 2, 2.4, 2.4);
+    }
   }
 
   private blitStaticMapViewport(ctx: CanvasRenderingContext2D): void {
@@ -282,8 +968,8 @@ export class CartoonRenderer {
       this.vRight > this.mapOriginX + this.mapCanvas.width ||
       this.vBottom > this.mapOriginY + this.mapCanvas.height
     ) {
-      const grassPat = Assets.getPattern(ctx, 'tile_grass');
-      ctx.fillStyle = grassPat || '#4ade80';
+      const grassPat = Assets.getPattern(ctx, 'tile_grass', 0.74);
+      ctx.fillStyle = grassPat || '#1e3124';
       ctx.fillRect(this.vLeft - 8, this.vTop - 8, this.vRight - this.vLeft + 16, this.vBottom - this.vTop + 16);
     }
 
@@ -304,13 +990,13 @@ export class CartoonRenderer {
     for (const dc of state.decals) {
       if (!this.inView(dc.x, dc.y, 40)) continue;
       ctx.save();
-      ctx.globalAlpha = Math.min(1, dc.life / 3.5);
+      ctx.globalAlpha = Math.min(0.88, dc.life / 3.5);
       ctx.fillStyle = dc.color;
       ctx.beginPath();
       ctx.arc(dc.x, dc.y, dc.radius * 0.72, 0, Math.PI * 2);
       ctx.arc(
-        dc.x + Math.cos(dc.seed) * dc.radius * 0.42,
-        dc.y + Math.sin(dc.seed) * dc.radius * 0.42,
+        dc.x + Math.cos(dc.seed) * dc.radius * 0.44,
+        dc.y + Math.sin(dc.seed) * dc.radius * 0.44,
         dc.radius * 0.42,
         0,
         Math.PI * 2
@@ -319,7 +1005,7 @@ export class CartoonRenderer {
       ctx.restore();
     }
 
-    // 地面强酸/腐蚀熔岩毒潭（提示玩家及时走位规避减速与灼伤！）
+    // 地面强酸/腐蚀熔岩毒潭
     const now = performance.now() * 0.007;
     for (const ap of state.acidPools) {
       if (!this.inView(ap.x, ap.y, ap.radius + 20)) continue;
@@ -329,7 +1015,7 @@ export class CartoonRenderer {
       ctx.globalAlpha = alpha;
       ctx.beginPath();
       ctx.arc(ap.x, ap.y, ap.radius * pulse, 0, Math.PI * 2);
-      ctx.fillStyle = ap.isBoss ? 'rgba(225, 29, 72, 0.36)' : 'rgba(132, 204, 22, 0.38)';
+      ctx.fillStyle = ap.isBoss ? 'rgba(225, 29, 72, 0.42)' : 'rgba(132, 204, 22, 0.42)';
       ctx.fill();
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = ap.isBoss ? '#fb7185' : '#bef264';
@@ -337,7 +1023,6 @@ export class CartoonRenderer {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 冒泡核心细节
       const bx = ap.x + Math.cos(now * 1.3 + ap.y) * ap.radius * 0.38;
       const by = ap.y + Math.sin(now * 1.1 + ap.x) * ap.radius * 0.38;
       ctx.beginPath();
@@ -353,30 +1038,48 @@ export class CartoonRenderer {
     if (!courtyard?.unlocked && state.waveState !== 'extraction') return;
 
     const { x, y } = state.stage.helipadPos;
-    if (!this.inView(x, y, 120)) return;
+    if (!this.inView(x, y, 130)) return;
     const isExtracting = state.waveState === 'extraction';
     const pulse = 0.85 + Math.sin(performance.now() * 0.008) * 0.15;
 
     ctx.save();
+    // 装甲停机坪八角战术底座与外圈警示标线
     ctx.beginPath();
-    ctx.arc(x, y, 72, 0, Math.PI * 2);
-    ctx.fillStyle = isExtracting ? `rgba(34, 197, 94, ${0.34 * pulse})` : 'rgba(15, 23, 42, 0.25)';
+    ctx.arc(x, y, 78, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(9, 14, 23, 0.54)';
     ctx.fill();
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = isExtracting ? '#4ade80' : '#facc15';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(71, 85, 105, 0.8)';
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, 68, 0, Math.PI * 2);
+    ctx.fillStyle = isExtracting ? `rgba(34, 197, 94, ${0.32 * pulse})` : 'rgba(15, 23, 42, 0.36)';
+    ctx.fill();
+    ctx.lineWidth = 4.5;
+    ctx.strokeStyle = isExtracting ? '#4ade80' : 'rgba(234, 179, 8, 0.78)';
     ctx.setLineDash([14, 9]);
     ctx.stroke();
     ctx.setLineDash([]);
 
+    // 四向跑道助航灯点
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * 73, y + Math.sin(a) * 73, 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = isExtracting ? '#4ade80' : i % 2 === 0 ? '#facc15' : '#38bdf8';
+      ctx.fill();
+    }
+
     ctx.font = '900 38px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = isExtracting ? '#4ade80' : 'rgba(250, 204, 21, 0.7)';
+    ctx.fillStyle = isExtracting ? '#4ade80' : 'rgba(250, 204, 21, 0.68)';
     ctx.fillText('H', x, y);
 
     if (isExtracting) {
       ctx.beginPath();
-      ctx.arc(x, y, 80, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * state.extractionProgress);
+      ctx.arc(x, y, 82, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * state.extractionProgress);
       ctx.strokeStyle = '#fde047';
       ctx.lineWidth = 8;
       ctx.stroke();
@@ -385,18 +1088,18 @@ export class CartoonRenderer {
       ctx.save();
       ctx.translate(x, y - 10);
       ctx.rotate(rotorAngle);
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.42)';
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.48)';
       ctx.lineWidth = 9;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(-78, 0);
-      ctx.lineTo(78, 0);
-      ctx.moveTo(0, -78);
-      ctx.lineTo(0, 78);
+      ctx.moveTo(-80, 0);
+      ctx.lineTo(80, 0);
+      ctx.moveTo(0, -80);
+      ctx.lineTo(0, 80);
       ctx.stroke();
       ctx.restore();
 
-      this.drawCachedLabel(ctx, '踩入光圈撤离!', x, y - 94, '#fef08a', 15);
+      this.drawCachedLabel(ctx, '踩入光圈撤离!', x, y - 96, '#fef08a', 15);
     }
     ctx.restore();
   }
@@ -406,18 +1109,17 @@ export class CartoonRenderer {
     const now = performance.now() * 0.005;
 
     for (const st of state.stations) {
-      if (!this.inView(st.x, st.y, 75)) continue;
+      if (!this.inView(st.x, st.y, 85)) continue;
       const room = state.rooms.find((r) => r.id === st.roomId);
       if (!room?.unlocked) continue;
       if (st.used && (st.type === 'starter_airdrop' || st.type === 'mech_dog_cage')) continue;
 
-      // 精致小巧的地面战术交互底座（30px 半径，告别硕大遮挡！）
-      const padR = 30;
+      const padR = 33;
       let ringColor = '#38bdf8';
       let priceTag = st.cost > 0 ? `$${st.cost}` : '';
 
       if (st.type === 'armory_kiosk') {
-        ringColor = '#4ade80';
+        ringColor = '#10b981';
         const near = Math.hypot(state.player.x - st.x, state.player.y - st.y) < 120;
         priceTag = near ? '踩入或按 B' : '';
       } else if (st.type === 'starter_airdrop') {
@@ -426,60 +1128,60 @@ export class CartoonRenderer {
       } else if (st.type === 'ammo_box') {
         ringColor = '#22c55e';
       } else if (st.type === 'pack_a_punch') {
-        ringColor = '#c084fc';
+        ringColor = '#a855f7';
       } else if (st.type === 'mech_dog_cage') {
         ringColor = '#38bdf8';
       } else if (st.type === 'vending_machine') {
-        ringColor = '#f472b6';
+        ringColor = '#ec4899';
       } else if (st.type === 'laser_trap') {
         ringColor = '#ef4444';
         if (st.activeTimer > 0) priceTag = `${st.activeTimer.toFixed(0)}s`;
       }
 
       ctx.save();
+
+      // 重型金属防滑底座盘 + 呼吸指示光环
+      ctx.beginPath();
+      ctx.arc(st.x, st.y, padR + 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.58)';
+      ctx.fill();
+
       ctx.beginPath();
       ctx.arc(st.x, st.y, padR, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.52)';
+      ctx.fillStyle = '#1e293b';
       ctx.fill();
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.6;
       ctx.strokeStyle = ringColor;
       ctx.stroke();
 
       if (st.progress > 0) {
         ctx.beginPath();
-        ctx.arc(st.x, st.y, padR + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * st.progress);
+        ctx.arc(st.x, st.y, padR + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * st.progress);
         ctx.strokeStyle = '#fde047';
         ctx.lineWidth = 5.5;
         ctx.stroke();
       }
 
+      // 全部采用 90° 纯正俯视高精度写实战术设备精灵！
       if (st.type === 'armory_kiosk') {
-        this.drawCenteredSprite(ctx, 'prop_armory_kiosk', st.x, st.y, 48, 0);
+        this.drawCenteredSprite(ctx, 'prop_armory_kiosk', st.x, st.y, 54, 0);
       } else if (st.type === 'pack_a_punch') {
-        this.drawCenteredSprite(ctx, 'prop_pap', st.x, st.y, 48, 0);
+        this.drawCenteredSprite(ctx, 'prop_pap', st.x, st.y, 58, 0);
       } else if (st.type === 'starter_airdrop') {
-        this.drawCenteredSprite(ctx, 'prop_chest', st.x, st.y + Math.sin(now * 1.3) * 2, 44, 0);
+        this.drawCenteredSprite(ctx, 'prop_chest', st.x, st.y + Math.sin(now * 1.3) * 1.8, 50, 0);
       } else if (st.type === 'mech_dog_cage') {
-        this.drawCenteredSprite(ctx, 'mech_dog', st.x, st.y, 44, -0.4);
+        this.drawCenteredSprite(ctx, 'mech_dog', st.x, st.y, 48, -0.4);
+        // 能量束缚格栅条
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(st.x - 18, st.y - 18, 36, 36);
       } else if (st.type === 'ammo_box') {
-        // 矢量弹药箱小图标，免 Emoji 卡顿且比例精致
-        ctx.fillStyle = '#16a34a';
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.roundRect(st.x - 14, st.y - 11, 28, 22, 4);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#fde047';
-        ctx.fillRect(st.x - 8, st.y - 4, 16, 8);
-      } else {
-        ctx.fillStyle = st.type === 'vending_machine' ? '#ec4899' : '#ef4444';
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.arc(st.x, st.y, 13, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        this.drawCenteredSprite(ctx, 'prop_ammo_box', st.x, st.y, 50, 0);
+      } else if (st.type === 'vending_machine') {
+        this.drawCenteredSprite(ctx, 'prop_vending', st.x, st.y, 54, 0);
+      } else if (st.type === 'laser_trap') {
+        const towerRot = st.activeTimer > 0 ? performance.now() * 0.0045 : 0;
+        this.drawCenteredSprite(ctx, 'prop_laser_tower', st.x, st.y, 56, towerRot);
       }
 
       if (st.type === 'laser_trap' && st.activeTimer > 0) {
@@ -489,7 +1191,7 @@ export class CartoonRenderer {
           ctx.beginPath();
           ctx.moveTo(st.x, st.y);
           ctx.lineTo(st.x + Math.cos(a) * 255, st.y + Math.sin(a) * 255);
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.55)';
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.58)';
           ctx.lineWidth = 14;
           ctx.stroke();
           ctx.strokeStyle = '#fef08a';
@@ -498,9 +1200,9 @@ export class CartoonRenderer {
         }
       }
 
-      this.drawCachedLabel(ctx, st.label, st.x, st.y - 38, '#ffffff', 11);
+      this.drawCachedLabel(ctx, st.label, st.x, st.y - 41, '#ffffff', 11);
       if (priceTag) {
-        this.drawCachedLabel(ctx, priceTag, st.x, st.y + 38, '#fde047', 11);
+        this.drawCachedLabel(ctx, priceTag, st.x, st.y + 41, '#fde047', 11);
       }
       ctx.restore();
     }
@@ -509,78 +1211,186 @@ export class CartoonRenderer {
   private drawWindowsAndDoors(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const electricActive = state.electricFortifyWaves > 0;
 
+    // 1. 立体钢框窗户与带钉头木纹防线板
     for (const win of state.windows) {
-      if (!this.inView(win.x + win.w / 2, win.y + win.h / 2, 80)) continue;
+      if (!this.inView(win.x + win.w / 2, win.y + win.h / 2, 85)) continue;
       ctx.save();
-      ctx.fillStyle = '#334155';
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 3;
+
+      // 深色凹陷窗槽与两侧钢制窗托
+      ctx.fillStyle = '#0f172a';
       ctx.fillRect(win.x, win.y, win.w, win.h);
-      ctx.strokeRect(win.x, win.y, win.w, win.h);
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(win.x + 3, win.y + 3, win.w - 6, win.h - 6);
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1.6;
+      ctx.strokeRect(win.x + 2, win.y + 2, win.w - 4, win.h - 4);
+
+      // 中央金属窗棂导轨
+      ctx.strokeStyle = '#090d16';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      if (win.orientation === 'horizontal') {
+        ctx.moveTo(win.x + 4, win.y + win.h / 2);
+        ctx.lineTo(win.x + win.w - 4, win.y + win.h / 2);
+      } else {
+        ctx.moveTo(win.x + win.w / 2, win.y + 4);
+        ctx.lineTo(win.x + win.w / 2, win.y + win.h - 4);
+      }
+      ctx.stroke();
 
       const count = win.planks;
       for (let i = 0; i < count; i++) {
         const ratio = (i + 0.5) / Math.max(1, win.maxPlanks);
-        ctx.fillStyle = electricActive ? '#38bdf8' : i % 2 === 0 ? '#d97706' : '#f59e0b';
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 2;
+        const tilt = ((i % 3) - 1) * 0.022;
+        const plankMain = electricActive ? '#0284c7' : i % 2 === 0 ? '#92400e' : '#b45309';
+        const plankHi = electricActive ? '#7dd3fc' : i % 2 === 0 ? '#d97706' : '#f59e0b';
+
         if (win.orientation === 'horizontal') {
-          const px = win.x + 6;
-          const py = win.y + 2 + ratio * (win.h - 10);
-          ctx.fillRect(px, py, win.w - 12, 6.5);
-          ctx.strokeRect(px, py, win.w - 12, 6.5);
+          const cx = win.x + win.w / 2;
+          const cy = win.y + 4 + ratio * (win.h - 8);
+          const pw = win.w - 14;
+          const ph = 6.5;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(tilt);
+          ctx.fillStyle = plankMain;
+          ctx.strokeStyle = '#090d16';
+          ctx.lineWidth = 1.8;
+          ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+          ctx.strokeRect(-pw / 2, -ph / 2, pw, ph);
+          ctx.fillStyle = plankHi;
+          ctx.fillRect(-pw / 2 + 1, -ph / 2 + 1, pw - 2, 1.8);
+          // 两端钢钉钉帽
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillRect(-pw / 2 + 5, -1.2, 2.5, 2.5);
+          ctx.fillRect(pw / 2 - 7.5, -1.2, 2.5, 2.5);
+          ctx.restore();
         } else {
-          const px = win.x + 2 + ratio * (win.w - 10);
-          const py = win.y + 6;
-          ctx.fillRect(px, py, 6.5, win.h - 12);
-          ctx.strokeRect(px, py, 6.5, win.h - 12);
+          const cx = win.x + 4 + ratio * (win.w - 8);
+          const cy = win.y + win.h / 2;
+          const pw = 6.5;
+          const ph = win.h - 14;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(tilt);
+          ctx.fillStyle = plankMain;
+          ctx.strokeStyle = '#090d16';
+          ctx.lineWidth = 1.8;
+          ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+          ctx.strokeRect(-pw / 2, -ph / 2, pw, ph);
+          ctx.fillStyle = plankHi;
+          ctx.fillRect(-pw / 2 + 1, -ph / 2 + 1, 1.8, ph - 2);
+          ctx.fillStyle = '#e2e8f0';
+          ctx.fillRect(-1.2, -ph / 2 + 5, 2.5, 2.5);
+          ctx.fillRect(-1.2, ph / 2 - 7.5, 2.5, 2.5);
+          ctx.restore();
         }
       }
 
       if (win.planks === 0) {
         const cx = win.x + win.w / 2;
         const cy = win.y + win.h / 2;
-        this.drawCachedLabel(ctx, '破窗!', cx, cy, '#f87171', 11);
+        const blink = 0.45 + Math.sin(performance.now() * 0.012) * 0.35;
+        ctx.fillStyle = `rgba(239, 68, 68, ${blink})`;
+        ctx.fillRect(win.x + 3, win.y + 3, win.w - 6, win.h - 6);
+        this.drawCachedLabel(ctx, '破窗!', cx, cy, '#fecaca', 11);
       }
       ctx.restore();
     }
 
+    // 2. 重型液压对开防爆钢门（Blast Bulkhead Doors）
     for (const door of state.doors) {
-      if (!this.inView(door.x + door.w / 2, door.y + door.h / 2, 80)) continue;
+      if (!this.inView(door.x + door.w / 2, door.y + door.h / 2, 90)) continue;
       if (door.unlocked) {
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.14)';
-        ctx.fillRect(door.x, door.y, door.w, door.h);
+        // 开启后露出两侧门框收纳钢槽
+        ctx.save();
+        ctx.fillStyle = '#334155';
+        ctx.strokeStyle = '#090d16';
+        ctx.lineWidth = 1.8;
+        if (door.orientation === 'horizontal') {
+          ctx.fillRect(door.x, door.y + 2, 10, door.h - 4);
+          ctx.strokeRect(door.x, door.y + 2, 10, door.h - 4);
+          ctx.fillRect(door.x + door.w - 10, door.y + 2, 10, door.h - 4);
+          ctx.strokeRect(door.x + door.w - 10, door.y + 2, 10, door.h - 4);
+        } else {
+          ctx.fillRect(door.x + 2, door.y, door.w - 4, 10);
+          ctx.strokeRect(door.x + 2, door.y, door.w - 4, 10);
+          ctx.fillRect(door.x + 2, door.y + door.h - 10, door.w - 4, 10);
+          ctx.strokeRect(door.x + 2, door.y + door.h - 10, door.w - 4, 10);
+        }
+        ctx.restore();
         continue;
       }
+
       ctx.save();
-      ctx.fillStyle = '#f59e0b';
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 3.5;
+      // 门体接地阴影
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.45)';
+      ctx.fillRect(door.x + 4, door.y + 6, door.w, door.h);
+
+      // 重型深灰装甲门扇主体 + 黄黑工程警戒边条
+      ctx.fillStyle = '#334155';
+      ctx.strokeStyle = '#090d16';
+      ctx.lineWidth = 3;
       ctx.fillRect(door.x, door.y, door.w, door.h);
       ctx.strokeRect(door.x, door.y, door.w, door.h);
 
-      ctx.fillStyle = '#1e293b';
-      if (door.orientation === 'horizontal') {
-        for (let sx = door.x + 12; sx < door.x + door.w - 12; sx += 24) {
-          ctx.fillRect(sx, door.y + 4, 9, door.h - 8);
-        }
-      } else {
-        for (let sy = door.y + 12; sy < door.y + door.h - 12; sy += 24) {
-          ctx.fillRect(door.x + 4, sy, door.w - 8, 9);
-        }
-      }
-
       const cx = door.x + door.w / 2;
       const cy = door.y + door.h / 2;
+
+      if (door.orientation === 'horizontal') {
+        // 上下黄黑警戒封边
+        ctx.fillStyle = '#eab308';
+        ctx.fillRect(door.x + 3, door.y + 2, door.w - 6, 4.5);
+        ctx.fillRect(door.x + 3, door.y + door.h - 6.5, door.w - 6, 4.5);
+        ctx.fillStyle = '#0f172a';
+        for (let sx = door.x + 8; sx < door.x + door.w - 8; sx += 16) {
+          ctx.fillRect(sx, door.y + 2, 7, 4.5);
+          ctx.fillRect(sx + 4, door.y + door.h - 6.5, 7, 4.5);
+        }
+        // 中央对开门缝与液压闭锁栓
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(cx - 1.5, door.y + 2, 3, door.h - 4);
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(cx - 14, cy - 6, 28, 12);
+        ctx.strokeRect(cx - 14, cy - 6, 28, 12);
+      } else {
+        ctx.fillStyle = '#eab308';
+        ctx.fillRect(door.x + 2, door.y + 3, 4.5, door.h - 6);
+        ctx.fillRect(door.x + door.w - 6.5, door.y + 3, 4.5, door.h - 6);
+        ctx.fillStyle = '#0f172a';
+        for (let sy = door.y + 8; sy < door.y + door.h - 8; sy += 16) {
+          ctx.fillRect(door.x + 2, sy, 4.5, 7);
+          ctx.fillRect(door.x + door.w - 6.5, sy + 4, 4.5, 7);
+        }
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(door.x + 2, cy - 1.5, door.w - 4, 3);
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(cx - 6, cy - 14, 12, 28);
+        ctx.strokeRect(cx - 6, cy - 14, 12, 28);
+      }
+
+      // 门禁红/绿状态指示灯
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3.8, 0, Math.PI * 2);
+      ctx.fillStyle = state.cash >= door.cost ? '#4ade80' : '#ef4444';
+      ctx.fill();
+
       if (door.progress > 0) {
         ctx.beginPath();
-        ctx.arc(cx, cy, 30, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * door.progress);
+        ctx.arc(cx, cy, 31, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * door.progress);
         ctx.strokeStyle = '#4ade80';
         ctx.lineWidth = 6;
         ctx.stroke();
       }
-      this.drawCachedLabel(ctx, door.label, cx, cy - 9, '#ffffff', 11);
-      this.drawCachedLabel(ctx, `$${door.cost}`, cx, cy + 9, '#fef08a', 12);
+      this.drawCachedLabel(ctx, door.label, cx, cy - 13, '#f8fafc', 11);
+      this.drawCachedLabel(
+        ctx,
+        `$${door.cost}`,
+        cx,
+        cy + 13,
+        state.cash >= door.cost ? '#86efac' : '#fde047',
+        12
+      );
       ctx.restore();
     }
   }
@@ -593,14 +1403,18 @@ export class CartoonRenderer {
       ctx.save();
       ctx.translate(d.x, d.y + bob);
       if (d.kind === 'cash') {
-        ctx.fillStyle = '#22c55e';
-        ctx.strokeStyle = '#0f172a';
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.35)';
+        ctx.fillRect(-9, -4, 20, 14);
+        ctx.fillStyle = '#15803d';
+        ctx.strokeStyle = '#052e16';
         ctx.lineWidth = 2.2;
         ctx.fillRect(-10, -7, 20, 14);
         ctx.strokeRect(-10, -7, 20, 14);
+        ctx.fillStyle = '#86efac';
+        ctx.fillRect(-3, -7, 6, 14);
         this.drawCachedLabel(ctx, '$', 0, 0, '#fef08a', 11);
       } else if (d.kind === 'xp') {
-        ctx.fillStyle = '#38bdf8';
+        ctx.fillStyle = '#0284c7';
         ctx.strokeStyle = '#0f172a';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -626,24 +1440,24 @@ export class CartoonRenderer {
     }
 
     for (const c of state.chests) {
-      if (!this.inView(c.x, c.y, 60)) continue;
-      const bounce = Math.abs(Math.sin(now * 1.25 + c.bobPhase)) * 4.5;
+      if (!this.inView(c.x, c.y, 65)) continue;
+      const bounce = Math.abs(Math.sin(now * 1.25 + c.bobPhase)) * 4;
       ctx.save();
       ctx.beginPath();
-      ctx.arc(c.x, c.y, 28, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(250, 204, 21, 0.26)';
+      ctx.arc(c.x, c.y, 30, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.24)';
       ctx.fill();
 
-      this.drawCenteredSprite(ctx, 'prop_chest', c.x, c.y - bounce, 50, 0);
+      this.drawCenteredSprite(ctx, 'prop_chest', c.x, c.y - bounce, 52, 0);
 
       if (c.progress > 0) {
         ctx.beginPath();
-        ctx.arc(c.x, c.y, 31, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * c.progress);
+        ctx.arc(c.x, c.y, 33, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * c.progress);
         ctx.strokeStyle = '#4ade80';
         ctx.lineWidth = 5;
         ctx.stroke();
       }
-      this.drawCachedLabel(ctx, '神秘宝物箱', c.x, c.y - 34 - bounce, '#fef08a', 11);
+      this.drawCachedLabel(ctx, '特战补给箱', c.x, c.y - 36 - bounce, '#fef08a', 11);
       ctx.restore();
     }
   }
@@ -655,10 +1469,10 @@ export class CartoonRenderer {
       if (!room?.unlocked) continue;
       ctx.save();
       ctx.beginPath();
-      ctx.ellipse(b.x, b.y + 11, 15, 7.5, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+      ctx.ellipse(b.x + 3, b.y + 8, 18, 14, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
       ctx.fill();
-      this.drawCenteredSprite(ctx, 'prop_barrel', b.x, b.y, 42, 0);
+      this.drawCenteredSprite(ctx, 'prop_barrel', b.x, b.y, 44, 0);
       ctx.restore();
     }
   }
@@ -668,8 +1482,8 @@ export class CartoonRenderer {
       if (!this.inView(t.x, t.y, 60)) continue;
       ctx.save();
       ctx.beginPath();
-      ctx.ellipse(t.x, t.y + 13, 19, 9.5, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
+      ctx.ellipse(t.x + 3, t.y + 10, 20, 13, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
       ctx.fill();
       this.drawCenteredSprite(ctx, 'prop_turret', t.x, t.y, 56, t.angle);
       this.drawCachedLabel(ctx, `哨戒炮 ${t.life.toFixed(0)}s`, t.x, t.y - 30, '#7dd3fc', 10);
@@ -680,8 +1494,8 @@ export class CartoonRenderer {
       const d = state.mechDog;
       ctx.save();
       ctx.beginPath();
-      ctx.ellipse(d.x, d.y + 12, 16, 8, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+      ctx.ellipse(d.x + 2, d.y + 10, 17, 10, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.4)';
       ctx.fill();
       this.drawCenteredSprite(ctx, 'mech_dog', d.x, d.y, 54, d.angle);
       this.drawCachedLabel(ctx, '机械警犬', d.x, d.y - 26, '#bae6fd', 10);
@@ -689,27 +1503,26 @@ export class CartoonRenderer {
     }
   }
 
-  // ==================== 生动步态与扑击动画的俯视僵尸群 ====================
+  // ==================== 写实俯视僵尸群 ====================
 
   private drawZombies(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const frozen = state.powerUpTimers.freeze > 0;
     for (const z of state.zombies) {
-      if (!this.inView(z.x, z.y, 110)) continue;
+      if (!this.inView(z.x, z.y, 115)) continue;
       const spKey = ZOMBIE_SPRITE_MAP[z.kind];
       const sway = Math.sin(z.wobblePhase) * 0.12;
       const squash = 1 + Math.sin(z.wobblePhase * 2) * 0.05;
       const lunge = z.attackAnim * 11;
       const angle = z.facingAngle + sway;
-      // 放大僵尸视觉体格（75px ~ 185px），压迫感十足且显著大于灵巧小特工主角！
       const drawSize = z.radius * 3.55;
 
       ctx.save();
       ctx.translate(z.x, z.y);
 
-      // 地面椭圆阴影
+      // 立体角色接地暗影
       ctx.beginPath();
-      ctx.ellipse(0, z.radius * 0.65, z.radius * 0.95, z.radius * 0.5, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
+      ctx.ellipse(3, z.radius * 0.55, z.radius * 1.02, z.radius * 0.62, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.46)';
       ctx.fill();
 
       if (frozen || z.slowTimer > 0) {
@@ -720,17 +1533,17 @@ export class CartoonRenderer {
       } else if (z.burnTimer > 0) {
         ctx.beginPath();
         ctx.arc(0, 0, z.radius + 7, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(249, 115, 22, 0.36)';
+        ctx.fillStyle = 'rgba(249, 115, 22, 0.38)';
         ctx.fill();
       }
 
-      // 僵尸脚底交替迈步的小脚掌（让移动充满鲜活步伐感！）
+      // 僵尸脚底交替迈步步伐
       ctx.save();
       ctx.rotate(z.facingAngle);
       const stride = Math.sin(z.wobblePhase) * (z.radius * 0.34);
       const footSpread = z.radius * 0.42;
       ctx.fillStyle = '#1e293b';
-      ctx.strokeStyle = '#0f172a';
+      ctx.strokeStyle = '#090d16';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.ellipse(stride - 2, -footSpread, 6.5, 4.2, 0, 0, Math.PI * 2);
@@ -739,7 +1552,6 @@ export class CartoonRenderer {
       ctx.stroke();
       ctx.restore();
 
-      // 扑击前冲位移 + 摇摆躯干
       ctx.save();
       ctx.rotate(angle);
       ctx.translate(lunge, 0);
@@ -753,7 +1565,7 @@ export class CartoonRenderer {
       } else if (z.kind === 'boss' || z.kind === 'miniboss') {
         this.drawCachedLabel(
           ctx,
-          z.kind === 'boss' ? '狂暴尸王' : '重装精英',
+          z.kind === 'boss' ? '深渊尸王' : '重装暴君',
           z.x,
           z.y - z.radius - 24,
           '#fca5a5',
@@ -765,7 +1577,7 @@ export class CartoonRenderer {
         const bw = Math.max(36, z.radius * 1.9);
         const bx = z.x - bw / 2;
         const by = z.y - z.radius - 13;
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = '#090d16';
         ctx.fillRect(bx - 1.5, by - 1.5, bw + 3, 7);
         ctx.fillStyle = z.kind === 'thief' ? '#facc15' : '#ef4444';
         ctx.fillRect(bx, by, bw * Math.max(0, z.hp / z.maxHp), 4);
@@ -779,8 +1591,8 @@ export class CartoonRenderer {
       const isBossOrb = s.radius >= 9;
       ctx.save();
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.radius + 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = isBossOrb ? 'rgba(244, 63, 94, 0.42)' : 'rgba(163, 230, 53, 0.35)';
+      ctx.arc(s.x, s.y, s.radius + 4, 0, Math.PI * 2);
+      ctx.fillStyle = isBossOrb ? 'rgba(244, 63, 94, 0.44)' : 'rgba(163, 230, 53, 0.38)';
       ctx.fill();
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
@@ -793,16 +1605,15 @@ export class CartoonRenderer {
     }
   }
 
-  // ==================== 全身骨骼分体特工主角（精悍灵巧，明显小于各型僵尸！） ====================
+  // ==================== 全身骨骼特种兵主角（夜视仪头盔躯干 + 战术护袖 + 枪口地面火光） ====================
 
   private drawPlayer(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const p = state.player;
     const activeWep = p.weapons[p.activeSlot];
     const isFever = state.feverTimer > 0;
     const now = performance.now();
-    const rigScale = 0.62; // 精悍特工体型缩放，与高大僵尸形成鲜明反差！
+    const rigScale = 0.64;
 
-    // 呼吸律动 + 移动步伐肩部扭转 + 射击后坐力回弹
     const idleBreath = 1 + Math.sin(now * 0.0042) * 0.024;
     const walkTwist = p.isMoving ? Math.sin(p.walkPhase) * 0.095 : 0;
     const walkBob = p.isMoving ? Math.abs(Math.cos(p.walkPhase)) * 1.4 : 0;
@@ -811,17 +1622,30 @@ export class CartoonRenderer {
     ctx.save();
     ctx.translate(p.x, p.y);
 
-    // 1. 柔和角色脚底阴影
+    // 0. 开火瞬间枪口照亮地面的动态战术火光池！
+    if (p.muzzleFlashTimer > 0) {
+      const fx = Math.cos(p.angle) * 28;
+      const fy = Math.sin(p.angle) * 28;
+      const mg = ctx.createRadialGradient(fx, fy, 4, fx, fy, 108);
+      mg.addColorStop(0, activeWep.evolved ? 'rgba(56, 189, 248, 0.32)' : 'rgba(251, 191, 36, 0.32)');
+      mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = mg;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 108, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 1. 柔和角色脚底接地投影
     ctx.beginPath();
-    ctx.ellipse(0, p.radius * 0.62, p.radius * 1.05, p.radius * 0.56, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.34)';
+    ctx.ellipse(2, p.radius * 0.58, p.radius * 1.12, p.radius * 0.64, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.48)';
     ctx.fill();
 
     // 2. 防弹护甲微光环 & 无敌 / Fever 狂热光环
     if (p.armor > 0) {
       ctx.beginPath();
       ctx.arc(0, 0, p.radius + 5.5, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.78)';
       ctx.lineWidth = 2.2;
       ctx.stroke();
     }
@@ -835,11 +1659,10 @@ export class CartoonRenderer {
       ctx.stroke();
     }
 
-    // 缩放角色骨骼本体（双靴 + 双臂 + 9把俯视枪械 + 特工头盔躯干）
     ctx.save();
     ctx.scale(rigScale, rigScale);
 
-    // 3. 下半身独立骨骼：朝向移动方向（legAngle）交替迈步的战术军靴！
+    // 3. 下半身独立骨骼：战术军靴
     ctx.save();
     ctx.rotate(p.legAngle);
     const stride = p.isMoving ? Math.sin(p.walkPhase) * 10.5 : 0;
@@ -847,32 +1670,29 @@ export class CartoonRenderer {
     this.drawTacticalBoot(ctx, -stride + 2, 10.5);
     ctx.restore();
 
-    // 4. 上半身独立骨骼：朝向鼠标瞄准角（p.angle）+ 肩部步态摆动 + 后坐力震动
+    // 4. 上半身独立骨骼：红外激光瞄准线 + 战术护袖持枪双臂 + 夜视仪特种兵头盔躯干
     ctx.save();
     ctx.translate(0, -walkBob);
     ctx.rotate(p.angle);
 
-    // 战术红点/激光瞄准虚线
     ctx.beginPath();
-    ctx.moveTo(32, 0);
-    ctx.lineTo(250, 0);
-    ctx.strokeStyle = activeWep.evolved ? 'rgba(244, 63, 94, 0.42)' : 'rgba(255, 255, 255, 0.22)';
-    ctx.lineWidth = 2.4;
-    ctx.setLineDash([8, 8]);
+    ctx.moveTo(34, 0);
+    ctx.lineTo(255, 0);
+    ctx.strokeStyle = activeWep.evolved ? 'rgba(56, 189, 248, 0.42)' : 'rgba(239, 68, 68, 0.34)';
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([10, 8]);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // 持枪双臂 + 当前装备的真实俯视枪械模型 + 换弹倾斜/枪口火焰/加特林旋转枪管
     this.drawEquippedTopDownWeaponAndArms(ctx, activeWep.defId, activeWep.evolved, p);
 
-    // 90° 纯正俯视特工头盔+护肩+战术背包精灵（叠加呼吸缩放与肩部步态微摆）
     ctx.save();
-    ctx.translate(-torsoKick - 3, 0);
+    ctx.translate(-torsoKick - 4, 0);
     ctx.rotate(walkTwist);
     ctx.scale(idleBreath, 2 - idleBreath);
     const torsoImg = Assets.getSprite('player_torso');
     if (torsoImg) {
-      const torsoSz = 62;
+      const torsoSz = 68;
       ctx.drawImage(torsoImg, -torsoSz / 2, -torsoSz / 2, torsoSz, torsoSz);
     }
     ctx.restore();
@@ -880,11 +1700,10 @@ export class CartoonRenderer {
     ctx.restore();
     ctx.restore(); // 结束 rigScale
 
-    // 5. 换弹进度条、余弹预警与修窗环形读条（保持清晰世界尺寸，不随人物缩小而糊掉）
     if (p.reloadTimer > 0 && p.reloadDuration > 0) {
       const pct = 1 - p.reloadTimer / p.reloadDuration;
       const bw = 40;
-      ctx.fillStyle = '#0f172a';
+      ctx.fillStyle = '#090d16';
       ctx.fillRect(-bw / 2 - 1.5, -p.radius - 19, bw + 3, 7);
       ctx.fillStyle = '#38bdf8';
       ctx.fillRect(-bw / 2, -p.radius - 17.5, bw * pct, 4.2);
@@ -908,14 +1727,14 @@ export class CartoonRenderer {
   }
 
   private drawTacticalBoot(ctx: CanvasRenderingContext2D, fx: number, fy: number): void {
-    ctx.fillStyle = '#1e293b';
-    ctx.strokeStyle = '#0f172a';
+    ctx.fillStyle = '#1c2430';
+    ctx.strokeStyle = '#090d16';
     ctx.lineWidth = 2.4;
     ctx.beginPath();
     ctx.roundRect(fx - 7, fy - 4.5, 15, 9, 4);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = '#475569';
+    ctx.fillStyle = '#4b5563';
     ctx.fillRect(fx + 2, fy - 2.5, 4, 5);
   }
 
@@ -934,176 +1753,162 @@ export class CartoonRenderer {
     ctx.translate(-kick, 0);
     ctx.rotate(reloadTilt);
 
-    // 根据枪械类型决定左右手握持点坐标（俯视）
-    let rightHandX = 16;
+    let rightHandX = 18;
     let rightHandY = 9;
-    let leftHandX = 25;
+    let leftHandX = 27;
     let leftHandY = -6;
-    let muzzleTipX = 44;
+    let muzzleTipX = 46;
 
     if (wepId === 'pistol') {
-      rightHandX = 18;
+      rightHandX = 20;
       rightHandY = 4;
-      leftHandX = 20;
+      leftHandX = 22;
       leftHandY = -3;
-      muzzleTipX = 35;
+      muzzleTipX = 37;
     } else if (wepId === 'minigun') {
-      rightHandX = 14;
+      rightHandX = 16;
       rightHandY = 13;
-      leftHandX = 24;
+      leftHandX = 26;
       leftHandY = -11;
-      muzzleTipX = 52;
+      muzzleTipX = 54;
     } else if (wepId === 'sniper') {
-      leftHandX = 29;
+      leftHandX = 31;
       leftHandY = -4;
-      muzzleTipX = 58;
+      muzzleTipX = 60;
     } else if (wepId === 'shotgun') {
-      leftHandX = 27 - kick * 0.45; // 霰弹泵动护木拉栓手感！
+      leftHandX = 29 - kick * 0.45;
       leftHandY = -4;
-      muzzleTipX = 46;
+      muzzleTipX = 48;
     }
 
     if (isReloading) {
-      // 换弹时左手向弹匣井往返拍入新弹匣！
       const slap = Math.sin(reloadPhase * Math.PI * 2);
-      leftHandX = 18 + slap * 5;
+      leftHandX = 20 + slap * 5;
       leftHandY = -10 + Math.abs(slap) * 8;
     }
 
-    // 绘制左右小臂（从护肩正下方伸出）
-    this.drawForearmToHand(ctx, 4, 15, rightHandX, rightHandY);
-    this.drawForearmToHand(ctx, 4, -15, leftHandX, leftHandY);
+    // 战术作战服深灰袖管 + 橄榄褐护肘（彻底告别违和粉色裸臂！）
+    this.drawForearmToHand(ctx, 4, 16, rightHandX, rightHandY);
+    this.drawForearmToHand(ctx, 4, -16, leftHandX, leftHandY);
 
-    // 绘制 9 把各具辨识度的俯视枪身模型
-    const trim = evolved ? '#38bdf8' : '#facc15';
-    ctx.lineWidth = 2.6;
-    ctx.strokeStyle = '#0f172a';
+    const trim = evolved ? '#38bdf8' : '#eab308';
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = '#090d16';
 
     if (wepId === 'pistol') {
-      ctx.fillStyle = evolved ? '#3b82f6' : '#64748b';
+      ctx.fillStyle = evolved ? '#2563eb' : '#475569';
       ctx.beginPath();
-      ctx.roundRect(16, -3.5, 18, 7, 2.5);
+      ctx.roundRect(18, -3.5, 18, 7, 2.5);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#e2e8f0';
-      ctx.fillRect(20, -1.5, 11, 3);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(22, -1.5, 11, 3);
     } else if (wepId === 'smg') {
-      ctx.fillStyle = '#334155';
+      ctx.fillStyle = '#1e293b';
       ctx.beginPath();
-      ctx.roundRect(12, -4, 26, 8, 3);
+      ctx.roundRect(14, -4, 26, 8, 3);
       ctx.fill();
       ctx.stroke();
-      // 侧插弹匣
       ctx.fillStyle = trim;
-      ctx.fillRect(21, -10, 5, 6);
-      ctx.strokeRect(21, -10, 5, 6);
+      ctx.fillRect(23, -10, 5, 6);
+      ctx.strokeRect(23, -10, 5, 6);
       ctx.fillStyle = '#94a3b8';
-      ctx.fillRect(38, -2, 6, 4);
+      ctx.fillRect(40, -2, 6, 4);
     } else if (wepId === 'shotgun') {
-      ctx.fillStyle = '#475569';
-      ctx.fillRect(10, -3.5, 35, 7);
-      ctx.strokeRect(10, -3.5, 35, 7);
-      // 经典木质/战术泵动护木
-      ctx.fillStyle = evolved ? '#ef4444' : '#b45309';
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(12, -3.5, 35, 7);
+      ctx.strokeRect(12, -3.5, 35, 7);
+      ctx.fillStyle = evolved ? '#dc2626' : '#92400e';
       ctx.beginPath();
       ctx.roundRect(leftHandX - 5, -5, 13, 10, 2.5);
       ctx.fill();
       ctx.stroke();
     } else if (wepId === 'rifle') {
-      ctx.fillStyle = evolved ? '#a855f7' : '#334155';
+      ctx.fillStyle = evolved ? '#7c3aed' : '#1e293b';
       ctx.beginPath();
-      ctx.roundRect(10, -4, 31, 8, 2.5);
+      ctx.roundRect(12, -4, 31, 8, 2.5);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#eab308';
-      ctx.fillRect(19, -3, 11, 6);
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(41, -2, 7, 4);
-      ctx.strokeRect(41, -2, 7, 4);
+      ctx.fillStyle = '#78716c';
+      ctx.fillRect(21, -3, 11, 6);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(43, -2, 7, 4);
+      ctx.strokeRect(43, -2, 7, 4);
     } else if (wepId === 'flamethrower') {
-      // 侧挂橙红高压燃料罐 + 黄铜喷火嘴
-      ctx.fillStyle = evolved ? '#0284c7' : '#ea580c';
+      ctx.fillStyle = evolved ? '#0284c7' : '#c2410c';
       ctx.beginPath();
-      ctx.roundRect(10, 4, 18, 9, 4);
+      ctx.roundRect(12, 4, 18, 9, 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#475569';
-      ctx.fillRect(13, -4, 27, 7);
-      ctx.strokeRect(13, -4, 27, 7);
-      ctx.fillStyle = '#facc15';
-      ctx.fillRect(40, -3.5, 6, 6);
-      ctx.strokeRect(40, -3.5, 6, 6);
-      // 常驻火种小火苗
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(15, -4, 27, 7);
+      ctx.strokeRect(15, -4, 27, 7);
+      ctx.fillStyle = '#eab308';
+      ctx.fillRect(42, -3.5, 6, 6);
+      ctx.strokeRect(42, -3.5, 6, 6);
       ctx.fillStyle = evolved ? '#38bdf8' : '#fb923c';
       ctx.beginPath();
-      ctx.arc(49, -0.5, 3.5 + Math.sin(performance.now() * 0.03), 0, Math.PI * 2);
+      ctx.arc(51, -0.5, 3.5 + Math.sin(performance.now() * 0.03), 0, Math.PI * 2);
       ctx.fill();
     } else if (wepId === 'sniper') {
-      ctx.fillStyle = evolved ? '#0891b2' : '#166534';
+      ctx.fillStyle = evolved ? '#0891b2' : '#3f4f3a';
       ctx.beginPath();
-      ctx.roundRect(10, -4, 26, 8, 2);
+      ctx.roundRect(12, -4, 26, 8, 2);
       ctx.fill();
       ctx.stroke();
-      // 修长重型狙击枪管 + 制退器 + 瞄准镜筒
       ctx.fillStyle = '#334155';
-      ctx.fillRect(36, -2, 20, 4);
-      ctx.strokeRect(36, -2, 20, 4);
-      ctx.fillRect(54, -4, 4, 8);
-      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(38, -2, 20, 4);
+      ctx.strokeRect(38, -2, 20, 4);
+      ctx.fillRect(56, -4, 4, 8);
+      ctx.fillStyle = '#090d16';
       ctx.beginPath();
-      ctx.roundRect(17, -2.5, 14, 5, 2);
+      ctx.roundRect(19, -2.5, 14, 5, 2);
       ctx.fill();
     } else if (wepId === 'launcher') {
-      // 大口径转轮榴弹筒
-      ctx.fillStyle = '#475569';
+      ctx.fillStyle = '#334155';
       ctx.beginPath();
-      ctx.roundRect(11, -6.5, 18, 13, 4);
+      ctx.roundRect(13, -6.5, 18, 13, 4);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = trim;
-      ctx.fillRect(16, -5.5, 6, 11);
+      ctx.fillRect(18, -5.5, 6, 11);
       ctx.fillStyle = '#1e293b';
-      ctx.fillRect(29, -4.5, 14, 9);
-      ctx.strokeRect(29, -4.5, 14, 9);
+      ctx.fillRect(31, -4.5, 14, 9);
+      ctx.strokeRect(31, -4.5, 14, 9);
     } else if (wepId === 'minigun') {
-      // 6管旋转加特林机匣！开火时可见枪管束高速旋转！
       ctx.fillStyle = '#1e293b';
       ctx.beginPath();
-      ctx.roundRect(10, -7.5, 18, 15, 4);
+      ctx.roundRect(12, -7.5, 18, 15, 4);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = evolved ? '#c084fc' : '#94a3b8';
       const spinOffset = Math.sin(p.barrelSpin) * 2.5;
-      ctx.fillRect(28, -6, 22, 3.2);
-      ctx.fillRect(28, -1.6 + spinOffset * 0.4, 22, 3.2);
-      ctx.fillRect(28, 2.8, 22, 3.2);
-      ctx.strokeRect(28, -6.2, 22, 12.4);
-      // 箍环
+      ctx.fillRect(30, -6, 22, 3.2);
+      ctx.fillRect(30, -1.6 + spinOffset * 0.4, 22, 3.2);
+      ctx.fillRect(30, 2.8, 22, 3.2);
+      ctx.strokeRect(30, -6.2, 22, 12.4);
       ctx.fillStyle = trim;
-      ctx.fillRect(42, -6.8, 4, 13.6);
+      ctx.fillRect(44, -6.8, 4, 13.6);
     } else {
-      // 等离子电浆炮双轨发光核心
-      ctx.fillStyle = '#312e81';
+      ctx.fillStyle = '#1e1b4b';
       ctx.beginPath();
-      ctx.roundRect(11, -6, 32, 12, 4);
+      ctx.roundRect(13, -6, 32, 12, 4);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = evolved ? '#f43f5e' : '#38bdf8';
-      ctx.fillRect(17, -2.5, 24, 5);
+      ctx.fillRect(19, -2.5, 24, 5);
     }
 
-    // 绘制握在枪体上的战术黑色手套拳头
     this.drawGlovedHand(ctx, rightHandX, rightHandY);
     this.drawGlovedHand(ctx, leftHandX, leftHandY);
 
-    // 鲜明三叉枪口火焰
     if (p.muzzleFlashTimer > 0 && wepId !== 'flamethrower') {
       ctx.fillStyle = evolved ? '#38bdf8' : '#fde047';
       ctx.beginPath();
       ctx.moveTo(muzzleTipX, 0);
-      ctx.lineTo(muzzleTipX + 20, -10);
-      ctx.lineTo(muzzleTipX + 13, 0);
-      ctx.lineTo(muzzleTipX + 22, 10);
+      ctx.lineTo(muzzleTipX + 22, -10);
+      ctx.lineTo(muzzleTipX + 14, 0);
+      ctx.lineTo(muzzleTipX + 23, 10);
       ctx.closePath();
       ctx.fill();
     }
@@ -1118,7 +1923,7 @@ export class CartoonRenderer {
     hx: number,
     hy: number
   ): void {
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = '#090d16';
     ctx.lineCap = 'round';
     ctx.lineWidth = 9.5;
     ctx.beginPath();
@@ -1126,17 +1931,26 @@ export class CartoonRenderer {
     ctx.lineTo(hx, hy);
     ctx.stroke();
 
-    ctx.strokeStyle = '#f4a97b';
-    ctx.lineWidth = 5.2;
+    // 战术深藏青作战服衣袖
+    ctx.strokeStyle = '#243042';
+    ctx.lineWidth = 5.6;
     ctx.beginPath();
     ctx.moveTo(sx, sy);
     ctx.lineTo(hx, hy);
     ctx.stroke();
+
+    // 橄榄卡其护肘块
+    const ex = sx + (hx - sx) * 0.42;
+    const ey = sy + (hy - sy) * 0.42;
+    ctx.fillStyle = '#757459';
+    ctx.beginPath();
+    ctx.arc(ex, ey, 3.2, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   private drawGlovedHand(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-    ctx.fillStyle = '#1e293b';
-    ctx.strokeStyle = '#0f172a';
+    ctx.fillStyle = '#3f3f37';
+    ctx.strokeStyle = '#090d16';
     ctx.lineWidth = 2.2;
     ctx.beginPath();
     ctx.arc(x, y, 4.6, 0, Math.PI * 2);
@@ -1152,23 +1966,22 @@ export class CartoonRenderer {
       ctx.save();
       ctx.beginPath();
       ctx.ellipse(g.x, g.y + 4, 8, 4, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
       ctx.fill();
 
       ctx.translate(g.x, g.y - g.z);
       ctx.beginPath();
       ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
-      ctx.fillStyle = Math.floor(g.fuse * 10) % 2 === 0 ? '#ef4444' : '#166534';
+      ctx.fillStyle = Math.floor(g.fuse * 10) % 2 === 0 ? '#ef4444' : '#3f6212';
       ctx.fill();
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = '#0f172a';
+      ctx.strokeStyle = '#090d16';
       ctx.stroke();
       ctx.restore();
     }
   }
 
   private drawBulletsAndFX(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
-    // 零渐变对象分配的极速高颜值曳光弹！
     for (const b of state.bullets) {
       if (!this.inView(b.x, b.y, 65)) continue;
       const ang = Math.atan2(b.vy, b.vx);
@@ -1189,10 +2002,10 @@ export class CartoonRenderer {
         continue;
       }
 
-      const trailLen = b.laser ? 52 : b.explosiveRadius > 0 ? 20 : 26;
-      ctx.globalAlpha = 0.42;
+      const trailLen = b.laser ? 56 : b.explosiveRadius > 0 ? 22 : 28;
+      ctx.globalAlpha = 0.48;
       ctx.strokeStyle = b.color;
-      ctx.lineWidth = b.radius * 1.9;
+      ctx.lineWidth = b.radius * 1.95;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(-trailLen, 0);
@@ -1202,7 +2015,7 @@ export class CartoonRenderer {
       ctx.globalAlpha = 1;
       const len = b.laser ? 26 : b.explosiveRadius > 0 ? 14 : 12;
       ctx.fillStyle = b.explosiveRadius > 0 ? '#facc15' : '#ffffff';
-      ctx.strokeStyle = '#0f172a';
+      ctx.strokeStyle = '#090d16';
       ctx.lineWidth = 1.8;
       ctx.fillRect(-len / 2, -b.radius * 0.85, len, b.radius * 1.7);
       ctx.strokeRect(-len / 2, -b.radius * 0.85, len, b.radius * 1.7);
@@ -1249,7 +2062,7 @@ export class CartoonRenderer {
     }
   }
 
-  // ==================== 屏幕层紧凑小地图与指示器 ====================
+  // ==================== 屏幕层紧凑战术雷达与指示器 ====================
 
   private drawTacticalMinimap(
     ctx: CanvasRenderingContext2D,
@@ -1258,8 +2071,8 @@ export class CartoonRenderer {
     state: RunSnapshot
   ): void {
     const compact = viewW < 760 || viewH < 500;
-    const mapW = compact ? 102 : 142;
-    const mapH = compact ? 74 : 102;
+    const mapW = compact ? 102 : 144;
+    const mapH = compact ? 74 : 104;
     const mx = compact ? 8 : 12;
     const my = compact ? viewH - mapH - 54 : viewH - mapH - 12;
     const bb = state.stage.buildingBounds;
@@ -1268,16 +2081,16 @@ export class CartoonRenderer {
     const oy = my + (mapH - bb.h * scale) / 2 - bb.y * scale;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.76)';
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 2.5;
+    ctx.fillStyle = 'rgba(9, 14, 23, 0.84)';
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.roundRect(mx, my, mapW, mapH, 10);
+    ctx.roundRect(mx, my, mapW, mapH, 8);
     ctx.fill();
     ctx.stroke();
 
     for (const room of state.rooms) {
-      ctx.fillStyle = room.unlocked ? 'rgba(148, 163, 184, 0.45)' : 'rgba(51, 65, 85, 0.42)';
+      ctx.fillStyle = room.unlocked ? 'rgba(148, 163, 184, 0.42)' : 'rgba(30, 41, 59, 0.55)';
       for (const r of room.rects) {
         ctx.fillRect(ox + r.x * scale, oy + r.y * scale, r.w * scale, r.h * scale);
       }
@@ -1285,7 +2098,7 @@ export class CartoonRenderer {
 
     for (const d of state.doors) {
       if (d.unlocked) continue;
-      ctx.fillStyle = '#facc15';
+      ctx.fillStyle = '#eab308';
       ctx.fillRect(ox + d.x * scale - 1, oy + d.y * scale - 1, Math.max(3, d.w * scale), Math.max(3, d.h * scale));
     }
 
@@ -1299,7 +2112,7 @@ export class CartoonRenderer {
       if (st.type === 'armory_kiosk') {
         const rm = state.rooms.find((r) => r.id === st.roomId);
         if (rm?.unlocked) {
-          ctx.fillStyle = '#38bdf8';
+          ctx.fillStyle = '#10b981';
           ctx.fillRect(ox + st.x * scale - 2.5, oy + st.y * scale - 2.5, 5, 5);
         }
       }
@@ -1336,7 +2149,7 @@ export class CartoonRenderer {
     const zoom = state.camera.zoom;
     const targets: { x: number; y: number; tag: string; color: string }[] = [];
     for (const c of state.chests) {
-      targets.push({ x: c.x, y: c.y, tag: '宝', color: '#facc15' });
+      targets.push({ x: c.x, y: c.y, tag: '箱', color: '#f59e0b' });
     }
     for (const z of state.zombies) {
       if (z.kind === 'thief') targets.push({ x: z.x, y: z.y, tag: '$', color: '#fde047' });
@@ -1361,7 +2174,7 @@ export class CartoonRenderer {
       ctx.fillStyle = t.color;
       ctx.fill();
       ctx.lineWidth = 2.5;
-      ctx.strokeStyle = '#0f172a';
+      ctx.strokeStyle = '#090d16';
       ctx.stroke();
       this.drawCachedLabel(ctx, t.tag, ix, iy, '#ffffff', 10);
       ctx.restore();
@@ -1374,7 +2187,7 @@ export class CartoonRenderer {
       ctx.save();
       ctx.beginPath();
       ctx.arc(stick.startX, stick.startY, 46, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.26)';
+      ctx.fillStyle = 'rgba(9, 14, 23, 0.34)';
       ctx.fill();
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
@@ -1405,7 +2218,7 @@ export class CartoonRenderer {
     if (img) {
       ctx.drawImage(img, -size / 2, -size / 2, size, size);
     } else {
-      ctx.fillStyle = '#facc15';
+      ctx.fillStyle = '#eab308';
       ctx.beginPath();
       ctx.arc(0, 0, size * 0.35, 0, Math.PI * 2);
       ctx.fill();
@@ -1455,7 +2268,7 @@ export class CartoonRenderer {
       }
       badge = document.createElement('canvas');
       const bctx = badge.getContext('2d')!;
-      const scale = 1.5; // 保证缩放下依然锐利清晰
+      const scale = 1.5;
       const font = `900 ${fontSize}px system-ui, -apple-system, sans-serif`;
       bctx.font = font;
       const metrics = bctx.measureText(text);
@@ -1470,7 +2283,7 @@ export class CartoonRenderer {
       bctx.textBaseline = 'middle';
       bctx.lineJoin = 'round';
       bctx.lineWidth = 3.8;
-      bctx.strokeStyle = '#0f172a';
+      bctx.strokeStyle = '#090d16';
       bctx.strokeText(text, w / 2, h / 2);
       bctx.fillStyle = fill;
       bctx.fillText(text, w / 2, h / 2);
