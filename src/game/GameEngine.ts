@@ -35,8 +35,9 @@ export class GameEngine {
 
   private spawnQueue: ZombieKind[] = [];
   private spawnTimer = 0;
+  private extractionSpawnTimer = 0;
 
-  // 40px 网格 BFS 流场寻路（支持任意不规则多边形房间、走廊与家具绕障！）
+  // 56px 网格 BFS 流场寻路（支持任意不规则多边形房间、走廊与家具绕障！）
   private flowDist: Int16Array = new Int16Array(0);
   private walkableGrid: Uint8Array = new Uint8Array(0);
   private staticBlockers: Rect[] = [];
@@ -81,7 +82,7 @@ export class GameEngine {
       cash: pStats.startCash,
       battleLevel: 1,
       battleXp: 0,
-      battleXpNext: 45,
+      battleXpNext: 55,
       kills: 0,
       fever: 0,
       feverTimer: 0,
@@ -96,7 +97,7 @@ export class GameEngine {
       player: {
         x: stage.playerSpawn.x,
         y: stage.playerSpawn.y,
-        radius: 23,
+        radius: 15,
         angle: 0,
         hp: pStats.maxHp,
         maxHp: pStats.maxHp,
@@ -168,7 +169,7 @@ export class GameEngine {
       reviveUsed: false,
       hqSupportCooldown: 0,
       armoryAdCooldown: 0,
-      camera: { x: stage.playerSpawn.x, y: stage.playerSpawn.y, zoom: 1.18, shake: 0 },
+      camera: { x: stage.playerSpawn.x, y: stage.playerSpawn.y, zoom: 1.02, shake: 0 },
     };
 
     this.paused = false;
@@ -409,7 +410,7 @@ export class GameEngine {
     return { ok: true, msg: `成功购入并装备【${def.name}】！` };
   }
 
-  public evolveActiveWeaponInShop(cost = 1100): { ok: boolean; msg: string } {
+  public evolveActiveWeaponInShop(cost = 1250): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
     const wep = s.player.weapons[s.player.activeSlot];
@@ -513,21 +514,41 @@ export class GameEngine {
     }
 
     const queue: ZombieKind[] = [];
-    const totalCount = Math.round(8 + wave * 4.4 + (s.stage.index - 1) * 3);
+    const totalCount = Math.round(
+      10 + wave * 6.2 + Math.pow(Math.max(0, wave - 3), 1.45) * 2.8 + (s.stage.index - 1) * 6
+    );
+    const spitterChance = wave >= 4 ? Math.min(0.27, 0.14 + (wave - 4) * 0.022) : 0;
+    const runnerChance = wave >= 2 ? Math.min(0.66, 0.34 + (wave - 2) * 0.04) : 0.12;
+
     for (let i = 0; i < totalCount; i++) {
       const r = Math.random();
-      if (wave >= 4 && r < 0.18) queue.push('spitter');
-      else if (wave >= 2 && r < 0.46) queue.push('runner');
+      if (r < spitterChance) queue.push('spitter');
+      else if (r < runnerChance) queue.push('runner');
       else queue.push('walker');
     }
 
     if (wave % 3 === 0) {
-      queue.splice(Math.floor(queue.length / 2), 0, 'thief');
+      queue.splice(Math.floor(queue.length * 0.45), 0, 'thief');
     }
-    if (wave % 10 === 5) {
-      queue.push('miniboss');
-    } else if (wave % 10 === 0) {
-      queue.push('miniboss', 'boss');
+
+    // 中后期（第 5 波起）混编重装暴君精英，层层施压不再割草！
+    let miniBossCount = 0;
+    if (wave === 5 || wave === 6) miniBossCount = 1;
+    else if (wave === 7 || wave === 8) miniBossCount = 2;
+    else if (wave === 9) miniBossCount = 3;
+    else if (wave === 10) miniBossCount = 2;
+    else if (wave > 10) miniBossCount = 2 + Math.floor((wave - 9) / 2);
+
+    for (let m = 0; m < miniBossCount; m++) {
+      const insertIdx = Math.min(
+        queue.length,
+        Math.floor(((m + 1) / (miniBossCount + 1)) * queue.length)
+      );
+      queue.splice(insertIdx, 0, 'miniboss');
+    }
+
+    if (wave % 10 === 0 || (wave > 10 && wave % 5 === 0)) {
+      queue.splice(Math.floor(queue.length * 0.72), 0, 'boss');
     }
 
     if (wave >= 2 && (wave - 2) % 3 === 0 && s.chests.length < 2) {
@@ -667,8 +688,8 @@ export class GameEngine {
     if (!this.state || this.paused || this.modalPaused || this.state.waveState === 'ended') return;
     const s = this.state;
 
-    // 舒适的近景街机视野缩放（兼顾大角色细节与开阔清爽的房间呼吸感）
-    s.camera.zoom = Math.max(1.06, Math.min(1.24, viewW / 1220));
+    // 宽敞室内视野缩放（兼顾灵巧小特工、压迫感大僵尸与开阔拉扯空间）
+    s.camera.zoom = Math.max(0.95, Math.min(1.12, viewW / 1380));
 
     if (s.bannerTimer > 0) s.bannerTimer -= dt;
     if (s.hqSupportCooldown > 0) s.hqSupportCooldown -= dt;
@@ -718,16 +739,23 @@ export class GameEngine {
       if (this.spawnQueue.length > 0) {
         this.spawnTimer -= dt;
         if (this.spawnTimer <= 0) {
-          const kind = this.spawnQueue.shift()!;
-          this.spawnZombie(kind);
-          const baseInterval = Math.max(0.28, 1.25 - s.wave * 0.065);
-          this.spawnTimer = baseInterval * (0.7 + Math.random() * 0.5);
+          // 中后期多窗口并发涌入，营造四面楚歌的防守张力
+          const maxBurst = s.wave >= 10 ? 3 : s.wave >= 7 ? 3 : s.wave >= 4 ? 2 : 1;
+          const burst =
+            maxBurst > 1 ? 1 + Math.floor(Math.random() * maxBurst) : 1;
+          for (let b = 0; b < burst && this.spawnQueue.length > 0; b++) {
+            const kind = this.spawnQueue.shift()!;
+            this.spawnZombie(kind);
+            if (kind === 'boss' || kind === 'miniboss') break;
+          }
+          const baseInterval = Math.max(0.24, 1.12 - s.wave * 0.068);
+          this.spawnTimer = baseInterval * (0.72 + Math.random() * 0.45);
         }
       } else if (s.zombies.length === 0) {
         if (s.electricFortifyWaves > 0) s.electricFortifyWaves -= 1;
 
         if (s.relicIds.includes('piggy_bank') && s.cash > 0) {
-          const interest = Math.round(s.cash * 0.2);
+          const interest = Math.min(450, Math.round(s.cash * 0.16));
           s.cash += interest;
           this.spawnFloatingText(s.player.x, s.player.y - 42, `🐷 存钱罐利息 +$${interest}!`, '#fde047', 1.3);
           SoundFX.coin();
@@ -735,6 +763,7 @@ export class GameEngine {
 
         if (s.mode === 'standard' && s.wave >= s.maxWaves) {
           s.waveState = 'extraction';
+          this.extractionSpawnTimer = 1.2;
           const yard = s.rooms.find((r) => r.id === 'courtyard');
           if (yard && !yard.unlocked) {
             // 紧急全图破拆连通停机坪
@@ -746,7 +775,7 @@ export class GameEngine {
           }
           SoundFX.fanfare();
           PlatformSDK.happyTime();
-          this.showBanner('🚁 救援直升机已降落停机坪！快顺着小地图前往 H 光圈撤离！', 6);
+          this.showBanner('🚁 救援直升机已降落停机坪！边打边撤，前往 H 光圈坚守登机！', 6);
         } else {
           s.waveState = 'intermission';
           s.intermissionTimer = 5.0;
@@ -760,9 +789,16 @@ export class GameEngine {
         this.prepareWave(s.wave + 1);
       }
     } else if (s.waveState === 'extraction') {
+      // 撤离突围阶段持续刷出追击尸潮，拒绝白给通关！
+      this.extractionSpawnTimer -= dt;
+      if (this.extractionSpawnTimer <= 0 && s.zombies.length < 14) {
+        this.extractionSpawnTimer = 1.35;
+        this.spawnZombie(Math.random() < 0.6 ? 'runner' : 'walker');
+      }
+
       const dist = Math.hypot(s.player.x - s.stage.helipadPos.x, s.player.y - s.stage.helipadPos.y);
-      if (dist <= 88) {
-        s.extractionProgress = Math.min(1, s.extractionProgress + dt / 2.2);
+      if (dist <= 86) {
+        s.extractionProgress = Math.min(1, s.extractionProgress + dt / 2.8);
         if (s.extractionProgress >= 1) {
           s.waveState = 'ended';
           PlatformSDK.gameplayStop();
@@ -771,7 +807,7 @@ export class GameEngine {
           this.callbacks.onRunFinished(true, s);
         }
       } else {
-        s.extractionProgress = Math.max(0, s.extractionProgress - dt * 0.5);
+        s.extractionProgress = Math.max(0, s.extractionProgress - dt * 0.55);
       }
     }
   }
@@ -788,6 +824,7 @@ export class GameEngine {
       const unlocked = s.rooms.filter((r) => r.unlocked);
       const rm = unlocked[Math.floor(Math.random() * unlocked.length)];
       const rc = rm.rects[0];
+      const thiefHp = Math.round((280 + s.wave * 95 + Math.pow(Math.max(0, s.wave - 3), 1.6) * 65) * (1 + (s.stage.index - 1) * 0.3));
       s.zombies.push({
         id: this.nextEntityId++,
         kind: 'thief',
@@ -795,12 +832,12 @@ export class GameEngine {
         y: rc.y + rc.h / 2,
         vx: 0,
         vy: 0,
-        radius: 23,
-        hp: 250 + s.wave * 55,
-        maxHp: 250 + s.wave * 55,
-        speed: 192,
+        radius: 25,
+        hp: thiefHp,
+        maxHp: thiefHp,
+        speed: 205,
         damage: 0,
-        cashReward: 290,
+        cashReward: 260,
         xpReward: 48,
         color: '#facc15',
         targetWindowId: null,
@@ -811,7 +848,7 @@ export class GameEngine {
         stunTimer: 0,
         attackCd: 0,
         rangedCd: 0,
-        fleeTimer: 16,
+        fleeTimer: 15,
         wobblePhase: Math.random() * 6,
         facingAngle: 0,
         attackAnim: 0,
@@ -820,45 +857,51 @@ export class GameEngine {
       return;
     }
 
-    const hpScale = (1 + (s.wave - 1) * 0.22) * (1 + (s.stage.index - 1) * 0.22);
-    let hp = 60 * hpScale;
-    let speed = 98 + Math.min(55, s.wave * 4);
-    let radius = 21;
-    let damage = 14;
-    let cash = 24;
-    let xp = 12;
+    // 中后期指数级血量与移速膨胀曲线，匹配玩家重火力与超武成长！
+    const stageMult = 1 + (s.stage.index - 1) * 0.34;
+    const hpScale =
+      (1 + (s.wave - 1) * 0.35 + Math.pow(Math.max(0, s.wave - 3), 1.72) * 0.32) * stageMult;
+    const dmgScale = 1 + Math.max(0, s.wave - 2) * 0.08 + (s.stage.index - 1) * 0.14;
+    const cashTaper = 1 / (1 + Math.max(0, s.wave - 5) * 0.08);
+
+    let hp = 62 * hpScale;
+    let speed = 102 + Math.min(78, s.wave * 6.5);
+    let radius = 24;
+    let damage = Math.round(15 * dmgScale);
+    let cash = Math.max(14, Math.round(22 * cashTaper));
+    let xp = 11;
     let color = '#4ade80';
 
     if (kind === 'runner') {
-      hp = 42 * hpScale;
-      speed = 166 + Math.min(60, s.wave * 4);
-      radius = 19;
-      damage = 12;
-      cash = 28;
-      xp = 14;
+      hp = 45 * hpScale;
+      speed = 174 + Math.min(86, s.wave * 7);
+      radius = 21;
+      damage = Math.round(13 * dmgScale);
+      cash = Math.max(16, Math.round(26 * cashTaper));
+      xp = 13;
       color = '#fb7185';
     } else if (kind === 'spitter') {
-      hp = 75 * hpScale;
-      speed = 92;
-      radius = 22;
-      damage = 14;
-      cash = 36;
-      xp = 18;
+      hp = 88 * hpScale;
+      speed = 98 + Math.min(48, s.wave * 4);
+      radius = 27;
+      damage = Math.round(16 * dmgScale);
+      cash = Math.max(22, Math.round(34 * cashTaper));
+      xp = 17;
       color = '#a3e635';
     } else if (kind === 'miniboss') {
-      hp = 660 * hpScale;
-      speed = 86;
-      radius = 33;
-      damage = 26;
-      cash = 240;
-      xp = 70;
+      hp = 780 * hpScale;
+      speed = 96 + Math.min(52, s.wave * 4.5);
+      radius = 38;
+      damage = Math.round(28 * dmgScale);
+      cash = 220;
+      xp = 68;
       color = '#a855f7';
     } else if (kind === 'boss') {
-      hp = 1650 * hpScale;
-      speed = 82;
-      radius = 45;
-      damage = 35;
-      cash = 550;
+      hp = 2100 * hpScale;
+      speed = 92 + Math.min(48, s.wave * 4);
+      radius = 52;
+      damage = Math.round(38 * dmgScale);
+      cash = 520;
       xp = 150;
       color = '#ef4444';
     }
@@ -928,8 +971,8 @@ export class GameEngine {
     }
 
     const mv = this.input.getMoveVector();
-    let speed = pStats.moveSpeed * s.modifiers.moveSpeedMult * def.moveSpeedMult;
-    if (s.feverTimer > 0 || s.powerUpTimers.overdrive > 0) speed *= 1.28;
+    let speed = pStats.moveSpeed * 1.06 * s.modifiers.moveSpeedMult * def.moveSpeedMult;
+    if (s.feverTimer > 0 || s.powerUpTimers.overdrive > 0) speed *= 1.26;
 
     const oldX = p.x;
     const oldY = p.y;
@@ -1013,6 +1056,30 @@ export class GameEngine {
     return a + diff * t;
   }
 
+  private hasBulletLineOfSight(x1: number, y1: number, x2: number, y2: number): boolean {
+    const dist = Math.hypot(x2 - x1, y2 - y1);
+    const steps = Math.max(3, Math.ceil(dist / 24));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const mx = x1 + (x2 - x1) * t;
+      const my = y1 + (y2 - y1) * t;
+      if (this.findBulletBlocker(mx, my, 4)) return false;
+    }
+    return true;
+  }
+
+  private isZombieTargetableForAutoAim(z: ZombieEntity): boolean {
+    if (z.insideBuilding) return true;
+    if (!z.targetWindowId) return false;
+    const win = this.state!.windows.find((w) => w.id === z.targetWindowId);
+    if (!win) return false;
+    // 木板尚未被拆光时，自动射击与哨戒炮不会隔着封窗提前把室外破门僵尸打死！
+    if (win.planks > 0) return false;
+    const wcx = win.x + win.w / 2;
+    const wcy = win.y + win.h / 2;
+    return Math.hypot(z.x - wcx, z.y - wcy) <= 48;
+  }
+
   private findNearestTarget(x: number, y: number, maxRange: number): ZombieEntity | null {
     const s = this.state!;
     let best: ZombieEntity | null = null;
@@ -1020,7 +1087,9 @@ export class GameEngine {
     for (const z of s.zombies) {
       const d = Math.hypot(z.x - x, z.y - y);
       if (d > maxRange) continue;
-      const score = z.kind === 'thief' ? d * 0.6 : z.insideBuilding ? d * 0.8 : d * 1.15;
+      if (!this.isZombieTargetableForAutoAim(z)) continue;
+      if (!this.hasBulletLineOfSight(x, y, z.x, z.y)) continue;
+      const score = z.kind === 'thief' ? d * 0.55 : z.insideBuilding ? d * 0.78 : d * 1.15;
       if (score < bestScore) {
         bestScore = score;
         best = z;
@@ -1050,7 +1119,7 @@ export class GameEngine {
     }
     if (p.fireCooldown > 0) return;
 
-    const rateMult = (overdrive ? 1.65 : 1) * (s.feverTimer > 0 ? 1.3 : 1) * (wep.evolved ? 1.25 : 1);
+    const rateMult = (overdrive ? 1.6 : 1) * (s.feverTimer > 0 ? 1.26 : 1) * (wep.evolved ? 1.16 : 1);
     p.fireCooldown = 1 / (def.fireRate * rateMult);
 
     if (!overdrive) {
@@ -1060,12 +1129,14 @@ export class GameEngine {
       }
     }
 
-    const totalPellets = def.pellets + s.modifiers.extraPellets;
+    const extraFloor = Math.floor(s.modifiers.extraPellets);
+    const extraFrac = s.modifiers.extraPellets - extraFloor;
+    const totalPellets = def.pellets + extraFloor + (Math.random() < extraFrac ? 1 : 0);
     const isCrit = Math.random() < s.modifiers.critChance;
-    const baseDmg = def.damage * s.modifiers.damageMult * (wep.evolved ? 1.85 : 1) * (isCrit ? 2 : 1);
+    const baseDmg = def.damage * s.modifiers.damageMult * (wep.evolved ? 1.58 : 1) * (isCrit ? 2 : 1);
 
-    const muzzleX = p.x + Math.cos(p.angle) * (p.radius + 18);
-    const muzzleY = p.y + Math.sin(p.angle) * (p.radius + 18);
+    const muzzleX = p.x + Math.cos(p.angle) * (p.radius + 14);
+    const muzzleY = p.y + Math.sin(p.angle) * (p.radius + 14);
 
     for (let i = 0; i < totalPellets; i++) {
       const offset =
@@ -1589,9 +1660,15 @@ export class GameEngine {
           }
 
           const ang = Math.atan2(b.vy, b.vx);
+          const plankCover =
+            !z.insideBuilding &&
+            z.targetWindowId &&
+            (s.windows.find((w) => w.id === z.targetWindowId)?.planks ?? 0) > 0
+              ? 0.6
+              : 1;
           this.damageZombie(
             z,
-            b.damage,
+            b.damage * plankCover,
             Math.cos(ang) * b.knockback,
             Math.sin(ang) * b.knockback,
             b.isCrit,
@@ -1852,7 +1929,9 @@ export class GameEngine {
         continue;
       }
 
-      const spd = z.speed * freezeMult * (z.slowTimer > 0 ? 0.55 : 1);
+      const bossEnraged = z.kind === 'boss' && z.hp < z.maxHp * 0.55;
+      const chargeBoost = z.kind === 'miniboss' && z.fleeTimer > 0 ? 1.85 : 1;
+      const spd = z.speed * freezeMult * (z.slowTimer > 0 ? 0.55 : 1) * (bossEnraged ? 1.28 : 1) * chargeBoost;
 
       if (!z.insideBuilding && z.targetWindowId) {
         const win = s.windows.find((w) => w.id === z.targetWindowId)!;
@@ -1863,7 +1942,7 @@ export class GameEngine {
         const dist = Math.hypot(dx, dy) || 1;
         z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 10));
 
-        if (dist > 26) {
+        if (dist > 28) {
           z.vx = (dx / dist) * spd;
           z.vy = (dy / dist) * spd;
           z.x += z.vx * dt;
@@ -1872,16 +1951,51 @@ export class GameEngine {
           z.vx = dx * 0.2;
           z.vy = dy * 0.2;
           if (z.attackCd <= 0) {
-            z.attackCd = z.kind === 'boss' || z.kind === 'miniboss' ? 0.65 : 1.15;
+            const baseTearCd =
+              z.kind === 'boss' || z.kind === 'miniboss'
+                ? 0.48
+                : z.kind === 'runner'
+                  ? Math.max(0.45, 0.82 - s.wave * 0.03)
+                  : Math.max(0.5, 1.06 - s.wave * 0.04);
+            z.attackCd = baseTearCd;
             z.attackAnim = 1.0;
+
+            const prevPlanks = win.planks;
             win.planks = Math.max(0, win.planks - (z.kind === 'boss' ? 2 : 1));
+            this.spawnHitSparks(wcx, wcy, '#fbbf24', 4);
+
+            // 高压电击钢网：仅提供非致命麻痹减速与拆窗迟滞，绝不让僵尸撞窗暴毙！
             if (s.electricFortifyWaves > 0) {
-              this.damageZombie(z, 55, 0, 0, false, false, true);
-              if (!s.zombies.includes(z)) continue;
+              z.attackCd *= 1.85;
+              z.stunTimer = 0.42;
+              z.slowTimer = 2.8;
+              z.hitFlash = 0.1;
+              if (z.hp > z.maxHp * 0.45) {
+                z.hp = Math.max(z.maxHp * 0.45, z.hp - z.maxHp * 0.08);
+              }
+              s.lightnings.push({
+                points: [
+                  { x: wcx, y: wcy },
+                  { x: z.x, y: z.y },
+                ],
+                color: '#38bdf8',
+                life: 0.18,
+              });
             }
-            if (s.relicIds.includes('explosive_planks')) {
-              this.explodeAt(wcx, wcy, 100, 75 * s.modifiers.damageMult);
-              if (!s.zombies.includes(z)) continue;
+
+            // 震荡铆钉板：仅在最后一块木板被彻底拆破时触发非致命气浪击退与眩晕！
+            if (prevPlanks > 0 && win.planks === 0 && s.relicIds.includes('explosive_planks')) {
+              this.spawnHitSparks(wcx, wcy, '#38bdf8', 14);
+              this.spawnFloatingText(wcx, wcy - 18, '🛡️ 震荡弹开!', '#38bdf8', 1.2);
+              for (const oz of s.zombies) {
+                if (!oz.insideBuilding && Math.hypot(oz.x - wcx, oz.y - wcy) <= 130) {
+                  const pushAng = Math.atan2(oz.y - wcy, oz.x - wcx);
+                  oz.x += Math.cos(pushAng) * 78;
+                  oz.y += Math.sin(pushAng) * 78;
+                  oz.stunTimer = Math.max(oz.stunTimer, 1.5);
+                  oz.slowTimer = Math.max(oz.slowTimer, 3.0);
+                }
+              }
             }
           }
         } else {
@@ -1894,6 +2008,48 @@ export class GameEngine {
           z.targetWindowId = null;
         }
       } else {
+        if (z.kind === 'miniboss') {
+          if (z.fleeTimer > 0) z.fleeTimer = Math.max(0, z.fleeTimer - dt);
+          z.rangedCd -= dt;
+          const pDistCharge = Math.hypot(p.x - z.x, p.y - z.y);
+          if (z.rangedCd <= 0 && pDistCharge < 390 && pDistCharge > 75) {
+            z.rangedCd = 4.2;
+            z.fleeTimer = 0.65;
+            z.attackAnim = 1.0;
+            this.spawnFloatingText(z.x, z.y - z.radius - 16, '💢 暴君冲锋!', '#c084fc', 1.15);
+          }
+        } else if (z.kind === 'boss') {
+          // 尸王半血狂暴召唤疾行猎犬护卫！
+          if (bossEnraged && z.fleeTimer === 0) {
+            z.fleeTimer = 1;
+            SoundFX.alarm();
+            s.camera.shake = Math.max(s.camera.shake, 0.9);
+            this.showBanner('👑 尸王进入狂暴二阶段！移速飙升并召唤嗜血猎犬！', 3.2);
+            for (let k = 0; k < 3; k++) {
+              this.spawnZombie('runner');
+            }
+          }
+          z.rangedCd -= dt;
+          const pDistBoss = Math.hypot(p.x - z.x, p.y - z.y);
+          if (z.rangedCd <= 0 && pDistBoss < 560) {
+            z.rangedCd = bossEnraged ? 2.3 : 3.1;
+            z.attackAnim = 1.0;
+            const baseAng = Math.atan2(p.y - z.y, p.x - z.x);
+            for (let k = -2; k <= 2; k++) {
+              const fanAng = baseAng + k * 0.22;
+              s.spits.push({
+                x: z.x + Math.cos(fanAng) * (z.radius * 0.6),
+                y: z.y + Math.sin(fanAng) * (z.radius * 0.6),
+                vx: Math.cos(fanAng) * 350,
+                vy: Math.sin(fanAng) * 350,
+                radius: 9.5,
+                damage: Math.round(z.damage * 0.55),
+                life: 2.1,
+              });
+            }
+          }
+        }
+
         const goal = this.getFlowVelocityTarget(z.x, z.y);
         const dx = goal.x - z.x;
         const dy = goal.y - z.y;
@@ -1910,8 +2066,8 @@ export class GameEngine {
           const sd = Math.hypot(sx, sy);
           const minD = z.radius + oz.radius;
           if (sd > 0 && sd < minD) {
-            z.vx += (sx / sd) * 72;
-            z.vy += (sy / sd) * 72;
+            z.vx += (sx / sd) * 78;
+            z.vy += (sy / sd) * 78;
           }
         }
 
@@ -1922,24 +2078,24 @@ export class GameEngine {
         if (z.kind === 'spitter') {
           z.rangedCd -= dt;
           const pDist = Math.hypot(p.x - z.x, p.y - z.y);
-          if (z.rangedCd <= 0 && pDist < 360) {
-            z.rangedCd = 2.6;
+          if (z.rangedCd <= 0 && pDist < 420 && this.hasBulletLineOfSight(z.x, z.y, p.x, p.y)) {
+            z.rangedCd = Math.max(1.85, 2.65 - s.wave * 0.05);
             const ang = Math.atan2(p.y - z.y, p.x - z.x);
             s.spits.push({
               x: z.x,
               y: z.y,
-              vx: Math.cos(ang) * 320,
-              vy: Math.sin(ang) * 320,
-              radius: 7.5,
-              damage: 14,
-              life: 1.8,
+              vx: Math.cos(ang) * 355,
+              vy: Math.sin(ang) * 355,
+              radius: 8,
+              damage: z.damage,
+              life: 1.9,
             });
           }
         }
 
         const pDist = Math.hypot(p.x - z.x, p.y - z.y);
         if (pDist <= p.radius + z.radius + 4 && z.attackCd <= 0) {
-          z.attackCd = 0.85;
+          z.attackCd = bossEnraged ? 0.65 : 0.82;
           z.attackAnim = 1.0;
           this.damagePlayer(z.damage);
         }
@@ -2030,7 +2186,7 @@ export class GameEngine {
       if (s.battleXp >= s.battleXpNext) {
         s.battleXp -= s.battleXpNext;
         s.battleLevel += 1;
-        s.battleXpNext = Math.round(s.battleXpNext * 1.32 + 15);
+        s.battleXpNext = Math.round(s.battleXpNext * 1.38 + 22);
         s.player.hp = Math.min(s.player.maxHp, s.player.hp + Math.round(s.player.maxHp * 0.15));
         this.triggerBattleLevelUp();
       }

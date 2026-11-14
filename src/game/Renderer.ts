@@ -29,11 +29,13 @@ const PROP_SPRITE_MAP: Record<PropKind, SpriteKey> = {
   fountain: 'prop_fountain',
 };
 
-const MAP_PAD = 360;
+const MAP_PAD = 420;
 
 export class CartoonRenderer {
-  // 静态世界地图离屏烘焙缓存（消除每帧全图 Pattern / Clip / 墙体重复绘制，帧率提升 10 倍！）
+  // 静态世界地图离屏烘焙缓存（围绕建筑有效边界紧凑烘焙，省显存且帧率提升 10 倍！）
   private mapCanvas: HTMLCanvasElement | null = null;
+  private mapOriginX = 0;
+  private mapOriginY = 0;
   private cachedStageId = '';
   private cachedMapRevision = -1;
 
@@ -137,8 +139,11 @@ export class CartoonRenderer {
     this.cachedStageId = state.stage.id;
     this.cachedMapRevision = state.mapRevision;
 
-    const totalW = state.stage.worldWidth + MAP_PAD * 2;
-    const totalH = state.stage.worldHeight + MAP_PAD * 2;
+    const bb = state.stage.buildingBounds;
+    this.mapOriginX = bb.x - MAP_PAD;
+    this.mapOriginY = bb.y - MAP_PAD;
+    const totalW = bb.w + MAP_PAD * 2;
+    const totalH = bb.h + MAP_PAD * 2;
 
     if (!this.mapCanvas) {
       this.mapCanvas = document.createElement('canvas');
@@ -151,12 +156,12 @@ export class CartoonRenderer {
     const mctx = this.mapCanvas.getContext('2d')!;
     mctx.save();
     mctx.clearRect(0, 0, totalW, totalH);
-    mctx.translate(MAP_PAD, MAP_PAD);
+    mctx.translate(-this.mapOriginX, -this.mapOriginY);
 
     // A. 户外草坪背景
     const grassPat = Assets.getPattern(mctx, 'tile_grass');
     mctx.fillStyle = grassPat || '#4ade80';
-    mctx.fillRect(-MAP_PAD, -MAP_PAD, totalW, totalH);
+    mctx.fillRect(this.mapOriginX, this.mapOriginY, totalW, totalH);
 
     // B. 建筑外侧石板路裙边
     mctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
@@ -270,15 +275,26 @@ export class CartoonRenderer {
 
   private blitStaticMapViewport(ctx: CanvasRenderingContext2D): void {
     if (!this.mapCanvas) return;
-    const sx = Math.max(0, Math.floor(this.vLeft + MAP_PAD - 8));
-    const sy = Math.max(0, Math.floor(this.vTop + MAP_PAD - 8));
-    const ex = Math.min(this.mapCanvas.width, Math.ceil(this.vRight + MAP_PAD + 8));
-    const ey = Math.min(this.mapCanvas.height, Math.ceil(this.vBottom + MAP_PAD + 8));
+    if (
+      this.vLeft < this.mapOriginX ||
+      this.vTop < this.mapOriginY ||
+      this.vRight > this.mapOriginX + this.mapCanvas.width ||
+      this.vBottom > this.mapOriginY + this.mapCanvas.height
+    ) {
+      const grassPat = Assets.getPattern(ctx, 'tile_grass');
+      ctx.fillStyle = grassPat || '#4ade80';
+      ctx.fillRect(this.vLeft - 8, this.vTop - 8, this.vRight - this.vLeft + 16, this.vBottom - this.vTop + 16);
+    }
+
+    const sx = Math.max(0, Math.floor(this.vLeft - this.mapOriginX - 8));
+    const sy = Math.max(0, Math.floor(this.vTop - this.mapOriginY - 8));
+    const ex = Math.min(this.mapCanvas.width, Math.ceil(this.vRight - this.mapOriginX + 8));
+    const ey = Math.min(this.mapCanvas.height, Math.ceil(this.vBottom - this.mapOriginY + 8));
     const sw = ex - sx;
     const sh = ey - sy;
     if (sw <= 0 || sh <= 0) return;
 
-    ctx.drawImage(this.mapCanvas, sx, sy, sw, sh, sx - MAP_PAD, sy - MAP_PAD, sw, sh);
+    ctx.drawImage(this.mapCanvas, sx, sy, sw, sh, sx + this.mapOriginX, sy + this.mapOriginY, sw, sh);
   }
 
   // ==================== 地面与房间动态交互物 ====================
@@ -649,13 +665,14 @@ export class CartoonRenderer {
   private drawZombies(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const frozen = state.powerUpTimers.freeze > 0;
     for (const z of state.zombies) {
-      if (!this.inView(z.x, z.y, 70)) continue;
+      if (!this.inView(z.x, z.y, 110)) continue;
       const spKey = ZOMBIE_SPRITE_MAP[z.kind];
       const sway = Math.sin(z.wobblePhase) * 0.12;
       const squash = 1 + Math.sin(z.wobblePhase * 2) * 0.05;
-      const lunge = z.attackAnim * 10;
+      const lunge = z.attackAnim * 11;
       const angle = z.facingAngle + sway;
-      const drawSize = z.radius * 3.15;
+      // 放大僵尸视觉体格（75px ~ 185px），压迫感十足且显著大于灵巧小特工主角！
+      const drawSize = z.radius * 3.55;
 
       ctx.save();
       ctx.translate(z.x, z.y);
@@ -729,35 +746,37 @@ export class CartoonRenderer {
 
   private drawSpits(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     for (const s of state.spits) {
-      if (!this.inView(s.x, s.y, 25)) continue;
+      if (!this.inView(s.x, s.y, 28)) continue;
+      const isBossOrb = s.radius >= 9;
       ctx.save();
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.radius + 3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(163, 230, 53, 0.35)';
+      ctx.arc(s.x, s.y, s.radius + 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = isBossOrb ? 'rgba(244, 63, 94, 0.42)' : 'rgba(163, 230, 53, 0.35)';
       ctx.fill();
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
-      ctx.fillStyle = '#a3e635';
+      ctx.fillStyle = isBossOrb ? '#fb7185' : '#a3e635';
       ctx.fill();
       ctx.lineWidth = 2;
-      ctx.strokeStyle = '#1a2e05';
+      ctx.strokeStyle = isBossOrb ? '#4c0519' : '#1a2e05';
       ctx.stroke();
       ctx.restore();
     }
   }
 
-  // ==================== 全身骨骼分体特工主角（彻底告别死板与倒立！） ====================
+  // ==================== 全身骨骼分体特工主角（精悍灵巧，明显小于各型僵尸！） ====================
 
   private drawPlayer(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const p = state.player;
     const activeWep = p.weapons[p.activeSlot];
     const isFever = state.feverTimer > 0;
     const now = performance.now();
+    const rigScale = 0.62; // 精悍特工体型缩放，与高大僵尸形成鲜明反差！
 
     // 呼吸律动 + 移动步伐肩部扭转 + 射击后坐力回弹
     const idleBreath = 1 + Math.sin(now * 0.0042) * 0.024;
     const walkTwist = p.isMoving ? Math.sin(p.walkPhase) * 0.095 : 0;
-    const walkBob = p.isMoving ? Math.abs(Math.cos(p.walkPhase)) * 1.8 : 0;
+    const walkBob = p.isMoving ? Math.abs(Math.cos(p.walkPhase)) * 1.4 : 0;
     const torsoKick = p.recoilOffset * 0.42;
 
     ctx.save();
@@ -765,20 +784,24 @@ export class CartoonRenderer {
 
     // 1. 柔和角色脚底阴影
     ctx.beginPath();
-    ctx.ellipse(0, p.radius * 0.62, p.radius * 1.02, p.radius * 0.54, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, p.radius * 0.62, p.radius * 1.05, p.radius * 0.56, 0, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(15, 23, 42, 0.34)';
     ctx.fill();
 
     // 2. 无敌 / Fever 狂热光环
     if (isFever || state.powerUpTimers.overdrive > 0 || p.invulnTimer > 0) {
       ctx.beginPath();
-      ctx.arc(0, 0, p.radius + 14, 0, Math.PI * 2);
+      ctx.arc(0, 0, p.radius + 10, 0, Math.PI * 2);
       ctx.fillStyle = p.invulnTimer > 0 ? 'rgba(56, 189, 248, 0.2)' : 'rgba(250, 204, 21, 0.24)';
       ctx.fill();
       ctx.strokeStyle = p.invulnTimer > 0 ? '#38bdf8' : '#facc15';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.5;
       ctx.stroke();
     }
+
+    // 缩放角色骨骼本体（双靴 + 双臂 + 9把俯视枪械 + 特工头盔躯干）
+    ctx.save();
+    ctx.scale(rigScale, rigScale);
 
     // 3. 下半身独立骨骼：朝向移动方向（legAngle）交替迈步的战术军靴！
     ctx.save();
@@ -796,10 +819,10 @@ export class CartoonRenderer {
     // 战术红点/激光瞄准虚线
     ctx.beginPath();
     ctx.moveTo(32, 0);
-    ctx.lineTo(195, 0);
+    ctx.lineTo(250, 0);
     ctx.strokeStyle = activeWep.evolved ? 'rgba(244, 63, 94, 0.42)' : 'rgba(255, 255, 255, 0.22)';
-    ctx.lineWidth = 1.8;
-    ctx.setLineDash([6, 6]);
+    ctx.lineWidth = 2.4;
+    ctx.setLineDash([8, 8]);
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -813,28 +836,29 @@ export class CartoonRenderer {
     ctx.scale(idleBreath, 2 - idleBreath);
     const torsoImg = Assets.getSprite('player_torso');
     if (torsoImg) {
-      const torsoSz = 64;
+      const torsoSz = 62;
       ctx.drawImage(torsoImg, -torsoSz / 2, -torsoSz / 2, torsoSz, torsoSz);
     }
     ctx.restore();
 
     ctx.restore();
+    ctx.restore(); // 结束 rigScale
 
-    // 5. 换弹进度条与修窗环形读条
+    // 5. 换弹进度条与修窗环形读条（保持清晰世界尺寸，不随人物缩小而糊掉）
     if (p.reloadTimer > 0 && p.reloadDuration > 0) {
       const pct = 1 - p.reloadTimer / p.reloadDuration;
-      const bw = 46;
+      const bw = 40;
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(-bw / 2 - 1.5, -p.radius - 22, bw + 3, 8);
+      ctx.fillRect(-bw / 2 - 1.5, -p.radius - 19, bw + 3, 7);
       ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(-bw / 2, -p.radius - 20.5, bw * pct, 5);
+      ctx.fillRect(-bw / 2, -p.radius - 17.5, bw * pct, 4.2);
     }
 
     if (p.repairProgress > 0) {
       ctx.beginPath();
-      ctx.arc(0, 0, p.radius + 13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.repairProgress);
+      ctx.arc(0, 0, p.radius + 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.repairProgress);
       ctx.strokeStyle = '#fbbf24';
-      ctx.lineWidth = 5;
+      ctx.lineWidth = 4.5;
       ctx.stroke();
     }
 

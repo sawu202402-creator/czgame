@@ -4,22 +4,22 @@ export const IN_RUN_PERKS: InRunPerkDef[] = [
   {
     id: 'hollow_point',
     name: '强装火药',
-    desc: '所有武器伤害提升 +22%',
+    desc: '所有武器伤害提升 +18%',
     icon: '💥',
     color: '#ef4444',
     apply: (m) => {
-      m.damageMult *= 1.22;
+      m.damageMult *= 1.18;
     },
   },
   {
     id: 'sleight_hand',
     name: '极速弹匣',
-    desc: '换弹时间缩短 25%，弹匣容量 +25%',
+    desc: '换弹时间缩短 22%，弹匣容量 +20%',
     icon: '⚡',
     color: '#3b82f6',
     apply: (m) => {
-      m.reloadMult *= 0.75;
-      m.magMult *= 1.25;
+      m.reloadMult *= 0.78;
+      m.magMult *= 1.2;
     },
   },
   {
@@ -35,21 +35,21 @@ export const IN_RUN_PERKS: InRunPerkDef[] = [
   {
     id: 'split_chamber',
     name: '分裂膛线',
-    desc: '每次开火额外多发射 +1 颗弹头',
+    desc: '每次开火有 35% 概率额外连射 1 颗弹头（可叠加）',
     icon: '✨',
     color: '#a855f7',
     apply: (m) => {
-      m.extraPellets += 1;
+      m.extraPellets += 0.35;
     },
   },
   {
     id: 'crit_hunter',
     name: '弱点狙击',
-    desc: '暴击率 +20%（暴击造成 200% 大字伤害）',
+    desc: '暴击率 +15%（暴击造成 200% 大字伤害）',
     icon: '🎲',
     color: '#ec4899',
     apply: (m) => {
-      m.critChance += 0.2;
+      m.critChance += 0.15;
     },
   },
   {
@@ -75,11 +75,11 @@ export const IN_RUN_PERKS: InRunPerkDef[] = [
   {
     id: 'bounty_badge',
     name: '赏金警徽',
-    desc: '击杀僵尸掉落的钞票增加 +30%',
+    desc: '击杀僵尸掉落的钞票增加 +22%',
     icon: '💰',
     color: '#eab308',
     apply: (m) => {
-      m.cashMult *= 1.3;
+      m.cashMult *= 1.22;
     },
   },
 ];
@@ -94,9 +94,9 @@ export const RELICS: RelicDef[] = [
   },
   {
     id: 'explosive_planks',
-    name: '爆裂木板',
-    desc: '僵尸每抓碎一块窗户木板，触发小范围火药爆炸炸伤尸群！',
-    icon: '🧨',
+    name: '震荡铆钉板',
+    desc: '窗户最后一块木板被拆碎瞬间，释放气浪震退并眩晕窗边尸群！',
+    icon: '🛡️',
     rarity: 'rare',
   },
   {

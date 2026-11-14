@@ -9,7 +9,7 @@ import {
   WindowConfig,
 } from '../types';
 
-const G = 40; // 40px 建筑网格单元
+const G = 56; // 56px 宽敞战术建筑网格（室内面积扩大近 2 倍，尽情走位拉扯！）
 const WALL_T = 28;
 const HALF_T = WALL_T / 2;
 
@@ -174,12 +174,12 @@ function buildArchitecturalStage(opts: {
   const builtWindows: WindowConfig[] = opts.windows.map((w) => {
     const off =
       w.outDir === 'N'
-        ? { dx: 0, dy: -90 }
+        ? { dx: 0, dy: -118 }
         : w.outDir === 'S'
-          ? { dx: 0, dy: 90 }
+          ? { dx: 0, dy: 118 }
           : w.outDir === 'W'
-            ? { dx: -90, dy: 0 }
-            : { dx: 90, dy: 0 };
+            ? { dx: -118, dy: 0 }
+            : { dx: 118, dy: 0 };
 
     if (w.orientation === 'horizontal') {
       for (let i = 0; i < w.span; i++) hOpenings.add(`${w.gx + i},${w.gy}`);
@@ -371,20 +371,20 @@ const stagePolice = buildArchitecturalStage({
     { id: 'p_w11', roomId: 'courtyard', orientation: 'horizontal', gx: 35, gy: 33, span: 3, outDir: 'S' },
   ],
   props: [
-    { id: 'pr_1', roomId: 'lobby', kind: 'desk', x: 19.5 * G, y: 17.8 * G, w: 82, h: 52, blocksBullets: false },
-    { id: 'pr_2', roomId: 'detective', kind: 'desk', x: 14 * G, y: 10 * G, w: 82, h: 52, rotation: 0.18, blocksBullets: false },
-    { id: 'pr_3', roomId: 'detective', kind: 'crates', x: 10.5 * G, y: 9.5 * G, w: 66, h: 66, blocksBullets: true },
-    { id: 'pr_4', roomId: 'cells', kind: 'crates', x: 42 * G, y: 13 * G, w: 66, h: 66, blocksBullets: true },
-    { id: 'pr_5', roomId: 'vault', kind: 'crates', x: 14.5 * G, y: 27 * G, w: 68, h: 68, blocksBullets: true },
-    { id: 'pr_6', roomId: 'courtyard', kind: 'swat_van', x: 33 * G, y: 28 * G, w: 148, h: 82, rotation: -0.18, blocksBullets: true },
+    { id: 'pr_1', roomId: 'lobby', kind: 'desk', x: 16.5 * G, y: 15.8 * G, w: 80, h: 50, blocksBullets: false },
+    { id: 'pr_2', roomId: 'detective', kind: 'desk', x: 14 * G, y: 8.2 * G, w: 80, h: 50, rotation: 0.18, blocksBullets: false },
+    { id: 'pr_3', roomId: 'detective', kind: 'crates', x: 10 * G, y: 8.5 * G, w: 66, h: 66, blocksBullets: true },
+    { id: 'pr_4', roomId: 'cells', kind: 'crates', x: 43.2 * G, y: 13.8 * G, w: 66, h: 66, blocksBullets: true },
+    { id: 'pr_5', roomId: 'vault', kind: 'crates', x: 15.2 * G, y: 28 * G, w: 68, h: 68, blocksBullets: true },
+    { id: 'pr_6', roomId: 'courtyard', kind: 'swat_van', x: 33 * G, y: 29.2 * G, w: 152, h: 84, rotation: -0.18, blocksBullets: true },
   ],
   stations: [
-    { id: 'st_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 25.5 * G, y: 16 * G, cost: 0, label: '军火终端 [B]' },
-    { id: 'st_air1', roomId: 'lobby', type: 'starter_airdrop', x: 16.2 * G, y: 20.6 * G, cost: 0, weaponId: 'plasma', label: '超武空投' },
-    { id: 'st_ammo1', roomId: 'detective', type: 'ammo_box', x: 19.5 * G, y: 9 * G, cost: 180, label: '弹药箱' },
-    { id: 'st_dog1', roomId: 'cells', type: 'mech_dog_cage', x: 38 * G, y: 10.5 * G, cost: 460, label: '解救警犬' },
-    { id: 'st_pap1', roomId: 'vault', type: 'pack_a_punch', x: 12.2 * G, y: 26 * G, cost: 1100, label: '超武改装台' },
-    { id: 'st_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 30.5 * G, y: 24 * G, cost: 0, label: '军火终端 [B]' },
+    { id: 'st_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 26.2 * G, y: 15.4 * G, cost: 0, label: '军火终端 [B]' },
+    { id: 'st_air1', roomId: 'lobby', type: 'starter_airdrop', x: 15.8 * G, y: 21.4 * G, cost: 0, weaponId: 'plasma', label: '超武空投' },
+    { id: 'st_ammo1', roomId: 'detective', type: 'ammo_box', x: 20.2 * G, y: 8 * G, cost: 180, label: '弹药箱' },
+    { id: 'st_dog1', roomId: 'cells', type: 'mech_dog_cage', x: 36.5 * G, y: 9.2 * G, cost: 460, label: '解救警犬' },
+    { id: 'st_pap1', roomId: 'vault', type: 'pack_a_punch', x: 11.5 * G, y: 25.2 * G, cost: 1250, label: '超武改装台' },
+    { id: 'st_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 30 * G, y: 23.2 * G, cost: 0, label: '军火终端 [B]' },
   ],
   barrels: [
     { x: 23 * G, y: 21 * G, roomId: 'lobby' },
@@ -486,7 +486,7 @@ const stageMall = buildArchitecturalStage({
     { id: 'ms_air', roomId: 'lobby', type: 'starter_airdrop', x: 22 * G, y: 22.5 * G, cost: 0, weaponId: 'launcher', label: '榴弹空投' },
     { id: 'ms_vend', roomId: 'diner', type: 'vending_machine', x: 14.5 * G, y: 20 * G, cost: 160, label: '幸运贩卖机' },
     { id: 'ms_dog', roomId: 'arcade', type: 'mech_dog_cage', x: 24 * G, y: 8.5 * G, cost: 460, label: '激活警犬' },
-    { id: 'ms_pap', roomId: 'arcade', type: 'pack_a_punch', x: 34 * G, y: 8.5 * G, cost: 1100, label: '超武改装舱' },
+    { id: 'ms_pap', roomId: 'arcade', type: 'pack_a_punch', x: 34 * G, y: 8.5 * G, cost: 1250, label: '超武改装舱' },
     { id: 'ms_ammo', roomId: 'cargo', type: 'ammo_box', x: 43.5 * G, y: 19.5 * G, cost: 180, label: '弹药补给' },
     { id: 'ms_laser', roomId: 'courtyard', type: 'laser_trap', x: 34.5 * G, y: 30 * G, cost: 260, label: '旋转激光塔' },
   ],
@@ -577,7 +577,7 @@ const stageLab = buildArchitecturalStage({
     { id: 'ls_air', roomId: 'lobby', type: 'starter_airdrop', x: 22.2 * G, y: 10.5 * G, cost: 0, weaponId: 'minigun', label: '加特林空投' },
     { id: 'ls_dog', roomId: 'west_wing', type: 'mech_dog_cage', x: 15 * G, y: 13.5 * G, cost: 460, label: '释放机械犬' },
     { id: 'ls_ammo', roomId: 'west_wing', type: 'ammo_box', x: 19 * G, y: 23.5 * G, cost: 180, label: '弹药补给柜' },
-    { id: 'ls_pap', roomId: 'east_wing', type: 'pack_a_punch', x: 41 * G, y: 22.5 * G, cost: 1100, label: '超武改造舱' },
+    { id: 'ls_pap', roomId: 'east_wing', type: 'pack_a_punch', x: 41 * G, y: 22.5 * G, cost: 1250, label: '超武改造舱' },
     { id: 'ls_laser', roomId: 'east_wing', type: 'laser_trap', x: 39 * G, y: 19.5 * G, cost: 240, label: '激光矩阵' },
     { id: 'ls_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 34.5 * G, y: 30.5 * G, cost: 0, label: '军火终端 [B]' },
   ],

@@ -351,7 +351,7 @@ export class UIManager {
       `;
     }).join('');
 
-    const canEvolve = !activeWep.evolved && s.cash >= 1100;
+    const canEvolve = !activeWep.evolved && s.cash >= 1250;
 
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop">
@@ -379,7 +379,7 @@ export class UIManager {
 
           <footer class="armory-tactical-bar">
             <button class="btn-cartoon ${canEvolve ? 'btn-purple' : 'btn-disabled'}" id="btn-shop-evolve" ${activeWep.evolved ? 'disabled' : ''}>
-              ${activeWep.evolved ? `✅ 已觉醒【${activeDef.superName}】` : `⚡ 觉醒【${activeDef.superName}】($1100)`}
+              ${activeWep.evolved ? `✅ 已觉醒【${activeDef.superName}】` : `⚡ 觉醒【${activeDef.superName}】($1250)`}
             </button>
             <button class="btn-cartoon btn-yellow" data-tac="grenades">💣 破片手雷x3 ($150) [当前:${s.player.grenades}]</button>
             <button class="btn-cartoon btn-blue" data-tac="all_ammo">📦 全枪满弹 ($180)</button>
@@ -413,7 +413,7 @@ export class UIManager {
     });
 
     (this.modalRoot.querySelector('#btn-shop-evolve') as HTMLButtonElement).onclick = () => {
-      const res = this.engine.evolveActiveWeaponInShop(1100);
+      const res = this.engine.evolveActiveWeaponInShop(1250);
       this.renderArmoryShop(res.msg);
     };
 
