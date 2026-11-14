@@ -48,12 +48,8 @@ async function bootstrap() {
     if (adPaused) input.resetStates();
   });
 
-  // CrazyGames 最佳实践：首次进入直接秒进第 1 关开打（Instant Play），无需繁琐点击开始！
-  if (SaveManager.get().totalRuns === 0) {
-    ui.startStageRun(STAGES[0], 'standard');
-  } else {
-    ui.showHomeHub();
-  }
+  // 当前开放全关卡自由选关预览，进入直接展示基地选关大厅
+  ui.showHomeHub();
 
   let lastTime = performance.now();
   let hudTick = 0;

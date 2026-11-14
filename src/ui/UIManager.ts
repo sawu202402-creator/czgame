@@ -61,23 +61,21 @@ export class UIManager {
       `;
     }).join('');
 
-    const stagesHtml = STAGES.map((st, idx) => {
-      const prevCleared = idx === 0 || save.clearedStages.includes(STAGES[idx - 1].id);
+    const stagesHtml = STAGES.map((st) => {
       const selfCleared = save.clearedStages.includes(st.id);
       const bestEndless = save.endlessBestWave[st.id] || 0;
 
       return `
-        <div class="stage-card ${prevCleared ? '' : 'stage-locked'}">
-          <div class="stage-badge">${selfCleared ? '✅ 已通关 10 波' : prevCleared ? '🔥 可出击' : '🔒 通关前一关解锁'}</div>
+        <div class="stage-card">
+          <div class="stage-badge">${selfCleared ? '✅ 已通关 10 波' : '🔓 全关卡已开放测试'}</div>
           <h3>${st.name}</h3>
           <p>${st.subtitle}</p>
           <div class="stage-actions">
-            <button class="btn-cartoon btn-green" data-stage="${st.id}" data-mode="standard" ${!prevCleared ? 'disabled' : ''}>
+            <button class="btn-cartoon btn-green" data-stage="${st.id}" data-mode="standard">
               🚁 10波撤离模式
             </button>
-            <button class="btn-cartoon ${selfCleared ? 'btn-purple' : 'btn-disabled'}"
-              data-stage="${st.id}" data-mode="endless" ${!selfCleared ? 'disabled' : ''}>
-              ${selfCleared ? `♾️ 无尽模式 (最高 ${bestEndless} 波)` : '🔒 通关10波解锁无尽'}
+            <button class="btn-cartoon btn-purple" data-stage="${st.id}" data-mode="endless">
+              ♾️ 无尽模式${bestEndless > 0 ? ` (最高 ${bestEndless} 波)` : ''}
             </button>
           </div>
         </div>
