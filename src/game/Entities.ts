@@ -78,8 +78,10 @@ export interface BulletEntity {
   color: string;
   isCrit: boolean;
   flame: boolean;
+  cryo: boolean;
   electric: boolean;
   laser: boolean;
+  sawblade: boolean;
   hitIds: Set<number>;
   life: number;
 }
@@ -242,6 +244,8 @@ export interface RunSnapshot {
     isMoving: boolean;
     recoilOffset: number;
     barrelSpin: number;
+    weaponSwapTimer: number;
+    akimboAlt: boolean;
     footDustCd: number;
     distanceAccum: number;
     vampCounter: number;

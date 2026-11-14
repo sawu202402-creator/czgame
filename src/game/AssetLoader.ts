@@ -21,13 +21,19 @@ export type SpriteKey =
   | 'prop_vending'
   | 'prop_laser_tower'
   | 'gun_pistol'
+  | 'gun_revolver'
   | 'gun_smg'
   | 'gun_shotgun'
   | 'gun_rifle'
+  | 'gun_autoshotgun'
   | 'gun_flamethrower'
+  | 'gun_crossbow'
   | 'gun_sniper'
+  | 'gun_cryogun'
   | 'gun_launcher'
+  | 'gun_sawlauncher'
   | 'gun_minigun'
+  | 'gun_tesla'
   | 'gun_plasma';
 
 export type TileKey =
@@ -61,13 +67,19 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   prop_vending: './assets/prop_vending.png',
   prop_laser_tower: './assets/prop_laser_tower.png',
   gun_pistol: './assets/gun_pistol.png',
+  gun_revolver: './assets/gun_revolver.png',
   gun_smg: './assets/gun_smg.png',
   gun_shotgun: './assets/gun_shotgun.png',
   gun_rifle: './assets/gun_rifle.png',
+  gun_autoshotgun: './assets/gun_autoshotgun.png',
   gun_flamethrower: './assets/gun_flamethrower.png',
+  gun_crossbow: './assets/gun_crossbow.png',
   gun_sniper: './assets/gun_sniper.png',
+  gun_cryogun: './assets/gun_cryogun.png',
   gun_launcher: './assets/gun_launcher.png',
+  gun_sawlauncher: './assets/gun_sawlauncher.png',
   gun_minigun: './assets/gun_minigun.png',
+  gun_tesla: './assets/gun_tesla.png',
   gun_plasma: './assets/gun_plasma.png',
 };
 

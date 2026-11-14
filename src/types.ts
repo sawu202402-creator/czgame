@@ -33,9 +33,13 @@ export interface WeaponDef {
   pierce: number;
   moveSpeedMult: number;
   flame?: boolean;
+  cryo?: boolean;
   electric?: boolean;
   laser?: boolean;
-  explosiveRadius?: number; // for grenade launcher!
+  sawblade?: boolean;
+  bounces?: number;
+  akimboOnEvolve?: boolean;
+  explosiveRadius?: number; // for grenade launcher / crossbow!
 }
 
 export interface WeaponInstance {

@@ -137,6 +137,8 @@ export class GameEngine {
         isMoving: false,
         recoilOffset: 0,
         barrelSpin: 0,
+        weaponSwapTimer: 0,
+        akimboAlt: false,
         footDustCd: 0,
         distanceAccum: 0,
         vampCounter: 0,
@@ -408,11 +410,15 @@ export class GameEngine {
       const w = s.player.weapons[ownedIdx];
       if (def.maxReserve < 0) {
         s.player.activeSlot = ownedIdx;
+        s.player.reloadTimer = 0;
+        s.player.weaponSwapTimer = 0.32;
         return { ok: true, msg: '已切换至该武器！' };
       }
       const maxRes = def.maxReserve * (w.evolved ? 2 : 1);
       if (w.reserve >= maxRes && w.mag >= this.getMaxMag(weaponId, w.evolved)) {
         s.player.activeSlot = ownedIdx;
+        s.player.reloadTimer = 0;
+        s.player.weaponSwapTimer = 0.32;
         return { ok: true, msg: '弹药已满，已装备上阵！' };
       }
       if (s.cash < def.ammoCost) return { ok: false, msg: `钞票不足 ($${def.ammoCost})！` };
@@ -420,6 +426,8 @@ export class GameEngine {
       w.mag = this.getMaxMag(weaponId, w.evolved);
       w.reserve = maxRes;
       s.player.activeSlot = ownedIdx;
+      s.player.reloadTimer = 0;
+      s.player.weaponSwapTimer = 0.32;
       SoundFX.reloadDone();
       return { ok: true, msg: `已补满【${def.name}】弹药！` };
     }
@@ -443,6 +451,8 @@ export class GameEngine {
     wep.evolved = true;
     wep.mag = this.getMaxMag(wep.defId, true);
     if (def.maxReserve > 0) wep.reserve = def.maxReserve * 2;
+    s.player.weaponSwapTimer = 0.35;
+    this.spawnFloatingText(s.player.x, s.player.y - 36, `⚡ ${def.superName}`, def.superColor, 1.3);
     SoundFX.fanfare();
     PlatformSDK.happyTime();
     return { ok: true, msg: `⚡ 超武觉醒：【${def.superName}】！` };
@@ -633,6 +643,17 @@ export class GameEngine {
       s.player.activeSlot = next;
       s.player.reloadTimer = 0;
       s.player.reloadDuration = 0;
+      s.player.weaponSwapTimer = 0.28;
+      const wep = s.player.weapons[next];
+      const def = WEAPONS[wep.defId];
+      SoundFX.reloadDone();
+      this.spawnFloatingText(
+        s.player.x,
+        s.player.y - 34,
+        `🔫 ${wep.evolved ? def.superName : def.name}`,
+        wep.evolved ? def.superColor : def.color,
+        1.15
+      );
     }
   }
 
@@ -1011,7 +1032,11 @@ export class GameEngine {
     if (p.grenadeCooldown > 0) p.grenadeCooldown -= dt;
     if (p.muzzleFlashTimer > 0) p.muzzleFlashTimer -= dt;
     if (p.recoilOffset > 0) p.recoilOffset = Math.max(0, p.recoilOffset - dt * 42);
+    if (p.weaponSwapTimer > 0) p.weaponSwapTimer = Math.max(0, p.weaponSwapTimer - dt);
     if (p.footDustCd > 0) p.footDustCd -= dt;
+    if (def.sawblade) {
+      p.barrelSpin += dt * 18;
+    }
 
     if (p.reloadTimer > 0) {
       p.reloadTimer -= dt;
@@ -1205,8 +1230,18 @@ export class GameEngine {
     const isCrit = Math.random() < s.modifiers.critChance;
     const baseDmg = def.damage * s.modifiers.damageMult * (wep.evolved ? 1.58 : 1) * (isCrit ? 2 : 1);
 
-    const muzzleX = p.x + Math.cos(p.angle) * (p.radius + 14);
-    const muzzleY = p.y + Math.sin(p.angle) * (p.radius + 14);
+    const isAkimbo = Boolean(def.akimboOnEvolve && wep.evolved);
+    p.akimboAlt = !p.akimboAlt;
+    const sideOffset = isAkimbo ? (p.akimboAlt ? 11 : -11) : 0;
+    const perpAng = p.angle + Math.PI / 2;
+    const fwdDist =
+      def.id === 'sniper'
+        ? p.radius + 32
+        : def.id === 'minigun' || def.id === 'plasma' || def.id === 'tesla'
+          ? p.radius + 26
+          : p.radius + 18;
+    const muzzleX = p.x + Math.cos(p.angle) * fwdDist + Math.cos(perpAng) * sideOffset;
+    const muzzleY = p.y + Math.sin(p.angle) * fwdDist + Math.sin(perpAng) * sideOffset;
 
     for (let i = 0; i < totalPellets; i++) {
       const offset =
@@ -1223,32 +1258,53 @@ export class GameEngine {
         y: muzzleY,
         vx: Math.cos(ang) * def.bulletSpeed,
         vy: Math.sin(ang) * def.bulletSpeed,
-        radius: def.flame ? 8 : def.laser ? 6 : def.explosiveRadius ? 6.5 : isCrit ? 5.5 : 4.2,
+        radius:
+          def.sawblade
+            ? wep.evolved
+              ? 13
+              : 10.5
+            : def.flame || def.cryo
+              ? 8.5
+              : def.laser
+                ? 6
+                : def.explosiveRadius
+                  ? 6.5
+                  : isCrit
+                    ? 5.5
+                    : 4.4,
         damage: baseDmg,
         knockback: def.knockback,
         pierceLeft: def.pierce + s.modifiers.extraPierce + (wep.evolved ? 1 : 0),
-        bouncesLeft: s.relicIds.includes('rubber_bullets') && !def.explosiveRadius ? 1 : 0,
+        bouncesLeft:
+          (def.bounces || 0) +
+          (def.sawblade && wep.evolved ? 2 : 0) +
+          (s.relicIds.includes('rubber_bullets') && !def.explosiveRadius ? 1 : 0),
         explosiveRadius: def.explosiveRadius ? def.explosiveRadius * (wep.evolved ? 1.35 : 1) : 0,
         color: isCrit ? '#fde047' : wep.evolved ? def.superColor : def.color,
         isCrit,
         flame: Boolean(def.flame || (def.id === 'shotgun' && wep.evolved) || s.relicIds.includes('dragon_oil')),
-        electric: Boolean((def.id === 'smg' || def.id === 'sniper') && wep.evolved),
+        cryo: Boolean(def.cryo),
+        electric: Boolean(def.electric || ((def.id === 'smg' || def.id === 'sniper') && wep.evolved)),
         laser: Boolean(def.laser),
+        sawblade: Boolean(def.sawblade),
         hitIds: new Set(),
-        life: def.flame ? 0.42 : 1.4,
+        life: def.flame || def.cryo ? 0.44 : def.sawblade ? 2.4 : 1.4,
       });
     }
 
-    p.muzzleFlashTimer = 0.065;
+    p.muzzleFlashTimer = 0.07;
     p.recoilOffset =
-      def.id === 'shotgun' || def.id === 'sniper' || def.id === 'launcher'
+      def.id === 'shotgun' || def.id === 'sniper' || def.id === 'launcher' || def.id === 'revolver'
         ? 10.5
-        : def.id === 'flamethrower'
-          ? 2.5
+        : def.flame || def.cryo
+          ? 2.2
           : 6.5;
-    s.camera.shake = Math.max(s.camera.shake, def.id === 'shotgun' || def.id === 'launcher' || def.id === 'sniper' ? 0.3 : 0.07);
+    s.camera.shake = Math.max(
+      s.camera.shake,
+      def.id === 'shotgun' || def.id === 'launcher' || def.id === 'sniper' ? 0.3 : 0.07
+    );
 
-    if (!def.flame && !def.laser) {
+    if (!def.flame && !def.cryo && !def.laser && !def.sawblade && def.id !== 'crossbow' && def.id !== 'tesla') {
       const shellAng = p.angle + Math.PI * 0.6 + (Math.random() - 0.5) * 0.4;
       s.particles.push({
         x: p.x,
@@ -1265,13 +1321,19 @@ export class GameEngine {
 
     const sfxMap: Record<string, 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'minigun' | 'plasma'> = {
       pistol: 'pistol',
+      revolver: 'shotgun',
       smg: 'smg',
       shotgun: 'shotgun',
+      autoshotgun: 'shotgun',
       rifle: 'rifle',
       flamethrower: 'smg',
+      crossbow: 'rifle',
       sniper: 'shotgun',
+      cryogun: 'smg',
       launcher: 'shotgun',
+      sawlauncher: 'rifle',
       minigun: 'minigun',
+      tesla: 'plasma',
       plasma: 'plasma',
     };
     SoundFX.shoot(sfxMap[def.id] || 'rifle', wep.evolved);
@@ -1546,6 +1608,14 @@ export class GameEngine {
       }
     }
     p.reloadTimer = 0;
+    p.weaponSwapTimer = 0.32;
+    this.spawnFloatingText(
+      p.x,
+      p.y - 36,
+      `🔫 装备：${evolved ? def.superName : def.name}`,
+      evolved ? def.superColor : def.color,
+      1.2
+    );
   }
 
   public flushQueuedModals(): void {
@@ -1657,8 +1727,10 @@ export class GameEngine {
             color: '#38bdf8',
             isCrit: false,
             flame: false,
+            cryo: false,
             electric: false,
             laser: false,
+            sawblade: false,
             hitIds: new Set(),
             life: 1.0,
           });
@@ -1722,7 +1794,12 @@ export class GameEngine {
         }
         if (b.bouncesLeft > 0) {
           b.bouncesLeft -= 1;
-          b.damage *= 1.25;
+          if (b.sawblade) {
+            b.hitIds.clear();
+            this.spawnHitSparks(b.x, b.y, '#fde047', 5);
+          } else {
+            b.damage *= 1.25;
+          }
           const hitX = this.findBulletBlocker(nextX, b.y, b.radius);
           if (hitX) b.vx = -b.vx;
           else b.vy = -b.vy;
@@ -1784,7 +1861,8 @@ export class GameEngine {
             Math.sin(ang) * b.knockback,
             b.isCrit,
             b.flame,
-            b.electric
+            b.electric,
+            b.cryo
           );
 
           if (b.pierceLeft > 0) {
@@ -1841,14 +1919,21 @@ export class GameEngine {
     ky: number,
     isCrit: boolean,
     flame: boolean,
-    electric: boolean
+    electric: boolean,
+    cryo = false
   ): void {
     if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) return;
     const s = this.state!;
     z.hp -= dmg;
     z.hitFlash = 0.09;
     if (flame) z.burnTimer = 3.0;
-    if (electric) z.slowTimer = 2.0;
+    if (cryo) {
+      z.slowTimer = Math.max(z.slowTimer, 3.2);
+      if (Math.random() < 0.25 && z.kind !== 'boss') {
+        z.stunTimer = Math.max(z.stunTimer, 0.22);
+      }
+    }
+    if (electric) z.slowTimer = Math.max(z.slowTimer, 2.2);
 
     const kbResist = z.kind === 'boss' ? 0.12 : z.kind === 'miniboss' ? 0.3 : 1;
     z.x += kx * 0.08 * kbResist;
@@ -1888,7 +1973,10 @@ export class GameEngine {
     }
 
     if (electric) {
-      this.triggerChainLightning(zx, zy, dmg * 0.4, 2, zid);
+      const activeWep = s.player.weapons[s.player.activeSlot];
+      const jumps = activeWep?.defId === 'tesla' ? (activeWep.evolved ? 5 : 3) : 2;
+      const arcRatio = activeWep?.defId === 'tesla' ? 0.65 : 0.4;
+      this.triggerChainLightning(zx, zy, dmg * arcRatio, jumps, zid);
     }
   }
 

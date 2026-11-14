@@ -103,8 +103,8 @@ export class UIManager {
               <div class="hero-banner-caption">
                 <img src="./assets/player_hero.png" alt="Hero" class="hero-mini-avatar" />
                 <div>
-                  <strong>近景特写视角 · 不规则战术建筑 · 9大枪械军火库！</strong>
-                  <div>按 B 键或踩终端随时打开军火商店买枪、买手雷、升超武</div>
+                  <strong>近景特写视角 · 不规则战术建筑 · 15大特色枪械军火库！</strong>
+                  <div>按 B 键或点军火商店买枪、升超武（双持沙鹰/加特林/电弧炮/回旋锯盘等换枪立显！）</div>
                 </div>
               </div>
             </div>

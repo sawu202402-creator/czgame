@@ -1612,27 +1612,33 @@ export class CartoonRenderer {
     const activeWep = p.weapons[p.activeSlot];
     const isFever = state.feverTimer > 0;
     const now = performance.now();
-    const rigScale = 0.64;
+    const rigScale = 0.68;
 
     const idleBreath = 1 + Math.sin(now * 0.0042) * 0.024;
     const walkTwist = p.isMoving ? Math.sin(p.walkPhase) * 0.095 : 0;
     const walkBob = p.isMoving ? Math.abs(Math.cos(p.walkPhase)) * 1.4 : 0;
     const torsoKick = p.recoilOffset * 0.42;
+    const activeDef = WEAPONS[activeWep.defId];
 
     ctx.save();
     ctx.translate(p.x, p.y);
 
     // 0. 开火瞬间枪口照亮地面的零GC双层动态战术火光池！
     if (p.muzzleFlashTimer > 0) {
-      const fx = Math.cos(p.angle) * 28;
-      const fy = Math.sin(p.angle) * 28;
-      ctx.fillStyle = activeWep.evolved ? 'rgba(56, 189, 248, 0.13)' : 'rgba(251, 191, 36, 0.13)';
+      const fx = Math.cos(p.angle) * 34;
+      const fy = Math.sin(p.angle) * 34;
+      const flashRgb = activeWep.evolved
+        ? '56, 189, 248'
+        : activeWep.defId === 'cryogun' || activeWep.defId === 'tesla' || activeWep.defId === 'plasma'
+          ? '34, 211, 238'
+          : '251, 191, 36';
+      ctx.fillStyle = `rgba(${flashRgb}, 0.14)`;
       ctx.beginPath();
-      ctx.arc(fx, fy, 92, 0, Math.PI * 2);
+      ctx.arc(fx, fy, 94, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = activeWep.evolved ? 'rgba(56, 189, 248, 0.22)' : 'rgba(251, 191, 36, 0.22)';
+      ctx.fillStyle = `rgba(${flashRgb}, 0.24)`;
       ctx.beginPath();
-      ctx.arc(fx, fy, 46, 0, Math.PI * 2);
+      ctx.arc(fx, fy, 48, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -1671,32 +1677,31 @@ export class CartoonRenderer {
     this.drawTacticalBoot(ctx, -stride + 2, 10.5);
     ctx.restore();
 
-    // 4. 上半身独立骨骼：红外激光瞄准线 + 战术护袖持枪双臂 + 夜视仪特种兵头盔躯干
+    // 4. 上半身独立骨骼：专属背包挂件 -> 夜视仪特种兵头盔躯干 -> 差异化激光/扇形准星 -> 前置无遮挡高辨识度持枪模型！
     ctx.save();
     ctx.translate(0, -walkBob);
     ctx.rotate(p.angle);
 
-    ctx.beginPath();
-    ctx.moveTo(34, 0);
-    ctx.lineTo(255, 0);
-    ctx.strokeStyle = activeWep.evolved ? 'rgba(56, 189, 248, 0.42)' : 'rgba(239, 68, 68, 0.34)';
-    ctx.lineWidth = 1.8;
-    ctx.setLineDash([10, 8]);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // 4a. 重武器专属背部装备（双火焰罐 / 液氮冷媒罐 / 加特林弹链箱 / 特斯拉电容组）
+    this.drawWeaponBackpackGear(ctx, activeWep.defId, activeWep.evolved, torsoKick);
 
-    this.drawEquippedTopDownWeaponAndArms(ctx, activeWep.defId, activeWep.evolved, p);
-
+    // 4b. 先绘制特种兵头盔与肩甲躯干（略微后移，绝不遮挡前方双手持握的枪械本体！）
     ctx.save();
-    ctx.translate(-torsoKick - 4, 0);
+    ctx.translate(-torsoKick - 9, 0);
     ctx.rotate(walkTwist);
     ctx.scale(idleBreath, 2 - idleBreath);
     const torsoImg = Assets.getSprite('player_torso');
     if (torsoImg) {
-      const torsoSz = 68;
+      const torsoSz = 60;
       ctx.drawImage(torsoImg, -torsoSz / 2, -torsoSz / 2, torsoSz, torsoSz);
     }
     ctx.restore();
+
+    // 4c. 枪械专属瞄准辅助线（霰弹扇面 / 巴雷特远距红点 / 超武双持双轨激光 / 电弧能量线）
+    this.drawWeaponAimSight(ctx, activeWep.defId, activeWep.evolved, Boolean(activeDef.akimboOnEvolve && activeWep.evolved));
+
+    // 4d. 最顶层绘制双手护袖与 15 把高辨识度俯视枪械（含切枪上膛弹出动画！）
+    this.drawEquippedTopDownWeaponAndArms(ctx, activeWep.defId, activeWep.evolved, p, now);
 
     ctx.restore();
     ctx.restore(); // 结束 rigScale
@@ -1739,181 +1744,892 @@ export class CartoonRenderer {
     ctx.fillRect(fx + 2, fy - 2.5, 4, 5);
   }
 
+  private drawWeaponBackpackGear(
+    ctx: CanvasRenderingContext2D,
+    wepId: string,
+    evolved: boolean,
+    torsoKick: number
+  ): void {
+    ctx.save();
+    ctx.translate(-torsoKick, 0);
+    ctx.strokeStyle = '#090d16';
+    ctx.lineWidth = 2.4;
+
+    if (wepId === 'flamethrower') {
+      // 背部双联高压燃油气瓶 + 右侧黄色编织输油软管
+      const tankColor = evolved ? '#0284c7' : '#ea580c';
+      const stripeColor = evolved ? '#7dd3fc' : '#fde047';
+      for (const ty of [-10, 10]) {
+        ctx.fillStyle = tankColor;
+        ctx.beginPath();
+        ctx.roundRect(-34, ty - 5.5, 18, 11, 5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = stripeColor;
+        ctx.fillRect(-28, ty - 4.5, 4, 9);
+      }
+      ctx.strokeStyle = '#eab308';
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(-18, 11);
+      ctx.quadraticCurveTo(4, 24, 26, 8);
+      ctx.stroke();
+    } else if (wepId === 'cryogun') {
+      // 背部发光液氮冷媒钢瓶 + 冰蓝保温导管
+      ctx.fillStyle = evolved ? '#2563eb' : '#0891b2';
+      ctx.beginPath();
+      ctx.roundRect(-35, -13, 17, 26, 7);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#bae6fd';
+      ctx.fillRect(-30, -9, 7, 18);
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(-19, 10);
+      ctx.quadraticCurveTo(4, 23, 26, 7);
+      ctx.stroke();
+    } else if (wepId === 'minigun') {
+      // 背部重型军绿弹药箱 + 侧面黄铜金属供弹链条
+      ctx.fillStyle = evolved ? '#4c1d95' : '#365314';
+      ctx.beginPath();
+      ctx.roundRect(-35, -14, 17, 28, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = evolved ? '#e879f9' : '#facc15';
+      ctx.lineWidth = 5;
+      ctx.setLineDash([3.5, 2.2]);
+      ctx.beginPath();
+      ctx.moveTo(-19, 11);
+      ctx.quadraticCurveTo(4, 25, 25, 8);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (wepId === 'tesla') {
+      // 背部双紫铜电磁电容塔
+      for (const ty of [-10, 10]) {
+        ctx.fillStyle = '#b45309';
+        ctx.beginPath();
+        ctx.roundRect(-33, ty - 5.5, 15, 11, 3.5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = evolved ? '#c084fc' : '#22d3ee';
+        ctx.beginPath();
+        ctx.arc(-26, ty, 3.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  private drawWeaponAimSight(
+    ctx: CanvasRenderingContext2D,
+    wepId: string,
+    evolved: boolean,
+    isAkimbo: boolean
+  ): void {
+    if (wepId === 'shotgun' || wepId === 'autoshotgun') {
+      const spreadAng = wepId === 'autoshotgun' ? 0.22 : 0.19;
+      const coneLen = 175;
+      ctx.save();
+      ctx.fillStyle = evolved ? 'rgba(249, 115, 22, 0.08)' : 'rgba(251, 191, 36, 0.06)';
+      ctx.beginPath();
+      ctx.moveTo(46, 0);
+      ctx.arc(46, 0, coneLen, -spreadAng, spreadAng);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = evolved ? 'rgba(249, 115, 22, 0.36)' : 'rgba(251, 191, 36, 0.3)';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([7, 7]);
+      ctx.beginPath();
+      ctx.moveTo(46, 0);
+      ctx.lineTo(46 + Math.cos(-spreadAng) * coneLen, Math.sin(-spreadAng) * coneLen);
+      ctx.moveTo(46, 0);
+      ctx.lineTo(46 + Math.cos(spreadAng) * coneLen, Math.sin(spreadAng) * coneLen);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      return;
+    }
+
+    if (isAkimbo) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.42)';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([9, 7]);
+      for (const sy of [-15, 15]) {
+        ctx.beginPath();
+        ctx.moveTo(46, sy);
+        ctx.lineTo(255, sy);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+      return;
+    }
+
+    if (wepId === 'sniper') {
+      ctx.save();
+      ctx.strokeStyle = evolved ? 'rgba(34, 211, 238, 0.62)' : 'rgba(239, 68, 68, 0.56)';
+      ctx.lineWidth = 2.1;
+      ctx.beginPath();
+      ctx.moveTo(98, 0);
+      ctx.lineTo(420, 0);
+      ctx.stroke();
+      ctx.fillStyle = evolved ? '#22d3ee' : '#ef4444';
+      ctx.beginPath();
+      ctx.arc(420, 0, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    if (wepId === 'flamethrower' || wepId === 'cryogun') {
+      return;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(52, 0);
+    ctx.lineTo(265, 0);
+    ctx.strokeStyle =
+      wepId === 'tesla' || wepId === 'plasma'
+        ? 'rgba(34, 211, 238, 0.42)'
+        : evolved
+          ? 'rgba(56, 189, 248, 0.42)'
+          : 'rgba(239, 68, 68, 0.34)';
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([10, 8]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   private drawEquippedTopDownWeaponAndArms(
     ctx: CanvasRenderingContext2D,
     wepId: string,
     evolved: boolean,
-    p: RunSnapshot['player']
+    p: RunSnapshot['player'],
+    now: number
   ): void {
     const kick = p.recoilOffset;
     const isReloading = p.reloadTimer > 0 && p.reloadDuration > 0;
     const reloadPhase = isReloading ? 1 - p.reloadTimer / p.reloadDuration : 0;
-    const reloadTilt = isReloading ? Math.sin(reloadPhase * Math.PI) * 0.45 : 0;
+    const reloadTilt = isReloading ? Math.sin(reloadPhase * Math.PI) * 0.42 : 0;
+
+    // 切枪瞬间（0.32s）干脆利落的上膛弹出与微放大反馈！
+    const swapRatio = Math.max(0, Math.min(1, p.weaponSwapTimer / 0.32));
+    const swapScale = 1 + Math.sin(swapRatio * Math.PI) * 0.22;
+    const swapTilt = -swapRatio * 0.34;
+
+    const def = WEAPONS[wepId];
+    const isAkimbo = Boolean(def?.akimboOnEvolve && evolved);
 
     ctx.save();
     ctx.translate(-kick, 0);
-    ctx.rotate(reloadTilt);
+    ctx.rotate(reloadTilt + swapTilt);
+    ctx.scale(swapScale, swapScale);
 
-    let rightHandX = 18;
-    let rightHandY = 9;
-    let leftHandX = 27;
-    let leftHandY = -6;
-    let muzzleTipX = 46;
+    // ===== A. 超武双持模式（黄金双持沙鹰 / 猩红双持左轮 / 幻影双持冲锋枪） =====
+    if (isAkimbo) {
+      const leftKick = p.akimboAlt ? kick * 0.65 : 0;
+      const rightKick = !p.akimboAlt ? kick * 0.65 : 0;
+      const lhX = 24 - leftKick;
+      const lhY = -15;
+      const rhX = 24 - rightKick;
+      const rhY = 15;
+
+      this.drawForearmToHand(ctx, 2, -16, lhX, lhY);
+      this.drawForearmToHand(ctx, 2, 16, rhX, rhY);
+
+      const drawSingleSidearm = (gx: number, gy: number, sideSign: number) => {
+        ctx.save();
+        ctx.translate(gx, gy);
+        ctx.lineWidth = 2.4;
+        ctx.strokeStyle = '#090d16';
+        if (wepId === 'pistol') {
+          // 黄金双持沙漠之鹰
+          ctx.fillStyle = '#facc15';
+          ctx.beginPath();
+          ctx.roundRect(-2, -4.5, 28, 9, 2.5);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#fef08a';
+          ctx.fillRect(4, -2.2, 18, 4.4);
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(24, -2.5, 4, 5);
+        } else if (wepId === 'revolver') {
+          // 猩红鎏金双持长管左轮
+          ctx.fillStyle = '#7f1d1d';
+          ctx.fillRect(-3, -3.5, 10, 7);
+          ctx.fillStyle = '#facc15';
+          ctx.beginPath();
+          ctx.roundRect(4, -6, 11, 12, 3);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.roundRect(15, -3.2, 24, 6.4, 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#fde047';
+          ctx.fillRect(17, -1.2, 18, 2.4);
+        } else {
+          // 幻影霓虹双持微冲（带外侧弹匣 + 消音管）
+          ctx.fillStyle = '#0f172a';
+          ctx.beginPath();
+          ctx.roundRect(-3, -4.5, 27, 9, 3);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillRect(8, sideSign < 0 ? -13 : 4.5, 5.5, 8.5);
+          ctx.strokeRect(8, sideSign < 0 ? -13 : 4.5, 5.5, 8.5);
+          ctx.fillStyle = '#22d3ee';
+          ctx.fillRect(3, -1.8, 17, 3.6);
+          ctx.fillStyle = '#64748b';
+          ctx.beginPath();
+          ctx.roundRect(24, -3, 12, 6, 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      };
+
+      drawSingleSidearm(lhX, lhY, -1);
+      drawSingleSidearm(rhX, rhY, 1);
+      this.drawGlovedHand(ctx, lhX, lhY);
+      this.drawGlovedHand(ctx, rhX, rhY);
+
+      if (p.muzzleFlashTimer > 0) {
+        const flashY = p.akimboAlt ? 15 : -15;
+        const flashX = wepId === 'revolver' ? 63 : wepId === 'smg' ? 60 : 52;
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(flashX, flashY);
+        ctx.lineTo(flashX + 22, flashY - 9);
+        ctx.lineTo(flashX + 14, flashY);
+        ctx.lineTo(flashX + 22, flashY + 9);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    // ===== B. 单把主武器握持手部坐标（整体前探至头盔前方 x=20..104，100% 清晰无遮挡！） =====
+    let rightHandX = 21;
+    let rightHandY = 8;
+    let leftHandX = 39;
+    let leftHandY = -5;
+    let muzzleTipX = 68;
 
     if (wepId === 'pistol') {
-      rightHandX = 20;
-      rightHandY = 4;
-      leftHandX = 22;
-      leftHandY = -3;
-      muzzleTipX = 37;
-    } else if (wepId === 'minigun') {
-      rightHandX = 16;
-      rightHandY = 13;
+      rightHandX = 23;
+      rightHandY = 4.5;
       leftHandX = 26;
-      leftHandY = -11;
-      muzzleTipX = 54;
-    } else if (wepId === 'sniper') {
-      leftHandX = 31;
+      leftHandY = -4;
+      muzzleTipX = 49;
+    } else if (wepId === 'revolver') {
+      rightHandX = 22;
+      rightHandY = 4.5;
+      leftHandX = 26;
       leftHandY = -4;
       muzzleTipX = 60;
+    } else if (wepId === 'smg') {
+      rightHandX = 21;
+      rightHandY = 7;
+      leftHandX = 35;
+      leftHandY = -5;
+      muzzleTipX = 62;
     } else if (wepId === 'shotgun') {
-      leftHandX = 29 - kick * 0.45;
-      leftHandY = -4;
-      muzzleTipX = 48;
+      rightHandX = 20;
+      rightHandY = 7.5;
+      leftHandX = 43 - kick * 0.55;
+      leftHandY = -4.5;
+      muzzleTipX = 74;
+    } else if (wepId === 'autoshotgun') {
+      rightHandX = 20;
+      rightHandY = 8;
+      leftHandX = 46;
+      leftHandY = -5.5;
+      muzzleTipX = 74;
+    } else if (wepId === 'rifle') {
+      rightHandX = 20;
+      rightHandY = 7.5;
+      leftHandX = 44;
+      leftHandY = -5;
+      muzzleTipX = 82;
+    } else if (wepId === 'crossbow') {
+      rightHandX = 20;
+      rightHandY = 7.5;
+      leftHandX = 42;
+      leftHandY = -5;
+      muzzleTipX = 78;
+    } else if (wepId === 'flamethrower' || wepId === 'cryogun') {
+      rightHandX = 20;
+      rightHandY = 9.5;
+      leftHandX = 42;
+      leftHandY = -7.5;
+      muzzleTipX = 75;
+    } else if (wepId === 'sniper') {
+      rightHandX = 19;
+      rightHandY = 7.5;
+      leftHandX = 48;
+      leftHandY = -5;
+      muzzleTipX = 104;
+    } else if (wepId === 'launcher') {
+      rightHandX = 20;
+      rightHandY = 9;
+      leftHandX = 47;
+      leftHandY = -6.5;
+      muzzleTipX = 72;
+    } else if (wepId === 'sawlauncher') {
+      rightHandX = 20;
+      rightHandY = 9.5;
+      leftHandX = 42;
+      leftHandY = -9;
+      muzzleTipX = 85;
+    } else if (wepId === 'minigun') {
+      rightHandX = 18;
+      rightHandY = 14;
+      leftHandX = 37;
+      leftHandY = -12;
+      muzzleTipX = 90;
+    } else if (wepId === 'tesla') {
+      rightHandX = 20;
+      rightHandY = 8.5;
+      leftHandX = 44;
+      leftHandY = -6.5;
+      muzzleTipX = 88;
+    } else if (wepId === 'plasma') {
+      rightHandX = 20;
+      rightHandY = 8.5;
+      leftHandX = 45;
+      leftHandY = -6.5;
+      muzzleTipX = 92;
     }
 
     if (isReloading) {
       const slap = Math.sin(reloadPhase * Math.PI * 2);
-      leftHandX = 20 + slap * 5;
-      leftHandY = -10 + Math.abs(slap) * 8;
+      leftHandX = 26 + slap * 7;
+      leftHandY = -12 + Math.abs(slap) * 9;
     }
 
-    // 战术作战服深灰袖管 + 橄榄褐护肘（彻底告别违和粉色裸臂！）
-    this.drawForearmToHand(ctx, 4, 16, rightHandX, rightHandY);
-    this.drawForearmToHand(ctx, 4, -16, leftHandX, leftHandY);
+    // 先画双臂战术护袖
+    this.drawForearmToHand(ctx, 2, 16, rightHandX, rightHandY);
+    this.drawForearmToHand(ctx, 2, -16, leftHandX, leftHandY);
 
-    const trim = evolved ? '#38bdf8' : '#eab308';
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = 2.5;
     ctx.strokeStyle = '#090d16';
 
     if (wepId === 'pistol') {
-      ctx.fillStyle = evolved ? '#2563eb' : '#475569';
+      // 战术银黑双色 USP 手枪（短小精悍、亮银套筒）
+      ctx.fillStyle = '#1e293b';
       ctx.beginPath();
-      ctx.roundRect(18, -3.5, 18, 7, 2.5);
+      ctx.roundRect(22, -4.5, 26, 9, 2.5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#e2e8f0';
+      ctx.beginPath();
+      ctx.roundRect(25, -3.2, 21, 6.4, 1.8);
+      ctx.fill();
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(44, -1.2, 2.5, 2.4);
+    } else if (wepId === 'revolver') {
+      // 蟒蛇 .357 左轮（红木握把 + 醒目宽大六连发转轮鼓 + 修长亮银枪管）
+      ctx.fillStyle = '#9a3412';
+      ctx.beginPath();
+      ctx.roundRect(20, -4, 10, 8, 3);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = '#cbd5e1';
-      ctx.fillRect(22, -1.5, 11, 3);
+      ctx.beginPath();
+      ctx.roundRect(28, -6.2, 12, 12.4, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(30, -4.2, 8, 2);
+      ctx.fillRect(30, 2.2, 8, 2);
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.roundRect(40, -3, 20, 6, 2);
+      ctx.fill();
+      ctx.stroke();
     } else if (wepId === 'smg') {
+      // MP5 冲锋枪（蓝灰机匣 + 左侧大幅弧形香蕉弹匣 + 前置消音筒）
+      ctx.fillStyle = '#facc15';
+      ctx.beginPath();
+      ctx.moveTo(33, -4);
+      ctx.lineTo(39, -18);
+      ctx.lineTo(44, -16);
+      ctx.lineTo(39, -4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#334155';
+      ctx.beginPath();
+      ctx.roundRect(18, -4.8, 30, 9.6, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#64748b';
+      ctx.beginPath();
+      ctx.roundRect(48, -3.2, 14, 6.4, 2.5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(25, -1.8, 12, 3.6);
+    } else if (wepId === 'shotgun') {
+      // 雷明顿泵动霰弹枪（暖棕胡桃木枪托/滑动护木 + 双管长枪管 + 侧面 3 发红壳霰弹排）
+      ctx.fillStyle = evolved ? '#991b1b' : '#92400e';
+      ctx.beginPath();
+      ctx.roundRect(16, -4.5, 13, 9, 2.5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#475569';
+      ctx.beginPath();
+      ctx.roundRect(28, -4.2, 45, 8.4, 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(30, -1.8, 41, 3.6);
+
+      // 侧面 3 颗鲜红霰弹壳
+      ctx.fillStyle = '#ef4444';
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(30 + i * 4.2, 4.2, 3, 2.6);
+      }
+
+      // 随射击后坐滑动的泵动木护木
+      ctx.fillStyle = evolved ? '#f97316' : '#d97706';
+      ctx.beginPath();
+      ctx.roundRect(leftHandX - 7, -6, 16, 12, 3);
+      ctx.fill();
+      ctx.stroke();
+    } else if (wepId === 'autoshotgun') {
+      // AA-12 全自动连喷（宽厚军绿/深红方匣机身 + 右侧超大 20 发圆形大弹鼓 + 散热孔护套！）
+      ctx.fillStyle = evolved ? '#f97316' : '#eab308';
+      ctx.beginPath();
+      ctx.arc(39, 10.5, 9.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
       ctx.fillStyle = '#1e293b';
       ctx.beginPath();
-      ctx.roundRect(14, -4, 26, 8, 3);
+      ctx.arc(39, 10.5, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = evolved ? '#b91c1c' : '#4d7c0f';
+      ctx.beginPath();
+      ctx.roundRect(17, -6.5, 40, 13, 3.5);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = trim;
-      ctx.fillRect(23, -10, 5, 6);
-      ctx.strokeRect(23, -10, 5, 6);
+
+      ctx.fillStyle = '#334155';
+      ctx.beginPath();
+      ctx.roundRect(57, -4.8, 17, 9.6, 2);
+      ctx.fill();
+      ctx.stroke();
       ctx.fillStyle = '#94a3b8';
-      ctx.fillRect(40, -2, 6, 4);
-    } else if (wepId === 'shotgun') {
-      ctx.fillStyle = '#334155';
-      ctx.fillRect(12, -3.5, 35, 7);
-      ctx.strokeRect(12, -3.5, 35, 7);
-      ctx.fillStyle = evolved ? '#dc2626' : '#92400e';
-      ctx.beginPath();
-      ctx.roundRect(leftHandX - 5, -5, 13, 10, 2.5);
-      ctx.fill();
-      ctx.stroke();
+      ctx.fillRect(24, -2.5, 26, 5);
     } else if (wepId === 'rifle') {
-      ctx.fillStyle = evolved ? '#7c3aed' : '#1e293b';
+      // 经典 AK-47 突击步枪（琥珀木护木/暗物质紫机身 + 橙色弯月弹匣 + 全息红点镜 + 细长导气管与斜口制退器）
+      ctx.fillStyle = evolved ? '#a855f7' : '#ea580c';
       ctx.beginPath();
-      ctx.roundRect(12, -4, 31, 8, 2.5);
+      ctx.moveTo(36, -4.5);
+      ctx.lineTo(44, -18.5);
+      ctx.lineTo(50, -16);
+      ctx.lineTo(43, -4.5);
+      ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#78716c';
-      ctx.fillRect(21, -3, 11, 6);
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(43, -2, 7, 4);
-      ctx.strokeRect(43, -2, 7, 4);
+
+      ctx.fillStyle = evolved ? '#4c1d95' : '#92400e';
+      ctx.beginPath();
+      ctx.roundRect(16, -4.5, 13, 9, 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = evolved ? '#6d28d9' : '#334155';
+      ctx.beginPath();
+      ctx.roundRect(28, -5, 22, 10, 2.5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = evolved ? '#c084fc' : '#d97706';
+      ctx.beginPath();
+      ctx.roundRect(49, -4.5, 16, 9, 2.5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(65, -2.4, 16, 4.8);
+      ctx.strokeRect(65, -2.4, 16, 4.8);
+
+      // 顶部战术导轨红点镜
+      ctx.fillStyle = evolved ? '#38bdf8' : '#facc15';
+      ctx.fillRect(32, -2.2, 10, 4.4);
+    } else if (wepId === 'crossbow') {
+      // 爆裂猎弩（极具辨识度的 56px 超宽横向反曲弓臂 + 绷紧白色弓弦 + 红色爆炸箭头！）
+      const limbColor = evolved ? '#facc15' : '#a3e635';
+
+      // 绷紧弓弦（两侧弓梢拉向弩机卡扣）
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(41, -27);
+      ctx.lineTo(28, 0);
+      ctx.lineTo(41, 27);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#090d16';
+      ctx.lineWidth = 2.5;
+      // 左右反曲大弓臂
+      for (const sgn of [-1, 1]) {
+        ctx.fillStyle = limbColor;
+        ctx.beginPath();
+        ctx.moveTo(56, sgn * 3.5);
+        ctx.quadraticCurveTo(53, sgn * 20, 40, sgn * 28);
+        ctx.lineTo(36, sgn * 25);
+        ctx.quadraticCurveTo(47, sgn * 16, 48, sgn * 3.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // 碳纤维中轴弩身
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.roundRect(17, -4.2, 54, 8.4, 3);
+      ctx.fill();
+      ctx.stroke();
+
+      // 待发箭杆与鲜红/鎏金爆裂三棱箭簇
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(28, -1.3, 44, 2.6);
+      ctx.fillStyle = evolved ? '#38bdf8' : '#ef4444';
+      ctx.beginPath();
+      ctx.moveTo(81, 0);
+      ctx.lineTo(69, -6.5);
+      ctx.lineTo(72, 0);
+      ctx.lineTo(69, 6.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
     } else if (wepId === 'flamethrower') {
-      ctx.fillStyle = evolved ? '#0284c7' : '#c2410c';
+      // 烈焰喷射器（橙红加厚储压腔 + 黄铜网状隔热罩 + 前端常亮跳动火苗！）
+      ctx.fillStyle = evolved ? '#0284c7' : '#ea580c';
       ctx.beginPath();
-      ctx.roundRect(12, 4, 18, 9, 4);
+      ctx.roundRect(17, -6.5, 34, 13, 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = '#334155';
-      ctx.fillRect(15, -4, 27, 7);
-      ctx.strokeRect(15, -4, 27, 7);
-      ctx.fillStyle = '#eab308';
-      ctx.fillRect(42, -3.5, 6, 6);
-      ctx.strokeRect(42, -3.5, 6, 6);
-      ctx.fillStyle = evolved ? '#38bdf8' : '#fb923c';
+
+      ctx.fillStyle = '#ca8a04';
       ctx.beginPath();
-      ctx.arc(51, -0.5, 3.5 + Math.sin(performance.now() * 0.03), 0, Math.PI * 2);
+      ctx.roundRect(51, -5, 20, 10, 2.5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#090d16';
+      for (let hx = 54; hx <= 66; hx += 5) {
+        ctx.fillRect(hx, -2.5, 2.5, 5);
+      }
+
+      // 实时跳动的常亮引火嘴火苗
+      const flicker = 4.6 + Math.sin(now * 0.028) * 1.6;
+      ctx.fillStyle = evolved ? 'rgba(56, 189, 248, 0.85)' : 'rgba(249, 115, 22, 0.88)';
+      ctx.beginPath();
+      ctx.arc(77, 0, flicker * 1.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fef08a';
+      ctx.beginPath();
+      ctx.arc(75, 0, flicker * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (wepId === 'cryogun') {
+      // 极寒液氮炮（纯白冰蓝机身 + 醒目喇叭状扩口冷冻喷嘴 + 缭绕冰晶寒雾！）
+      ctx.fillStyle = '#e0f2fe';
+      ctx.beginPath();
+      ctx.roundRect(17, -6.5, 36, 13, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = evolved ? '#3b82f6' : '#06b6d4';
+      ctx.fillRect(24, -3.2, 24, 6.4);
+
+      // 喇叭形扩口急冻喷口
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.moveTo(53, -4.5);
+      ctx.lineTo(73, -10);
+      ctx.lineTo(73, 10);
+      ctx.lineTo(53, 4.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      const frostPulse = 4 + Math.cos(now * 0.022) * 1.5;
+      ctx.fillStyle = 'rgba(186, 230, 253, 0.85)';
+      ctx.beginPath();
+      ctx.arc(78, 0, frostPulse * 1.3, 0, Math.PI * 2);
       ctx.fill();
     } else if (wepId === 'sniper') {
-      ctx.fillStyle = evolved ? '#0891b2' : '#3f4f3a';
+      // 巴雷特 .50 重型反器材大狙（超长 88px 枪身 + 折叠两脚架 + 巨型瞄准镜 + 标志性箭头形大制退器！）
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.roundRect(12, -4, 26, 8, 2);
+      ctx.moveTo(68, -4);
+      ctx.lineTo(56, -13);
+      ctx.moveTo(68, 4);
+      ctx.lineTo(56, 13);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#090d16';
+      ctx.lineWidth = 2.5;
+      ctx.fillStyle = evolved ? '#0e7490' : '#4d7c0f';
+      ctx.beginPath();
+      ctx.roundRect(16, -5.2, 44, 10.4, 2.5);
       ctx.fill();
       ctx.stroke();
+
+      // 超长重型浮置枪管
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(60, -2.6, 38, 5.2);
+      ctx.strokeRect(60, -2.6, 38, 5.2);
+
+      // 标志性巴雷特 V 型宽大箭头炮口制退器
       ctx.fillStyle = '#334155';
-      ctx.fillRect(38, -2, 20, 4);
-      ctx.strokeRect(38, -2, 20, 4);
-      ctx.fillRect(56, -4, 4, 8);
-      ctx.fillStyle = '#090d16';
       ctx.beginPath();
-      ctx.roundRect(19, -2.5, 14, 5, 2);
+      ctx.moveTo(105, -5);
+      ctx.lineTo(95, -10);
+      ctx.lineTo(95, 10);
+      ctx.lineTo(105, 5);
+      ctx.closePath();
       ctx.fill();
+      ctx.stroke();
+
+      // 顶部大口径高倍光学狙击镜 + 红宝石/青色镀膜镜片
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.roundRect(25, -3.8, 26, 7.6, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = evolved ? '#22d3ee' : '#ef4444';
+      ctx.fillRect(48, -2.8, 3.5, 5.6);
     } else if (wepId === 'launcher') {
-      ctx.fillStyle = '#334155';
+      // M32 六连发转轮榴弹炮（超肥厚 20px 转轮弹巢鼓 + 粗壮 40mm 大口径炮管 + 黄黑警示环！）
+      ctx.fillStyle = '#3f6212';
       ctx.beginPath();
-      ctx.roundRect(13, -6.5, 18, 13, 4);
+      ctx.roundRect(16, -5, 13, 10, 3);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = trim;
-      ctx.fillRect(18, -5.5, 6, 11);
+
+      // 宽大六连发榴弹转轮鼓
+      ctx.fillStyle = evolved ? '#b91c1c' : '#475569';
+      ctx.beginPath();
+      ctx.roundRect(27, -10, 22, 20, 5);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(34, -9, 6, 18);
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(29, -4, 18, 2);
+      ctx.fillRect(29, 2, 18, 2);
+
+      // 粗壮大口径榴弹发射筒
       ctx.fillStyle = '#1e293b';
-      ctx.fillRect(31, -4.5, 14, 9);
-      ctx.strokeRect(31, -4.5, 14, 9);
+      ctx.beginPath();
+      ctx.roundRect(49, -6.5, 22, 13, 2.5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillRect(67, -6.5, 4, 13);
+    } else if (wepId === 'sawlauncher') {
+      // 回旋锯盘发射器（醒目工程黄黑双叉轨道架 + 前端实时高速旋转的大号带齿合金圆锯盘！）
+      ctx.fillStyle = '#eab308';
+      ctx.beginPath();
+      ctx.roundRect(17, -8.5, 34, 17, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      // 工程黑斜纹警示块
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(25, -7.5, 5, 15);
+      ctx.fillRect(36, -7.5, 5, 15);
+
+      // 双侧夹持导轨叉臂
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(51, -9, 20, 4.5);
+      ctx.strokeRect(51, -9, 20, 4.5);
+      ctx.fillRect(51, 4.5, 20, 4.5);
+      ctx.strokeRect(51, 4.5, 20, 4.5);
+
+      // 前端待发高速旋转圆锯盘
+      this.drawSpinningSawDisc(
+        ctx,
+        72,
+        0,
+        13.5,
+        now * 0.014 + p.barrelSpin,
+        evolved ? '#fb7185' : '#f1f5f9',
+        evolved ? '#facc15' : '#ef4444'
+      );
     } else if (wepId === 'minigun') {
+      // M134 加特林火神炮（宽体电机座 + 顶部横向提把 + 6 根高速旋转长枪管束 + 双道金属箍环！）
       ctx.fillStyle = '#1e293b';
       ctx.beginPath();
-      ctx.roundRect(12, -7.5, 18, 15, 4);
+      ctx.roundRect(15, -9.5, 25, 19, 4.5);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = evolved ? '#c084fc' : '#94a3b8';
-      const spinOffset = Math.sin(p.barrelSpin) * 2.5;
-      ctx.fillRect(30, -6, 22, 3.2);
-      ctx.fillRect(30, -1.6 + spinOffset * 0.4, 22, 3.2);
-      ctx.fillRect(30, 2.8, 22, 3.2);
-      ctx.strokeRect(30, -6.2, 22, 12.4);
-      ctx.fillStyle = trim;
-      ctx.fillRect(44, -6.8, 4, 13.6);
-    } else {
-      ctx.fillStyle = '#1e1b4b';
+
+      const spinShift = Math.sin(p.barrelSpin) * 2.6;
+      ctx.fillStyle = evolved ? '#e879f9' : '#cbd5e1';
+      ctx.fillRect(40, -8, 48, 3.6);
+      ctx.fillRect(40, -3.2 + spinShift * 0.45, 48, 3.6);
+      ctx.fillRect(40, 1.6 - spinShift * 0.45, 48, 3.6);
+      ctx.fillRect(40, 4.6, 48, 3.6);
+      ctx.strokeRect(40, -8.2, 48, 16.4);
+
+      // 两道重型旋转枪管束箍环
+      ctx.fillStyle = evolved ? '#38bdf8' : '#facc15';
+      ctx.fillRect(58, -9, 5, 18);
+      ctx.strokeRect(58, -9, 5, 18);
+      ctx.fillRect(80, -9, 6, 18);
+      ctx.strokeRect(80, -9, 6, 18);
+
+      // 顶部横向链锯式握持护杠
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 3.6;
       ctx.beginPath();
-      ctx.roundRect(13, -6, 32, 12, 4);
+      ctx.moveTo(35, -12);
+      ctx.lineTo(35, 11);
+      ctx.stroke();
+    } else if (wepId === 'tesla') {
+      // 特斯拉电弧炮（深灰机身 + 3 道紫铜发光电磁线圈环 + 前端双音叉电极与实时跳跃电弧！）
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.roundRect(17, -6.5, 56, 13, 4);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = evolved ? '#f43f5e' : '#38bdf8';
-      ctx.fillRect(19, -2.5, 24, 5);
+
+      const glowCol = evolved ? '#c084fc' : '#22d3ee';
+      ctx.fillStyle = glowCol;
+      ctx.fillRect(24, -2.5, 48, 5);
+
+      // 3 道醒目紫铜电磁感应线圈环
+      for (const cx of [36, 50, 64]) {
+        ctx.fillStyle = '#ea580c';
+        ctx.beginPath();
+        ctx.roundRect(cx - 3.5, -9, 7, 18, 2.5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = glowCol;
+        ctx.fillRect(cx - 1.2, -7.5, 2.4, 15);
+      }
+
+      // 前端双叉放电电极
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(73, -7.5, 13, 3.8);
+      ctx.strokeRect(73, -7.5, 13, 3.8);
+      ctx.fillRect(73, 3.7, 13, 3.8);
+      ctx.strokeRect(73, 3.7, 13, 3.8);
+
+      // 电极间实时跳跃的闪电电弧
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.9;
+      ctx.beginPath();
+      ctx.moveTo(85, -5.5);
+      ctx.lineTo(89 + Math.sin(now * 0.05) * 2.5, 0);
+      ctx.lineTo(85, 5.5);
+      ctx.stroke();
+    } else {
+      // 等离子磁轨炮（科幻分体双翼导轨 + 暴露式高亮脉冲能量核心槽 + 枪口电浆球！）
+      const railBody = evolved ? '#4c0519' : '#064e3b';
+      const coreGlow = evolved ? '#fb7185' : '#34d399';
+
+      ctx.fillStyle = railBody;
+      ctx.beginPath();
+      ctx.roundRect(16, -8.5, 32, 17, 4.5);
+      ctx.fill();
+      ctx.stroke();
+
+      // 上下分体磁轨翼片
+      ctx.fillStyle = evolved ? '#e11d48' : '#10b981';
+      ctx.beginPath();
+      ctx.roundRect(46, -8.5, 44, 5.8, 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.roundRect(46, 2.7, 44, 5.8, 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // 中央高能脉冲等离子光槽
+      ctx.fillStyle = coreGlow;
+      ctx.fillRect(24, -2.5, 64, 5);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(89, 0, 3.6 + Math.sin(now * 0.025) * 1.1, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     this.drawGlovedHand(ctx, rightHandX, rightHandY);
     this.drawGlovedHand(ctx, leftHandX, leftHandY);
 
-    if (p.muzzleFlashTimer > 0 && wepId !== 'flamethrower') {
-      ctx.fillStyle = evolved ? '#38bdf8' : '#fde047';
+    if (p.muzzleFlashTimer > 0 && wepId !== 'flamethrower' && wepId !== 'cryogun' && wepId !== 'sawlauncher') {
+      ctx.fillStyle =
+        wepId === 'tesla' || wepId === 'plasma' || evolved ? '#38bdf8' : '#fde047';
       ctx.beginPath();
       ctx.moveTo(muzzleTipX, 0);
-      ctx.lineTo(muzzleTipX + 22, -10);
-      ctx.lineTo(muzzleTipX + 14, 0);
-      ctx.lineTo(muzzleTipX + 23, 10);
+      ctx.lineTo(muzzleTipX + 24, -11);
+      ctx.lineTo(muzzleTipX + 15, 0);
+      ctx.lineTo(muzzleTipX + 24, 11);
       ctx.closePath();
       ctx.fill();
     }
 
+    ctx.restore();
+  }
+
+  private drawSpinningSawDisc(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    radius: number,
+    spinAngle: number,
+    bladeColor: string,
+    hubColor: string
+  ): void {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(spinAngle);
+
+    const teeth = 8;
+    ctx.fillStyle = bladeColor;
+    ctx.strokeStyle = '#090d16';
+    ctx.lineWidth = 2.0;
+    ctx.beginPath();
+    for (let i = 0; i < teeth; i++) {
+      const a0 = (i / teeth) * Math.PI * 2;
+      const aTip = a0 + (0.55 / teeth) * Math.PI * 2;
+      const a1 = ((i + 1) / teeth) * Math.PI * 2;
+      const innerR = radius * 0.72;
+      if (i === 0) {
+        ctx.moveTo(Math.cos(a0) * innerR, Math.sin(a0) * innerR);
+      }
+      ctx.lineTo(Math.cos(aTip) * radius, Math.sin(aTip) * radius);
+      ctx.lineTo(Math.cos(a1) * innerR, Math.sin(a1) * innerR);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = hubColor;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1983,12 +2699,49 @@ export class CartoonRenderer {
   }
 
   private drawBulletsAndFX(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    const now = performance.now();
     for (const b of state.bullets) {
       if (!this.inView(b.x, b.y, 65)) continue;
       const ang = Math.atan2(b.vy, b.vx);
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(ang);
+
+      if (b.sawblade) {
+        ctx.globalAlpha = 0.34;
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = b.radius * 1.45;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-26, 0);
+        ctx.lineTo(0, 0);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        this.drawSpinningSawDisc(
+          ctx,
+          0,
+          0,
+          b.radius * 1.18,
+          now * 0.026,
+          b.color === '#fb7185' ? '#fda4af' : '#f8fafc',
+          b.color === '#fb7185' ? '#facc15' : '#ef4444'
+        );
+        ctx.restore();
+        continue;
+      }
+
+      if (b.cryo) {
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius * 1.9, 0, Math.PI * 2);
+        ctx.fillStyle = b.color === '#60a5fa' ? 'rgba(96, 165, 250, 0.58)' : 'rgba(103, 232, 249, 0.56)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius * 0.92, 0, Math.PI * 2);
+        ctx.fillStyle = '#f0f9ff';
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
 
       if (b.flame) {
         ctx.beginPath();
