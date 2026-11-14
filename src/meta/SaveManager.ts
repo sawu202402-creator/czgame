@@ -6,7 +6,7 @@ const SAVE_KEY = 'czgame_zombie_defense_save_v1';
 const DEFAULT_SAVE: SaveData = {
   agentLevel: 1,
   agentXp: 0,
-  gold: 150,
+  gold: 80,
   upgrades: {
     hp: 0,
     reload: 0,
@@ -39,9 +39,9 @@ export const UPGRADE_TRACKS: UpgradeTrackMeta[] = [
     icon: '❤️',
     desc: '永久提升角色最大生命值',
     maxLevel: 10,
-    baseCost: 80,
-    costStep: 55,
-    valueText: (lvl) => `${100 + lvl * 20} HP`,
+    baseCost: 110,
+    costStep: 85,
+    valueText: (lvl) => `${100 + lvl * 18} HP`,
   },
   {
     key: 'reload',
@@ -49,9 +49,9 @@ export const UPGRADE_TRACKS: UpgradeTrackMeta[] = [
     icon: '⚡',
     desc: '永久加快所有武器换弹速度',
     maxLevel: 10,
-    baseCost: 90,
-    costStep: 65,
-    valueText: (lvl) => `+${lvl * 7}% 速度`,
+    baseCost: 120,
+    costStep: 90,
+    valueText: (lvl) => `+${lvl * 6}% 速度`,
   },
   {
     key: 'speed',
@@ -59,9 +59,9 @@ export const UPGRADE_TRACKS: UpgradeTrackMeta[] = [
     icon: '👟',
     desc: '永久提升角色移动与拉扯速度',
     maxLevel: 8,
-    baseCost: 100,
-    costStep: 75,
-    valueText: (lvl) => `+${lvl * 4}% 移速`,
+    baseCost: 135,
+    costStep: 100,
+    valueText: (lvl) => `+${lvl * 3.5}% 移速`,
   },
   {
     key: 'repair',
@@ -69,8 +69,8 @@ export const UPGRADE_TRACKS: UpgradeTrackMeta[] = [
     icon: '🔨',
     desc: '提升修窗速度与木板耐久上限',
     maxLevel: 8,
-    baseCost: 75,
-    costStep: 50,
+    baseCost: 100,
+    costStep: 75,
     valueText: (lvl) => `+${lvl * 12}% 修筑`,
   },
   {
@@ -79,9 +79,9 @@ export const UPGRADE_TRACKS: UpgradeTrackMeta[] = [
     icon: '💵',
     desc: '每局开局自带更多初始钞票',
     maxLevel: 10,
-    baseCost: 85,
-    costStep: 60,
-    valueText: (lvl) => `$${150 + lvl * 80}`,
+    baseCost: 125,
+    costStep: 95,
+    valueText: (lvl) => `$${80 + lvl * 45}`,
   },
 ];
 
@@ -120,7 +120,7 @@ class SaveService {
   }
 
   public xpForNextLevel(level: number): number {
-    return 100 + (level - 1) * 65;
+    return 120 + (level - 1) * 85;
   }
 
   public addRewards(goldEarned: number, xpEarned: number): { leveledUp: boolean; oldLevel: number; newLevel: number } {
@@ -133,7 +133,7 @@ class SaveService {
       this.data.agentXp -= this.xpForNextLevel(this.data.agentLevel);
       this.data.agentLevel += 1;
       // 每次特工升级额外赠送一笔奖金，且每级被动提升 3% 全枪械伤害！
-      this.data.gold += 60;
+      this.data.gold += 40;
       leveledUp = true;
     }
     this.save();
@@ -176,13 +176,13 @@ class SaveService {
   public getEffectivePlayerStats() {
     const u = this.data.upgrades;
     return {
-      maxHp: 100 + u.hp * 20 + (this.data.agentLevel - 1) * 5,
-      reloadMultiplier: Math.max(0.35, 1 - u.reload * 0.07),
-      moveSpeed: 235 * (1 + u.speed * 0.04),
+      maxHp: 100 + u.hp * 18 + (this.data.agentLevel - 1) * 4,
+      reloadMultiplier: Math.max(0.4, 1 - u.reload * 0.06),
+      moveSpeed: 232 * (1 + u.speed * 0.035),
       repairSpeedMultiplier: 1 + u.repair * 0.12,
       maxPlanks: 4 + Math.floor(u.repair / 3),
-      startCash: 150 + u.startCash * 80,
-      agentDamageBonus: 1 + (this.data.agentLevel - 1) * 0.04,
+      startCash: 80 + u.startCash * 45,
+      agentDamageBonus: 1 + (this.data.agentLevel - 1) * 0.03,
     };
   }
 }

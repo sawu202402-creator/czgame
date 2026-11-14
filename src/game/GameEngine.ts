@@ -87,6 +87,7 @@ export class GameEngine {
       fever: 0,
       feverTimer: 0,
       electricFortifyWaves: 0,
+      repairsPaidThisWave: 0,
       powerUpTimers: {
         overdrive: 0,
         nuke: 0,
@@ -101,6 +102,9 @@ export class GameEngine {
         angle: 0,
         hp: pStats.maxHp,
         maxHp: pStats.maxHp,
+        armor: 0,
+        maxArmor: 100,
+        hitFlashTimer: 0,
         invulnTimer: 1.5,
         weapons: [
           {
@@ -156,6 +160,7 @@ export class GameEngine {
       bullets: [],
       grenadesThrown: [],
       spits: [],
+      acidPools: [],
       drops: [],
       chests: [],
       turrets: [],
@@ -378,8 +383,9 @@ export class GameEngine {
     if (!s) return { ok: false, msg: '' };
     const def = WEAPONS[weaponId];
     const unlockedRooms = this.getUnlockedExtraRoomsCount();
-    if (unlockedRooms < def.unlockRoomsRequired && s.wave < def.unlockRoomsRequired * 2 + 1) {
-      return { ok: false, msg: `需先在地图中开启 ${def.unlockRoomsRequired} 个新区域！` };
+    // 严格按照 SAS2 规则：必须真实花钱开门拓展新防区，才能授权解锁对应高阶重火器！
+    if (unlockedRooms < def.unlockRoomsRequired) {
+      return { ok: false, msg: `🔒 需先在地图中开门解锁 ${def.unlockRoomsRequired} 个新区域！` };
     }
 
     const ownedIdx = s.player.weapons.findIndex((w) => w.defId === weaponId);
@@ -394,7 +400,7 @@ export class GameEngine {
         s.player.activeSlot = ownedIdx;
         return { ok: true, msg: '弹药已满，已装备上阵！' };
       }
-      if (s.cash < def.ammoCost) return { ok: false, msg: '钞票不足！' };
+      if (s.cash < def.ammoCost) return { ok: false, msg: `钞票不足 ($${def.ammoCost})！` };
       s.cash -= def.ammoCost;
       w.mag = this.getMaxMag(weaponId, w.evolved);
       w.reserve = maxRes;
@@ -403,20 +409,20 @@ export class GameEngine {
       return { ok: true, msg: `已补满【${def.name}】弹药！` };
     }
 
-    if (s.cash < def.shopCost) return { ok: false, msg: '钞票不足！杀僵尸或修窗赚钞票' };
+    if (s.cash < def.shopCost) return { ok: false, msg: `钞票不足 ($${def.shopCost})！迎战尸潮攒军费` };
     s.cash -= def.shopCost;
     this.giveOrRefillWeapon(weaponId, false);
     SoundFX.fanfare();
     return { ok: true, msg: `成功购入并装备【${def.name}】！` };
   }
 
-  public evolveActiveWeaponInShop(cost = 1250): { ok: boolean; msg: string } {
+  public evolveActiveWeaponInShop(cost = 1850): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
     const wep = s.player.weapons[s.player.activeSlot];
     const def = WEAPONS[wep.defId];
     if (wep.evolved) return { ok: false, msg: '当前武器已经是超武形态！' };
-    if (s.cash < cost) return { ok: false, msg: '钞票不足！' };
+    if (s.cash < cost) return { ok: false, msg: `钞票不足 ($${cost})！` };
 
     s.cash -= cost;
     wep.evolved = true;
@@ -427,33 +433,43 @@ export class GameEngine {
     return { ok: true, msg: `⚡ 超武觉醒：【${def.superName}】！` };
   }
 
-  public buyShopTacticalItem(item: 'grenades' | 'medkit' | 'turret' | 'all_ammo'): { ok: boolean; msg: string } {
+  public buyShopTacticalItem(
+    item: 'grenades' | 'medkit' | 'turret' | 'all_ammo' | 'armor'
+  ): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
+    if (item === 'armor') {
+      if (s.player.armor >= s.player.maxArmor) return { ok: false, msg: '当前防弹护甲已满 (100/100)！' };
+      if (s.cash < 380) return { ok: false, msg: '钞票不足 ($380)' };
+      s.cash -= 380;
+      s.player.armor = Math.min(s.player.maxArmor, s.player.armor + 65);
+      SoundFX.fanfare();
+      return { ok: true, msg: '🦺 已穿戴凯夫拉防弹插板 (+65 护甲，抵消 70% 受击伤害)！' };
+    }
     if (item === 'grenades') {
-      if (s.cash < 150) return { ok: false, msg: '钞票不足 ($150)' };
-      s.cash -= 150;
+      if (s.cash < 220) return { ok: false, msg: '钞票不足 ($220)' };
+      s.cash -= 220;
       s.player.grenades += 3;
       SoundFX.reloadDone();
-      return { ok: true, msg: '💣 已购入 3 颗高爆破片手雷 (按 G 投掷)！' };
+      return { ok: true, msg: '💣 已购入 3 颗高爆破片手雷！' };
     }
     if (item === 'medkit') {
       if (s.player.hp >= s.player.maxHp) return { ok: false, msg: '当前生命值已满！' };
-      if (s.cash < 200) return { ok: false, msg: '钞票不足 ($200)' };
-      s.cash -= 200;
+      if (s.cash < 300) return { ok: false, msg: '钞票不足 ($300)' };
+      s.cash -= 300;
       s.player.hp = s.player.maxHp;
       SoundFX.fanfare();
       return { ok: true, msg: '❤️ 战地急救完成，生命值已回满！' };
     }
     if (item === 'turret') {
-      if (s.cash < 450) return { ok: false, msg: '钞票不足 ($450)' };
-      s.cash -= 450;
-      s.turrets.push({ x: s.player.x + 25, y: s.player.y, angle: s.player.angle, fireCd: 0, life: 50 });
+      if (s.cash < 650) return { ok: false, msg: '钞票不足 ($650)' };
+      s.cash -= 650;
+      s.turrets.push({ x: s.player.x + 25, y: s.player.y, angle: s.player.angle, fireCd: 0, life: 38 });
       SoundFX.fanfare();
-      return { ok: true, msg: '🛰️ 自动哨戒机枪塔已部署在身边！' };
+      return { ok: true, msg: '🛰️ 自动哨戒机枪塔已部署 (38秒)！' };
     }
-    if (s.cash < 180) return { ok: false, msg: '钞票不足 ($180)' };
-    s.cash -= 180;
+    if (s.cash < 320) return { ok: false, msg: '钞票不足 ($320)' };
+    s.cash -= 320;
     for (const w of s.player.weapons) {
       const def = WEAPONS[w.defId];
       w.mag = this.getMaxMag(w.defId, w.evolved);
@@ -492,6 +508,7 @@ export class GameEngine {
     if (!s) return;
     s.wave = wave;
     s.waveState = 'fighting';
+    s.repairsPaidThisWave = 0;
 
     const p = s.player;
     for (let i = p.weapons.length - 1; i >= 0; i--) {
@@ -721,6 +738,7 @@ export class GameEngine {
     this.updateBullets(dt);
     this.updateZombies(dt);
     this.updateSpits(dt);
+    this.updateAcidPools(dt);
     this.updateDrops(dt);
     this.updateFX(dt);
 
@@ -756,7 +774,7 @@ export class GameEngine {
         if (s.electricFortifyWaves > 0) s.electricFortifyWaves -= 1;
 
         if (s.relicIds.includes('piggy_bank') && s.cash > 0) {
-          const interest = Math.min(450, Math.round(s.cash * 0.16));
+          const interest = Math.min(180, Math.round(s.cash * 0.1));
           s.cash += interest;
           this.spawnFloatingText(s.player.x, s.player.y - 42, `🐷 存钱罐利息 +$${interest}!`, '#fde047', 1.3);
           SoundFX.coin();
@@ -825,7 +843,7 @@ export class GameEngine {
       const unlocked = s.rooms.filter((r) => r.unlocked);
       const rm = unlocked[Math.floor(Math.random() * unlocked.length)];
       const rc = rm.rects[0];
-      const thiefHp = Math.round((280 + s.wave * 95 + Math.pow(Math.max(0, s.wave - 3), 1.6) * 65) * (1 + (s.stage.index - 1) * 0.3));
+      const thiefHp = Math.round((320 + s.wave * 110 + Math.pow(Math.max(0, s.wave - 3), 1.65) * 75) * (1 + (s.stage.index - 1) * 0.34));
       s.zombies.push({
         id: this.nextEntityId++,
         kind: 'thief',
@@ -836,10 +854,10 @@ export class GameEngine {
         radius: 25,
         hp: thiefHp,
         maxHp: thiefHp,
-        speed: 205,
+        speed: 214,
         damage: 0,
-        cashReward: 260,
-        xpReward: 48,
+        cashReward: 130,
+        xpReward: 42,
         color: '#facc15',
         targetWindowId: null,
         insideBuilding: true,
@@ -848,62 +866,62 @@ export class GameEngine {
         slowTimer: 0,
         stunTimer: 0,
         attackCd: 0,
-        rangedCd: 0,
-        fleeTimer: 15,
+        rangedCd: 5, // 最多受击掉落 5 枚金币，杜绝高频冲锋枪无限刷钱！
+        fleeTimer: 14,
         wobblePhase: Math.random() * 6,
         facingAngle: 0,
         attackAnim: 0,
       });
-      this.showBanner('💰 黄金盗宝僵尸出现！集火打爆它掉满地钞票+神秘宝物箱！', 3.5);
+      this.showBanner('💰 黄金盗宝僵尸出现！集火打爆它抢夺神秘宝物箱！', 3.5);
       return;
     }
 
-    // 中后期指数级血量与移速膨胀曲线，匹配玩家重火力与超武成长！
-    const stageMult = 1 + (s.stage.index - 1) * 0.34;
+    // 紧绷硬核的尸潮血量/移速膨胀与赏金衰减曲线！
+    const stageMult = 1 + (s.stage.index - 1) * 0.38;
     const hpScale =
-      (1 + (s.wave - 1) * 0.35 + Math.pow(Math.max(0, s.wave - 3), 1.72) * 0.32) * stageMult;
-    const dmgScale = 1 + Math.max(0, s.wave - 2) * 0.08 + (s.stage.index - 1) * 0.14;
-    const cashTaper = 1 / (1 + Math.max(0, s.wave - 5) * 0.08);
+      (1 + (s.wave - 1) * 0.42 + Math.pow(Math.max(0, s.wave - 3), 1.76) * 0.36) * stageMult;
+    const dmgScale = 1 + Math.max(0, s.wave - 1) * 0.095 + (s.stage.index - 1) * 0.16;
+    const cashTaper = 1 / (1 + Math.max(0, s.wave - 3) * 0.14);
 
-    let hp = 62 * hpScale;
-    let speed = 102 + Math.min(78, s.wave * 6.5);
+    let hp = 68 * hpScale;
+    let speed = 108 + Math.min(86, s.wave * 7.2);
     let radius = 24;
-    let damage = Math.round(15 * dmgScale);
-    let cash = Math.max(14, Math.round(22 * cashTaper));
-    let xp = 11;
+    let damage = Math.round(17 * dmgScale);
+    let cash = Math.max(5, Math.round(10 * cashTaper));
+    let xp = 10;
     let color = '#4ade80';
 
     if (kind === 'runner') {
-      hp = 45 * hpScale;
-      speed = 174 + Math.min(86, s.wave * 7);
+      hp = 50 * hpScale;
+      speed = 182 + Math.min(92, s.wave * 7.8);
       radius = 21;
-      damage = Math.round(13 * dmgScale);
-      cash = Math.max(16, Math.round(26 * cashTaper));
-      xp = 13;
+      damage = Math.round(15 * dmgScale);
+      cash = Math.max(6, Math.round(12 * cashTaper));
+      xp = 12;
       color = '#fb7185';
     } else if (kind === 'spitter') {
-      hp = 88 * hpScale;
-      speed = 98 + Math.min(48, s.wave * 4);
+      hp = 98 * hpScale;
+      speed = 104 + Math.min(54, s.wave * 4.5);
       radius = 27;
-      damage = Math.round(16 * dmgScale);
-      cash = Math.max(22, Math.round(34 * cashTaper));
-      xp = 17;
+      damage = Math.round(18 * dmgScale);
+      cash = Math.max(8, Math.round(16 * cashTaper));
+      xp = 16;
       color = '#a3e635';
     } else if (kind === 'miniboss') {
-      hp = 780 * hpScale;
-      speed = 96 + Math.min(52, s.wave * 4.5);
+      hp = 880 * hpScale;
+      speed = 102 + Math.min(58, s.wave * 5);
       radius = 38;
-      damage = Math.round(28 * dmgScale);
-      cash = 220;
-      xp = 68;
+      damage = Math.round(32 * dmgScale);
+      cash = 110;
+      xp = 62;
       color = '#a855f7';
     } else if (kind === 'boss') {
-      hp = 2100 * hpScale;
-      speed = 92 + Math.min(48, s.wave * 4);
+      hp = 2450 * hpScale;
+      speed = 98 + Math.min(54, s.wave * 4.5);
       radius = 52;
-      damage = Math.round(38 * dmgScale);
-      cash = 520;
-      xp = 150;
+      damage = Math.round(42 * dmgScale);
+      cash = 280;
+      xp = 140;
       color = '#ef4444';
     }
 
@@ -948,6 +966,7 @@ export class GameEngine {
     const def = WEAPONS[wep.defId];
 
     if (p.invulnTimer > 0) p.invulnTimer -= dt;
+    if (p.hitFlashTimer > 0) p.hitFlashTimer = Math.max(0, p.hitFlashTimer - dt);
     if (p.fireCooldown > 0) p.fireCooldown -= dt;
     if (p.grenadeCooldown > 0) p.grenadeCooldown -= dt;
     if (p.muzzleFlashTimer > 0) p.muzzleFlashTimer -= dt;
@@ -972,8 +991,14 @@ export class GameEngine {
     }
 
     const mv = this.input.getMoveVector();
-    let speed = pStats.moveSpeed * 1.06 * s.modifiers.moveSpeedMult * def.moveSpeedMult;
-    if (s.feverTimer > 0 || s.powerUpTimers.overdrive > 0) speed *= 1.26;
+    const inAcid = s.acidPools.some((ap) => Math.hypot(p.x - ap.x, p.y - ap.y) <= ap.radius + p.radius * 0.5);
+    let speed =
+      pStats.moveSpeed *
+      1.05 *
+      s.modifiers.moveSpeedMult *
+      def.moveSpeedMult *
+      (inAcid ? 0.72 : 1);
+    if (s.feverTimer > 0 || s.powerUpTimers.overdrive > 0) speed *= 1.24;
 
     const oldX = p.x;
     const oldY = p.y;
@@ -1251,11 +1276,17 @@ export class GameEngine {
         if (p.repairProgress >= 1) {
           p.repairProgress = 0;
           win.planks += 1;
-          const cashBonus = 15;
-          s.cash += cashBonus;
           SoundFX.repair();
-          this.spawnFloatingText(cx, cy - 16, `🔨 修窗 +$${cashBonus}`, '#fde047', 1);
-          if (s.modifiers.repairHealRatio > 0) {
+          // 每波最多前 6 块修补木板发放赏金，杜绝留最后一只僵尸无限修窗刷钱！
+          if (s.repairsPaidThisWave < 6) {
+            s.repairsPaidThisWave += 1;
+            const cashBonus = 8;
+            s.cash += cashBonus;
+            this.spawnFloatingText(cx, cy - 16, `🔨 修窗 +$${cashBonus}`, '#fde047', 1);
+          } else {
+            this.spawnFloatingText(cx, cy - 16, '🔨 已加固', '#cbd5e1', 0.9);
+          }
+          if (s.modifiers.repairHealRatio > 0 && s.repairsPaidThisWave <= 6) {
             const heal = Math.round(p.maxHp * s.modifiers.repairHealRatio);
             p.hp = Math.min(p.maxHp, p.hp + heal);
             this.spawnFloatingText(p.x, p.y - 26, `+${heal} HP`, '#4ade80', 1);
@@ -1421,15 +1452,16 @@ export class GameEngine {
       this.showBanner('🐕 机械警犬已出笼！自动帮你捡全图钞票并撕咬僵尸！', 3.4);
     } else if (st.type === 'vending_machine') {
       const roll = Math.random();
-      if (roll < 0.35) {
+      if (roll < 0.36) {
         p.hp = p.maxHp;
-        this.spawnFloatingText(st.x, st.y - 34, '🍔 能量汉堡：生命全满！', '#4ade80', 1.25);
-      } else if (roll < 0.7) {
-        s.powerUpTimers.overdrive = 10;
-        this.spawnFloatingText(st.x, st.y - 34, '🥤 狂暴汽水：10秒无限火力！', '#f97316', 1.25);
+        p.armor = Math.min(p.maxArmor, p.armor + 35);
+        this.spawnFloatingText(st.x, st.y - 34, '🍔 能量汉堡：满血 + 35护甲！', '#4ade80', 1.25);
+      } else if (roll < 0.75) {
+        s.powerUpTimers.overdrive = 7;
+        this.spawnFloatingText(st.x, st.y - 34, '🥤 狂暴汽水：7秒无限火力！', '#f97316', 1.25);
       } else {
-        s.cash += 380;
-        this.spawnFloatingText(st.x, st.y - 34, '🎰 扭蛋头奖 +$380!', '#fde047', 1.35);
+        s.cash += 300;
+        this.spawnFloatingText(st.x, st.y - 34, '🎰 扭蛋头奖 +$300!', '#fde047', 1.35);
       }
       SoundFX.fanfare();
     } else if (st.type === 'laser_trap') {
@@ -1723,11 +1755,12 @@ export class GameEngine {
       );
     }
 
-    if (z.kind === 'thief' && Math.random() < 0.45) {
+    if (z.kind === 'thief' && z.rangedCd > 0 && Math.random() < 0.38) {
+      z.rangedCd -= 1;
       s.drops.push({
         id: this.nextEntityId++,
         kind: 'cash',
-        value: 20,
+        value: 12,
         x: z.x + (Math.random() - 0.5) * 28,
         y: z.y + (Math.random() - 0.5) * 28,
         life: 22,
@@ -1776,16 +1809,16 @@ export class GameEngine {
 
     if (s.relicIds.includes('vamp_fangs')) {
       s.player.vampCounter += 1;
-      if (s.player.vampCounter >= 12) {
+      if (s.player.vampCounter >= 18) {
         s.player.vampCounter = 0;
-        const heal = Math.round(s.player.maxHp * 0.1);
+        const heal = Math.round(s.player.maxHp * 0.08);
         s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
         this.spawnFloatingText(s.player.x, s.player.y - 30, `🦇 吸血 +${heal}`, '#4ade80', 1.15);
       }
     }
 
-    if (s.relicIds.includes('chain_blast') && Math.random() < 0.25) {
-      this.explodeAt(z.x, z.y, 120, 90 * s.modifiers.damageMult);
+    if (s.relicIds.includes('chain_blast') && Math.random() < 0.2) {
+      this.explodeAt(z.x, z.y, 115, 85 * s.modifiers.damageMult);
     }
 
     const cashMult = s.modifiers.cashMult * (s.powerUpTimers.double_cash > 0 ? 2 : 1);
@@ -1821,7 +1854,7 @@ export class GameEngine {
       });
       SoundFX.fanfare();
       this.showBanner('💰 成功击毙盗宝僵尸！爆出【神秘宝物箱】！', 3.2);
-    } else if (Math.random() < (z.kind === 'miniboss' || z.kind === 'boss' ? 0.85 : 0.065)) {
+    } else if (Math.random() < (z.kind === 'miniboss' || z.kind === 'boss' ? 0.55 : 0.035)) {
       const types: PowerUpType[] = ['overdrive', 'nuke', 'carpenter', 'double_cash', 'freeze'];
       const pType = types[Math.floor(Math.random() * types.length)];
       s.drops.push({
@@ -1954,10 +1987,10 @@ export class GameEngine {
           if (z.attackCd <= 0) {
             const baseTearCd =
               z.kind === 'boss' || z.kind === 'miniboss'
-                ? 0.48
+                ? 0.42
                 : z.kind === 'runner'
-                  ? Math.max(0.45, 0.82 - s.wave * 0.03)
-                  : Math.max(0.5, 1.06 - s.wave * 0.04);
+                  ? Math.max(0.38, 0.72 - s.wave * 0.03)
+                  : Math.max(0.44, 0.94 - s.wave * 0.04);
             z.attackCd = baseTearCd;
             z.attackAnim = 1.0;
 
@@ -2110,14 +2143,30 @@ export class GameEngine {
     );
   }
 
-  private damagePlayer(amount: number): void {
+  private damagePlayer(amount: number, invulnDur = 0.32): void {
     const s = this.state!;
     const p = s.player;
     if (p.invulnTimer > 0 || s.waveState === 'ended') return;
-    p.hp = Math.max(0, p.hp - amount);
-    p.invulnTimer = 0.45;
-    s.camera.shake = Math.max(s.camera.shake, 0.55);
-    this.spawnFloatingText(p.x, p.y - 30, `-${amount}`, '#f87171', 1.25);
+
+    let hpLoss = amount;
+    let armorAbsorbed = 0;
+    if (p.armor > 0) {
+      armorAbsorbed = Math.min(p.armor, Math.round(amount * 0.7));
+      p.armor = Math.max(0, p.armor - armorAbsorbed);
+      hpLoss = Math.max(1, amount - armorAbsorbed);
+    }
+
+    p.hp = Math.max(0, p.hp - hpLoss);
+    p.invulnTimer = invulnDur;
+    p.hitFlashTimer = 0.24;
+    s.camera.shake = Math.max(s.camera.shake, 0.58);
+    this.spawnFloatingText(
+      p.x,
+      p.y - 30,
+      armorAbsorbed > 0 ? `-${hpLoss} (🛡️-${armorAbsorbed})` : `-${hpLoss}`,
+      armorAbsorbed > 0 ? '#7dd3fc' : '#f87171',
+      1.2
+    );
 
     if (p.hp <= 0) {
       PlatformSDK.gameplayStop();
@@ -2129,20 +2178,59 @@ export class GameEngine {
     }
   }
 
+  private spawnAcidPool(x: number, y: number, isBoss: boolean): void {
+    const s = this.state!;
+    if (s.acidPools.length >= 16) s.acidPools.shift();
+    const dur = isBoss ? 3.8 : 3.2;
+    s.acidPools.push({
+      x,
+      y,
+      radius: isBoss ? 44 : 34,
+      life: dur,
+      maxLife: dur,
+      isBoss,
+    });
+  }
+
   private updateSpits(dt: number): void {
     const s = this.state!;
     for (let i = s.spits.length - 1; i >= 0; i--) {
       const sp = s.spits[i];
+      const isBoss = sp.radius >= 9;
       sp.life -= dt;
       sp.x += sp.vx * dt;
       sp.y += sp.vy * dt;
-      if (sp.life <= 0 || this.findBulletBlocker(sp.x, sp.y, sp.radius)) {
+      const blocked = this.findBulletBlocker(sp.x, sp.y, sp.radius);
+      if (sp.life <= 0 || blocked) {
+        if (!blocked || Math.hypot(sp.x - s.player.x, sp.y - s.player.y) < 320) {
+          this.spawnAcidPool(sp.x - sp.vx * dt, sp.y - sp.vy * dt, isBoss);
+        }
         s.spits.splice(i, 1);
         continue;
       }
       if (Math.hypot(sp.x - s.player.x, sp.y - s.player.y) <= sp.radius + s.player.radius) {
+        this.spawnAcidPool(sp.x, sp.y, isBoss);
         s.spits.splice(i, 1);
         this.damagePlayer(sp.damage);
+      }
+    }
+  }
+
+  private updateAcidPools(dt: number): void {
+    const s = this.state!;
+    const p = s.player;
+    for (let i = s.acidPools.length - 1; i >= 0; i--) {
+      const ap = s.acidPools[i];
+      ap.life -= dt;
+      if (ap.life <= 0) {
+        s.acidPools.splice(i, 1);
+        continue;
+      }
+      if (
+        p.invulnTimer <= 0 &&
+        Math.hypot(p.x - ap.x, p.y - ap.y) <= ap.radius + p.radius * 0.45
+      ) {
+        this.damagePlayer(ap.isBoss ? 9 : 6, 0.55);
       }
     }
   }
@@ -2208,7 +2296,7 @@ export class GameEngine {
         }
       } else if (d.powerUp === 'carpenter') {
         for (const w of s.windows) w.planks = w.maxPlanks;
-        s.cash += 80;
+        s.cash += 40;
       } else {
         s.powerUpTimers[d.powerUp] = meta.duration;
       }

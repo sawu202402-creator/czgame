@@ -106,6 +106,15 @@ export interface AcidSpitEntity {
   life: number;
 }
 
+export interface AcidPoolEntity {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+  maxLife: number;
+  isBoss: boolean;
+}
+
 export interface DropItem {
   id: number;
   kind: 'cash' | 'xp' | 'powerup';
@@ -206,6 +215,7 @@ export interface RunSnapshot {
   fever: number;
   feverTimer: number;
   electricFortifyWaves: number;
+  repairsPaidThisWave: number;
   powerUpTimers: Record<PowerUpType, number>;
   player: {
     x: number;
@@ -214,6 +224,9 @@ export interface RunSnapshot {
     angle: number;
     hp: number;
     maxHp: number;
+    armor: number;
+    maxArmor: number;
+    hitFlashTimer: number;
     invulnTimer: number;
     weapons: WeaponInstance[];
     activeSlot: number;
@@ -247,6 +260,7 @@ export interface RunSnapshot {
   bullets: BulletEntity[];
   grenadesThrown: GrenadeEntity[];
   spits: AcidSpitEntity[];
+  acidPools: AcidPoolEntity[];
   drops: DropItem[];
   chests: TreasureChestEntity[];
   turrets: TurretEntity[];

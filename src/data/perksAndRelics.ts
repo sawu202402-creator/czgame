@@ -102,7 +102,7 @@ export const RELICS: RelicDef[] = [
   {
     id: 'piggy_bank',
     name: '黄金存钱罐',
-    desc: '每波结束时，按当前未花完的钞票额外发放 20% 理财利息！',
+    desc: '每波结束时，按当前未花完的钞票额外发放 10% 理财利息（单波上限 $180）！',
     icon: '🐷',
     rarity: 'epic',
   },
@@ -116,7 +116,7 @@ export const RELICS: RelicDef[] = [
   {
     id: 'vamp_fangs',
     name: '吸血蝙蝠挂件',
-    desc: '每击杀 12 只僵尸立刻回复 10% 最大生命值！',
+    desc: '每击杀 18 只僵尸立刻回复 8% 最大生命值！',
     icon: '🦇',
     rarity: 'rare',
   },
@@ -130,7 +130,7 @@ export const RELICS: RelicDef[] = [
   {
     id: 'chain_blast',
     name: '连环爆破罐',
-    desc: '击败僵尸时有 25% 概率引发卡通彩花爆炸，波及周围怪物！',
+    desc: '击败僵尸时有 20% 概率引发卡通彩花爆炸，波及周围怪物！',
     icon: '🎉',
     rarity: 'legendary',
   },
@@ -144,8 +144,8 @@ export const POWERUP_META: Record<
     name: '无限火力',
     icon: '🔥',
     color: '#f97316',
-    duration: 10,
-    banner: '🔥 无限火力！10秒免换弹狂扫！',
+    duration: 7,
+    banner: '🔥 无限火力！7秒免换弹狂扫！',
   },
   nuke: {
     name: '战术震爆弹',
@@ -165,14 +165,14 @@ export const POWERUP_META: Record<
     name: '双倍赏金',
     icon: '💎',
     color: '#eab308',
-    duration: 14,
-    banner: '💎 双倍钞票时间！疯狂刷钱！',
+    duration: 10,
+    banner: '💎 双倍钞票时间！把握赏金窗口！',
   },
   freeze: {
     name: '急冻寒流',
     icon: '❄️',
     color: '#06b6d4',
-    duration: 9,
-    banner: '❄️ 急冻时刻！全场僵尸变冰雕！',
+    duration: 7,
+    banner: '❄️ 急冻时刻！全场僵尸减速迟缓！',
   },
 };

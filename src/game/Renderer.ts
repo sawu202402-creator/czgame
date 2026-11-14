@@ -1,4 +1,5 @@
 import { POWERUP_META } from '../data/perksAndRelics';
+import { WEAPONS } from '../data/weapons';
 import { SaveManager } from '../meta/SaveManager';
 import { FloorTheme, PropKind } from '../types';
 import { Assets, SpriteKey, TileKey } from './AssetLoader';
@@ -314,6 +315,34 @@ export class CartoonRenderer {
         0,
         Math.PI * 2
       );
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 地面强酸/腐蚀熔岩毒潭（提示玩家及时走位规避减速与灼伤！）
+    const now = performance.now() * 0.007;
+    for (const ap of state.acidPools) {
+      if (!this.inView(ap.x, ap.y, ap.radius + 20)) continue;
+      const alpha = Math.min(1, ap.life / 0.8);
+      const pulse = 0.94 + Math.sin(now + ap.x * 0.05) * 0.06;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.arc(ap.x, ap.y, ap.radius * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = ap.isBoss ? 'rgba(225, 29, 72, 0.36)' : 'rgba(132, 204, 22, 0.38)';
+      ctx.fill();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = ap.isBoss ? '#fb7185' : '#bef264';
+      ctx.setLineDash([7, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 冒泡核心细节
+      const bx = ap.x + Math.cos(now * 1.3 + ap.y) * ap.radius * 0.38;
+      const by = ap.y + Math.sin(now * 1.1 + ap.x) * ap.radius * 0.38;
+      ctx.beginPath();
+      ctx.arc(bx, by, 5, 0, Math.PI * 2);
+      ctx.fillStyle = ap.isBoss ? '#fda4af' : '#ecfccb';
       ctx.fill();
       ctx.restore();
     }
@@ -788,7 +817,14 @@ export class CartoonRenderer {
     ctx.fillStyle = 'rgba(15, 23, 42, 0.34)';
     ctx.fill();
 
-    // 2. 无敌 / Fever 狂热光环
+    // 2. 防弹护甲微光环 & 无敌 / Fever 狂热光环
+    if (p.armor > 0) {
+      ctx.beginPath();
+      ctx.arc(0, 0, p.radius + 5.5, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+    }
     if (isFever || state.powerUpTimers.overdrive > 0 || p.invulnTimer > 0) {
       ctx.beginPath();
       ctx.arc(0, 0, p.radius + 10, 0, Math.PI * 2);
@@ -844,7 +880,7 @@ export class CartoonRenderer {
     ctx.restore();
     ctx.restore(); // 结束 rigScale
 
-    // 5. 换弹进度条与修窗环形读条（保持清晰世界尺寸，不随人物缩小而糊掉）
+    // 5. 换弹进度条、余弹预警与修窗环形读条（保持清晰世界尺寸，不随人物缩小而糊掉）
     if (p.reloadTimer > 0 && p.reloadDuration > 0) {
       const pct = 1 - p.reloadTimer / p.reloadDuration;
       const bw = 40;
@@ -852,6 +888,12 @@ export class CartoonRenderer {
       ctx.fillRect(-bw / 2 - 1.5, -p.radius - 19, bw + 3, 7);
       ctx.fillStyle = '#38bdf8';
       ctx.fillRect(-bw / 2, -p.radius - 17.5, bw * pct, 4.2);
+    } else {
+      const def = WEAPONS[activeWep.defId];
+      const maxMag = Math.max(2, Math.round(def.magSize * state.modifiers.magMult * (activeWep.evolved ? 1.5 : 1)));
+      if (activeWep.mag > 0 && activeWep.mag <= Math.max(2, Math.floor(maxMag * 0.2))) {
+        this.drawCachedLabel(ctx, '弹药偏低!', 0, -p.radius - 18, '#fde047', 10);
+      }
     }
 
     if (p.repairProgress > 0) {

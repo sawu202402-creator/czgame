@@ -381,9 +381,9 @@ const stagePolice = buildArchitecturalStage({
   stations: [
     { id: 'st_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 26.2 * G, y: 15.4 * G, cost: 0, label: '军火终端 [B]' },
     { id: 'st_air1', roomId: 'lobby', type: 'starter_airdrop', x: 15.8 * G, y: 21.4 * G, cost: 0, weaponId: 'plasma', label: '超武空投' },
-    { id: 'st_ammo1', roomId: 'detective', type: 'ammo_box', x: 20.2 * G, y: 8 * G, cost: 180, label: '弹药箱' },
-    { id: 'st_dog1', roomId: 'cells', type: 'mech_dog_cage', x: 36.5 * G, y: 9.2 * G, cost: 460, label: '解救警犬' },
-    { id: 'st_pap1', roomId: 'vault', type: 'pack_a_punch', x: 11.5 * G, y: 25.2 * G, cost: 1250, label: '超武改装台' },
+    { id: 'st_ammo1', roomId: 'detective', type: 'ammo_box', x: 20.2 * G, y: 8 * G, cost: 220, label: '弹药箱' },
+    { id: 'st_dog1', roomId: 'cells', type: 'mech_dog_cage', x: 36.5 * G, y: 9.2 * G, cost: 580, label: '解救警犬' },
+    { id: 'st_pap1', roomId: 'vault', type: 'pack_a_punch', x: 11.5 * G, y: 25.2 * G, cost: 1850, label: '超武改装台' },
     { id: 'st_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 30 * G, y: 23.2 * G, cost: 0, label: '军火终端 [B]' },
   ],
   barrels: [
@@ -484,11 +484,11 @@ const stageMall = buildArchitecturalStage({
   stations: [
     { id: 'ms_shop', roomId: 'lobby', type: 'armory_kiosk', x: 31.4 * G, y: 17 * G, cost: 0, label: '军火终端 [B]' },
     { id: 'ms_air', roomId: 'lobby', type: 'starter_airdrop', x: 22 * G, y: 22.5 * G, cost: 0, weaponId: 'launcher', label: '榴弹空投' },
-    { id: 'ms_vend', roomId: 'diner', type: 'vending_machine', x: 14.5 * G, y: 20 * G, cost: 160, label: '幸运贩卖机' },
-    { id: 'ms_dog', roomId: 'arcade', type: 'mech_dog_cage', x: 24 * G, y: 8.5 * G, cost: 460, label: '激活警犬' },
-    { id: 'ms_pap', roomId: 'arcade', type: 'pack_a_punch', x: 34 * G, y: 8.5 * G, cost: 1250, label: '超武改装舱' },
-    { id: 'ms_ammo', roomId: 'cargo', type: 'ammo_box', x: 43.5 * G, y: 19.5 * G, cost: 180, label: '弹药补给' },
-    { id: 'ms_laser', roomId: 'courtyard', type: 'laser_trap', x: 34.5 * G, y: 30 * G, cost: 260, label: '旋转激光塔' },
+    { id: 'ms_vend', roomId: 'diner', type: 'vending_machine', x: 14.5 * G, y: 20 * G, cost: 240, label: '幸运贩卖机' },
+    { id: 'ms_dog', roomId: 'arcade', type: 'mech_dog_cage', x: 24 * G, y: 8.5 * G, cost: 580, label: '激活警犬' },
+    { id: 'ms_pap', roomId: 'arcade', type: 'pack_a_punch', x: 34 * G, y: 8.5 * G, cost: 1850, label: '超武改装舱' },
+    { id: 'ms_ammo', roomId: 'cargo', type: 'ammo_box', x: 43.5 * G, y: 19.5 * G, cost: 220, label: '弹药补给' },
+    { id: 'ms_laser', roomId: 'courtyard', type: 'laser_trap', x: 34.5 * G, y: 30 * G, cost: 320, label: '旋转激光塔' },
   ],
   barrels: [
     { x: 29.5 * G, y: 23.5 * G, roomId: 'lobby' },
@@ -575,10 +575,10 @@ const stageLab = buildArchitecturalStage({
   stations: [
     { id: 'ls_shop', roomId: 'lobby', type: 'armory_kiosk', x: 32.8 * G, y: 10.5 * G, cost: 0, label: '军火终端 [B]' },
     { id: 'ls_air', roomId: 'lobby', type: 'starter_airdrop', x: 22.2 * G, y: 10.5 * G, cost: 0, weaponId: 'minigun', label: '加特林空投' },
-    { id: 'ls_dog', roomId: 'west_wing', type: 'mech_dog_cage', x: 15 * G, y: 13.5 * G, cost: 460, label: '释放机械犬' },
-    { id: 'ls_ammo', roomId: 'west_wing', type: 'ammo_box', x: 19 * G, y: 23.5 * G, cost: 180, label: '弹药补给柜' },
-    { id: 'ls_pap', roomId: 'east_wing', type: 'pack_a_punch', x: 41 * G, y: 22.5 * G, cost: 1250, label: '超武改造舱' },
-    { id: 'ls_laser', roomId: 'east_wing', type: 'laser_trap', x: 39 * G, y: 19.5 * G, cost: 240, label: '激光矩阵' },
+    { id: 'ls_dog', roomId: 'west_wing', type: 'mech_dog_cage', x: 15 * G, y: 13.5 * G, cost: 580, label: '释放机械犬' },
+    { id: 'ls_ammo', roomId: 'west_wing', type: 'ammo_box', x: 19 * G, y: 23.5 * G, cost: 220, label: '弹药补给柜' },
+    { id: 'ls_pap', roomId: 'east_wing', type: 'pack_a_punch', x: 41 * G, y: 22.5 * G, cost: 1850, label: '超武改造舱' },
+    { id: 'ls_laser', roomId: 'east_wing', type: 'laser_trap', x: 39 * G, y: 19.5 * G, cost: 300, label: '激光矩阵' },
     { id: 'ls_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 34.5 * G, y: 30.5 * G, cost: 0, label: '军火终端 [B]' },
   ],
   barrels: [

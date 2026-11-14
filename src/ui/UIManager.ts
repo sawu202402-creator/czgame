@@ -152,6 +152,7 @@ export class UIManager {
     this.hudRoot?.remove();
     this.hudCache = {};
     this.wepDomRefs = [];
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     const hud = document.createElement('div');
     hud.className = 'hud-overlay';
     hud.innerHTML = `
@@ -162,6 +163,10 @@ export class UIManager {
             <div class="bar-fill hp-fill" id="hud-hp-fill"></div>
             <span id="hud-hp-text">❤️ 100 / 100</span>
           </div>
+          <div class="bar-box armor-box" id="hud-armor-box" style="display:none">
+            <div class="bar-fill armor-fill" id="hud-armor-fill"></div>
+            <span id="hud-armor-text">🦺 护甲 0</span>
+          </div>
           <div class="bar-box lv-box">
             <div class="bar-fill lv-fill" id="hud-lv-fill"></div>
             <span id="hud-lv-text">⚔️ 战斗 Lv.1</span>
@@ -171,6 +176,10 @@ export class UIManager {
 
         <div class="hud-center">
           <div class="wave-pill" id="hud-wave">第 1 / 10 波</div>
+          <div class="boss-bar-wrap" id="hud-boss-box" style="display:none">
+            <div class="boss-bar-fill" id="hud-boss-fill"></div>
+            <span id="hud-boss-text">👑 狂暴尸王</span>
+          </div>
           <div class="fever-wrap">
             <div class="fever-fill" id="hud-fever-fill"></div>
             <span id="hud-fever-text">🌈 连杀狂热 FEVER</span>
@@ -179,7 +188,7 @@ export class UIManager {
         </div>
 
         <div class="hud-right">
-          <div class="cash-pill" id="hud-cash">💵 $150</div>
+          <div class="cash-pill" id="hud-cash">💵 $80</div>
           <div class="mini-btns">
             <button class="btn-cartoon btn-mini btn-blue" id="btn-autofire">🎯 自动射击</button>
             <button class="btn-cartoon btn-mini btn-gray" id="btn-mute">🔊</button>
@@ -201,11 +210,11 @@ export class UIManager {
 
       <div class="hud-bottom">
         <button class="btn-cartoon btn-green btn-armory-open" id="btn-open-armory">
-          🛒 军火商店 (B)
+          ${isTouch ? '🛒 军火商店' : '🛒 军火商店 (B)'}
         </button>
         <div class="weapon-slots" id="hud-weapons"></div>
-        <button class="btn-cartoon btn-mini btn-orange" id="btn-grenade">💣 手雷 x2 (G)</button>
-        <button class="btn-cartoon btn-mini btn-yellow" id="btn-reload">🔄 换弹 (R)</button>
+        <button class="btn-cartoon btn-mini btn-orange" id="btn-grenade">${isTouch ? '💣 手雷 x2' : '💣 手雷 x2 (G)'}</button>
+        <button class="btn-cartoon btn-mini btn-yellow" id="btn-reload">${isTouch ? '🔄 换弹' : '🔄 换弹 (R)'}</button>
       </div>
     `;
     this.uiLayer.appendChild(hud);
@@ -304,15 +313,15 @@ export class UIManager {
     const gunCards = WEAPON_LIST.map((w) => {
       const owned = s.player.weapons.find((inst) => inst.defId === w.id);
       const isEquipped = activeWep.defId === w.id;
-      const locked = unlockedRooms < w.unlockRoomsRequired && s.wave < w.unlockRoomsRequired * 2 + 1;
+      const locked = unlockedRooms < w.unlockRoomsRequired;
 
-      const dmgPct = Math.min(100, Math.round(((w.damage * w.pellets) / 185) * 100));
-      const ratePct = Math.min(100, Math.round((w.fireRate / 16) * 100));
+      const dmgPct = Math.min(100, Math.round(((w.damage * w.pellets) / 175) * 100));
+      const ratePct = Math.min(100, Math.round((w.fireRate / 15) * 100));
 
       let btnLabel = `💵 $${w.shopCost} 购买`;
       let btnClass = s.cash >= w.shopCost ? 'btn-green' : 'btn-disabled';
       if (locked) {
-        btnLabel = `🔒 开${w.unlockRoomsRequired}个新房间或第${w.unlockRoomsRequired * 2 + 1}波解锁`;
+        btnLabel = `🔒 需在地图开门解锁 ${w.unlockRoomsRequired} 个新区域`;
         btnClass = 'btn-disabled';
       } else if (owned) {
         if (w.maxReserve < 0) {
@@ -351,7 +360,7 @@ export class UIManager {
       `;
     }).join('');
 
-    const canEvolve = !activeWep.evolved && s.cash >= 1250;
+    const canEvolve = !activeWep.evolved && s.cash >= 1850;
 
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop">
@@ -361,15 +370,15 @@ export class UIManager {
               <img src="./assets/prop_armory_kiosk.png" alt="Shop" class="armory-logo" />
               <div>
                 <h2>🔫 特警战术军火库 (SAS Armory)</h2>
-                <span>已探索新区域：${unlockedRooms} 个 · 探索新房间自动解锁重型武器库</span>
+                <span>已开门拓展防区：${unlockedRooms} 个 · 花钱开门拓展新房间才能授权解锁重武器！</span>
               </div>
             </div>
             <div class="armory-wallet">
               <div class="cash-pill">💵 $${s.cash}</div>
               <button class="btn-cartoon btn-mini btn-yellow" id="btn-armory-ad" ${s.armoryAdCooldown > 0 ? 'disabled' : ''}>
-                ${s.armoryAdCooldown > 0 ? `🎬 军费冷却(${s.armoryAdCooldown.toFixed(0)}s)` : '🎬 紧急空投 +$500'}
+                ${s.armoryAdCooldown > 0 ? `🎬 军费冷却(${s.armoryAdCooldown.toFixed(0)}s)` : '🎬 紧急空投 +$450'}
               </button>
-              <button class="btn-cartoon btn-mini btn-gray" id="btn-close-armory">✖ 继续战斗 (B)</button>
+              <button class="btn-cartoon btn-mini btn-gray" id="btn-close-armory">✖ 继续战斗</button>
             </div>
           </header>
 
@@ -379,12 +388,13 @@ export class UIManager {
 
           <footer class="armory-tactical-bar">
             <button class="btn-cartoon ${canEvolve ? 'btn-purple' : 'btn-disabled'}" id="btn-shop-evolve" ${activeWep.evolved ? 'disabled' : ''}>
-              ${activeWep.evolved ? `✅ 已觉醒【${activeDef.superName}】` : `⚡ 觉醒【${activeDef.superName}】($1250)`}
+              ${activeWep.evolved ? `✅ 已觉醒【${activeDef.superName}】` : `⚡ 觉醒【${activeDef.superName}】($1850)`}
             </button>
-            <button class="btn-cartoon btn-yellow" data-tac="grenades">💣 破片手雷x3 ($150) [当前:${s.player.grenades}]</button>
-            <button class="btn-cartoon btn-blue" data-tac="all_ammo">📦 全枪满弹 ($180)</button>
-            <button class="btn-cartoon btn-green" data-tac="medkit">❤️ 急救满血 ($200)</button>
-            <button class="btn-cartoon btn-yellow" data-tac="turret">🛰️ 自动哨戒炮 ($450)</button>
+            <button class="btn-cartoon btn-blue" data-tac="armor">🦺 防弹护甲+65 ($380) [${Math.round(s.player.armor)}/100]</button>
+            <button class="btn-cartoon btn-yellow" data-tac="grenades">💣 破片手雷x3 ($220) [x${s.player.grenades}]</button>
+            <button class="btn-cartoon btn-blue" data-tac="all_ammo">📦 全枪满弹 ($320)</button>
+            <button class="btn-cartoon btn-green" data-tac="medkit">❤️ 急救满血 ($300)</button>
+            <button class="btn-cartoon btn-yellow" data-tac="turret">🛰️ 自动哨戒炮 ($650)</button>
           </footer>
         </div>
       </div>
@@ -396,12 +406,12 @@ export class UIManager {
 
     (this.modalRoot.querySelector('#btn-armory-ad') as HTMLButtonElement).onclick = async () => {
       if (s.armoryAdCooldown > 0) return;
-      const ok = await PlatformSDK.showRewardedAd('armory_free_cash', '军火库紧急军费空投 +$500');
+      const ok = await PlatformSDK.showRewardedAd('armory_free_cash', '军火库紧急军费空投 +$450');
       if (ok) {
-        s.cash += 500;
-        s.armoryAdCooldown = 60;
+        s.cash += 450;
+        s.armoryAdCooldown = 90;
         PlatformSDK.gameplayStart();
-        this.renderArmoryShop('💰 总部紧急军费 +$500 已到账！快选购强力重武器！');
+        this.renderArmoryShop('💰 总部紧急军费 +$450 已到账！');
       }
     };
 
@@ -413,13 +423,13 @@ export class UIManager {
     });
 
     (this.modalRoot.querySelector('#btn-shop-evolve') as HTMLButtonElement).onclick = () => {
-      const res = this.engine.evolveActiveWeaponInShop(1250);
+      const res = this.engine.evolveActiveWeaponInShop(1850);
       this.renderArmoryShop(res.msg);
     };
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-tac]').forEach((btn) => {
       btn.onclick = () => {
-        const item = btn.dataset.tac as 'grenades' | 'medkit' | 'turret' | 'all_ammo';
+        const item = btn.dataset.tac as 'grenades' | 'medkit' | 'turret' | 'all_ammo' | 'armor';
         const res = this.engine.buyShopTacticalItem(item);
         this.renderArmoryShop(res.msg);
       };
@@ -437,9 +447,11 @@ export class UIManager {
       }
     };
 
-    const lowHp = s.player.hp / s.player.maxHp < 0.3 ? '1' : '0';
-    setIfChanged('lowHp', lowHp, () => {
-      (this.hudRoot!.querySelector('#hud-vignette') as HTMLElement).classList.toggle('low-hp', lowHp === '1');
+    const vigState = `${s.player.hp / s.player.maxHp < 0.3 ? 1 : 0}|${s.player.hitFlashTimer > 0 ? 1 : 0}`;
+    setIfChanged('vig', vigState, () => {
+      const vig = this.hudRoot!.querySelector('#hud-vignette') as HTMLElement;
+      vig.classList.toggle('low-hp', s.player.hp / s.player.maxHp < 0.3);
+      vig.classList.toggle('hit-flash', s.player.hitFlashTimer > 0);
     });
 
     const hpTextStr = `❤️ ${Math.ceil(s.player.hp)} / ${s.player.maxHp}`;
@@ -448,6 +460,18 @@ export class UIManager {
       const hpText = this.hudRoot!.querySelector('#hud-hp-text') as HTMLElement;
       hpFill.style.width = `${Math.max(0, (s.player.hp / s.player.maxHp) * 100)}%`;
       hpText.textContent = hpTextStr;
+    });
+
+    const armorVal = Math.round(s.player.armor);
+    setIfChanged('armor', `${armorVal}`, () => {
+      const armorBox = this.hudRoot!.querySelector('#hud-armor-box') as HTMLElement;
+      if (armorVal > 0) {
+        armorBox.style.display = 'block';
+        (this.hudRoot!.querySelector('#hud-armor-fill') as HTMLElement).style.width = `${Math.min(100, armorVal)}%`;
+        (this.hudRoot!.querySelector('#hud-armor-text') as HTMLElement).textContent = `🦺 护甲 ${armorVal}`;
+      } else {
+        armorBox.style.display = 'none';
+      }
     });
 
     const lvStr = `${s.battleLevel}|${s.battleXp}|${s.battleXpNext}`;
@@ -471,6 +495,24 @@ export class UIManager {
       (this.hudRoot!.querySelector('#hud-wave') as HTMLElement).textContent = waveStr;
     });
 
+    // 顶部 Boss / 重装暴君醒目血条
+    const bossTarget =
+      s.zombies.find((z) => z.kind === 'boss') || s.zombies.find((z) => z.kind === 'miniboss');
+    const bossKey = bossTarget ? `${bossTarget.id}:${Math.ceil(bossTarget.hp)}` : 'none';
+    setIfChanged('bossHud', bossKey, () => {
+      const bossBox = this.hudRoot!.querySelector('#hud-boss-box') as HTMLElement;
+      if (bossTarget) {
+        bossBox.style.display = 'block';
+        const pct = Math.max(0, (bossTarget.hp / bossTarget.maxHp) * 100);
+        (this.hudRoot!.querySelector('#hud-boss-fill') as HTMLElement).style.width = `${pct}%`;
+        const title = bossTarget.kind === 'boss' ? '👑 狂暴尸王' : '🛡️ 重装暴君';
+        (this.hudRoot!.querySelector('#hud-boss-text') as HTMLElement).textContent =
+          `${title} ${Math.ceil(bossTarget.hp)} / ${Math.round(bossTarget.maxHp)}`;
+      } else {
+        bossBox.style.display = 'none';
+      }
+    });
+
     const feverKey = s.feverTimer > 0 ? `F:${s.feverTimer.toFixed(1)}` : `N:${Math.round(s.fever)}`;
     setIfChanged('fever', feverKey, () => {
       const feverFill = this.hudRoot!.querySelector('#hud-fever-fill') as HTMLElement;
@@ -491,7 +533,7 @@ export class UIManager {
       (this.hudRoot!.querySelector('#hud-cash') as HTMLElement).textContent = cashStr;
     });
 
-    const pulseShop = s.waveState === 'intermission' || (s.player.weapons.length === 1 && s.cash >= 280) ? '1' : '0';
+    const pulseShop = s.waveState === 'intermission' || (s.player.weapons.length === 1 && s.cash >= 420) ? '1' : '0';
     setIfChanged('pulseShop', pulseShop, () => {
       (this.hudRoot!.querySelector('#btn-open-armory') as HTMLButtonElement).classList.toggle(
         'shop-pulse',
@@ -499,7 +541,7 @@ export class UIManager {
       );
     });
 
-    const grenStr = `💣 手雷 x${s.player.grenades} (G)`;
+    const grenStr = this.engine.input.usingTouch ? `💣 手雷 x${s.player.grenades}` : `💣 手雷 x${s.player.grenades} (G)`;
     setIfChanged('gren', grenStr, () => {
       const grenBtn = this.hudRoot!.querySelector('#btn-grenade') as HTMLButtonElement;
       grenBtn.textContent = grenStr;
@@ -751,8 +793,8 @@ export class UIManager {
 
   public showSettlementModal(victory: boolean, s: RunSnapshot): void {
     this.armoryOpen = false;
-    const baseGold = Math.round(45 + s.wave * 24 + s.kills * 2.2 + (victory ? 180 : 0));
-    const baseXp = Math.round(35 + s.wave * 18 + s.kills * 1.5 + (victory ? 120 : 0));
+    const baseGold = Math.round(25 + s.wave * 14 + Math.min(220, s.kills * 0.45) + (victory ? 110 : 0));
+    const baseXp = Math.round(30 + s.wave * 16 + Math.min(260, s.kills * 0.65) + (victory ? 100 : 0));
     const zones = [2, 3, 5, 3, 2];
 
     this.modalRoot.innerHTML = `
