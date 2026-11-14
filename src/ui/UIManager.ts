@@ -115,7 +115,7 @@ export class UIManager {
             <h2>🗺️ 选择行动地图 (3张差异化建筑关卡)</h2>
             <div class="stage-list">${stagesHtml}</div>
             <div class="controls-tip">
-              💡 <strong>操作指南</strong>：<code>WASD</code> 移动，鼠标瞄准射击，<strong><code>B</code> 键打开【军火商店】买枪</strong>，<code>G</code> 或右键扔破片手雷，<code>Q</code> 切枪，<code>R</code> 换弹；左下角配备实时雷达小地图！
+              💡 <strong>双端操作支持</strong>：📱 <strong>手机端</strong>左半屏滑动走位、右半屏滑动转向（自动开火已默认开启，横屏体验更佳）；💻 <strong>电脑端</strong> <code>WASD</code> 移动、鼠标射击、<code>B</code> 军火商店、<code>G</code> 手雷、<code>Q</code> 切枪。
             </div>
           </section>
         </div>

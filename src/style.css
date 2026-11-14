@@ -191,6 +191,9 @@ body {
   .hub-grid {
     grid-template-columns: 1fr;
   }
+  .hub-grid > .hub-panel:last-child {
+    order: -1;
+  }
 }
 
 .hub-panel {
@@ -660,6 +663,9 @@ body {
   padding: 22px;
   max-width: 680px;
   width: 100%;
+  max-height: 92vh;
+  max-height: 92dvh;
+  overflow-y: auto;
   text-align: center;
   box-shadow: 0 8px 0 #0f172a;
 }
@@ -1134,5 +1140,39 @@ body {
   .armory-gun-grid {
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
     gap: 8px;
+  }
+}
+
+/* 手机竖屏窄屏专属布局微调 */
+@media (max-width: 560px) {
+  .hud-top {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .hud-left {
+    order: 1;
+  }
+  .hud-right {
+    order: 2;
+    margin-left: auto;
+  }
+  .hud-center {
+    order: 3;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+  .choice-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .choice-card {
+    padding: 10px 12px;
+  }
+  .choice-icon {
+    font-size: 26px;
+    margin-bottom: 2px;
   }
 }
