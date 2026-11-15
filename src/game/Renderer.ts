@@ -30,7 +30,7 @@ const PROP_SPRITE_MAP: Record<PropKind, SpriteKey> = {
   fountain: 'prop_fountain',
 };
 
-const MAP_PAD = 440;
+const MAP_PAD = 560;
 
 function hash2D(x: number, y: number, seed = 1337): number {
   let h = (Math.imul(Math.floor(x), 374761393) + Math.imul(Math.floor(y), 668265263) + seed) | 0;
@@ -413,18 +413,33 @@ export class CartoonRenderer {
       const ox = wcx + win.spawnOutsideOffset.dx;
       const oy = wcy + win.spawnOutsideOffset.dy;
 
-      // 泥泞踩踏冲锋痕迹
+      // 从地图外围边缘一路延伸至破窗的泥泞尸潮踩踏土路（直观提示户外来袭方向！）
       const mudGrad = mctx.createLinearGradient(ox, oy, wcx, wcy);
-      mudGrad.addColorStop(0, 'rgba(15, 12, 10, 0)');
-      mudGrad.addColorStop(0.45, 'rgba(24, 18, 14, 0.36)');
-      mudGrad.addColorStop(1, 'rgba(38, 16, 16, 0.46)');
+      mudGrad.addColorStop(0, 'rgba(15, 12, 10, 0.05)');
+      mudGrad.addColorStop(0.25, 'rgba(24, 18, 14, 0.28)');
+      mudGrad.addColorStop(0.75, 'rgba(28, 18, 14, 0.38)');
+      mudGrad.addColorStop(1, 'rgba(38, 16, 16, 0.48)');
       mctx.strokeStyle = mudGrad;
-      mctx.lineWidth = 48;
+      mctx.lineWidth = 64;
       mctx.lineCap = 'round';
       mctx.beginPath();
       mctx.moveTo(ox, oy);
       mctx.lineTo(wcx, wcy);
       mctx.stroke();
+
+      // 土路两侧车辙/踩踏暗痕
+      const rutPerpX = win.spawnOutsideOffset.dy !== 0 ? 1 : 0;
+      const rutPerpY = win.spawnOutsideOffset.dx !== 0 ? 1 : 0;
+      mctx.strokeStyle = 'rgba(12, 10, 8, 0.22)';
+      mctx.lineWidth = 6;
+      mctx.setLineDash([18, 14]);
+      for (const rSide of [-18, 18]) {
+        mctx.beginPath();
+        mctx.moveTo(ox + rutPerpX * rSide, oy + rutPerpY * rSide);
+        mctx.lineTo(wcx + rutPerpX * rSide, wcy + rutPerpY * rSide);
+        mctx.stroke();
+      }
+      mctx.setLineDash([]);
 
       // 窗台内外散落的反光碎玻璃碴
       const nx = Math.sign(win.spawnOutsideOffset.dx);
@@ -466,10 +481,10 @@ export class CartoonRenderer {
       mctx.fill();
     }
 
-    // 2. 户外远端荒野：俯视暗调针叶灌木丛与战术混凝土拒马（严格避开所有房间与破窗通道）
+    // 2. 户外远端荒野：俯视暗调针叶灌木丛与战术混凝土拒马（严格避开所有房间及整条地图边缘至窗户的冲锋通道！）
     const bb = state.stage.buildingBounds;
-    for (let gy = bb.y - 310; gy <= bb.y + bb.h + 310; gy += 165) {
-      for (let gx = bb.x - 310; gx <= bb.x + bb.w + 310; gx += 165) {
+    for (let gy = bb.y - 460; gy <= bb.y + bb.h + 460; gy += 160) {
+      for (let gx = bb.x - 460; gx <= bb.x + bb.w + 460; gx += 160) {
         const r1 = hash2D(gx, gy, stageSeed + 101);
         if (r1 < 0.42) continue;
         const tx = gx + (hash2D(gx, gy, stageSeed + 109) - 0.5) * 95;
@@ -478,16 +493,23 @@ export class CartoonRenderer {
 
         let nearWindowLane = false;
         for (const win of state.windows) {
-          const wx = win.x + win.w / 2 + win.spawnOutsideOffset.dx * 0.55;
-          const wy = win.y + win.h / 2 + win.spawnOutsideOffset.dy * 0.55;
-          if (Math.hypot(tx - wx, ty - wy) < 115) {
+          const wcx = win.x + win.w / 2;
+          const wcy = win.y + win.h / 2;
+          const ox = wcx + win.spawnOutsideOffset.dx;
+          const oy = wcy + win.spawnOutsideOffset.dy;
+          const segDx = ox - wcx;
+          const segDy = oy - wcy;
+          const segLenSq = segDx * segDx + segDy * segDy || 1;
+          const proj = Math.max(0, Math.min(1, ((tx - wcx) * segDx + (ty - wcy) * segDy) / segLenSq));
+          const distToLane = Math.hypot(tx - (wcx + segDx * proj), ty - (wcy + segDy * proj));
+          if (distToLane < 94) {
             nearWindowLane = true;
             break;
           }
         }
         if (nearWindowLane) continue;
 
-        if (r1 > 0.76) {
+        if (r1 > 0.72) {
           this.bakeTopDownShrubCluster(mctx, tx, ty, 24 + r1 * 18, stageSeed + gx);
         } else if (r1 > 0.58) {
           this.bakeJerseyBarrier(mctx, tx, ty, r1 * Math.PI);

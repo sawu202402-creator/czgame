@@ -47,6 +47,8 @@ export class GameEngine {
   private walkableGrid: Uint8Array = new Uint8Array(0);
   private staticBlockers: Rect[] = [];
   private flowTimer = 0;
+  private lastViewW = 1280;
+  private lastViewH = 720;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -695,6 +697,7 @@ export class GameEngine {
     }
     for (const win of s.windows) {
       win.planks = win.maxPlanks;
+      this.pushOutdoorZombiesOutsidePlanks(win);
     }
     for (const z of s.zombies) {
       const dx = z.x - s.player.x;
@@ -702,6 +705,12 @@ export class GameEngine {
       const d = Math.hypot(dx, dy) || 1;
       z.x += (dx / d) * 150;
       z.y += (dy / d) * 150;
+      if (z.insideBuilding) {
+        this.resolveEntityInsideWalls(z);
+      } else if (z.targetWindowId) {
+        const w = s.windows.find((item) => item.id === z.targetWindowId);
+        if (w) this.resolveOutdoorZombieObstacles(z, w, false);
+      }
       z.stunTimer = 3.2;
       if (z.kind !== 'boss' && z.kind !== 'miniboss') z.hp -= z.maxHp * 0.65;
     }
@@ -730,7 +739,10 @@ export class GameEngine {
     const s = this.state;
     if (!s) return;
     s.electricFortifyWaves = 2;
-    for (const win of s.windows) win.planks = win.maxPlanks;
+    for (const win of s.windows) {
+      win.planks = win.maxPlanks;
+      this.pushOutdoorZombiesOutsidePlanks(win);
+    }
     this.showBanner('⚡ 全图窗户已升级为【高压电击钢网】(持续2波)！', 3.2);
     PlatformSDK.gameplayStart();
   }
@@ -748,6 +760,8 @@ export class GameEngine {
   }
 
   public update(dt: number, viewW: number, viewH: number): void {
+    this.lastViewW = viewW;
+    this.lastViewH = viewH;
     if (!this.state || this.paused || this.modalPaused || this.state.waveState === 'ended') return;
     const s = this.state;
 
@@ -899,43 +913,7 @@ export class GameEngine {
       return r?.unlocked;
     });
     const win = activeWindows[Math.floor(Math.random() * activeWindows.length)] || s.windows[0];
-
-    if (kind === 'thief') {
-      const unlocked = s.rooms.filter((r) => r.unlocked);
-      const rm = unlocked[Math.floor(Math.random() * unlocked.length)];
-      const rc = rm.rects[0];
-      const thiefHp = Math.round((320 + s.wave * 110 + Math.pow(Math.max(0, s.wave - 3), 1.65) * 75) * (1 + (s.stage.index - 1) * 0.34));
-      s.zombies.push({
-        id: this.nextEntityId++,
-        kind: 'thief',
-        x: rc.x + rc.w / 2,
-        y: rc.y + rc.h / 2,
-        vx: 0,
-        vy: 0,
-        radius: 25,
-        hp: thiefHp,
-        maxHp: thiefHp,
-        speed: 214,
-        damage: 0,
-        cashReward: 130,
-        xpReward: 42,
-        color: '#facc15',
-        targetWindowId: null,
-        insideBuilding: true,
-        hitFlash: 0,
-        burnTimer: 0,
-        slowTimer: 0,
-        stunTimer: 0,
-        attackCd: 0,
-        rangedCd: 5, // 最多受击掉落 5 枚金币，杜绝高频冲锋枪无限刷钱！
-        fleeTimer: 14,
-        wobblePhase: Math.random() * 6,
-        facingAngle: 0,
-        attackAnim: 0,
-      });
-      this.showBanner('💰 黄金盗宝僵尸出现！集火打爆它抢夺神秘宝物箱！', 3.5);
-      return;
-    }
+    const wf = this.getWindowFrame(win);
 
     // 紧绷硬核的尸潮血量/移速膨胀与赏金衰减曲线！
     const stageMult = 1 + (s.stage.index - 1) * 0.38;
@@ -951,8 +929,23 @@ export class GameEngine {
     let cash = Math.max(5, Math.round(10 * cashTaper));
     let xp = 10;
     let color = '#4ade80';
+    let rangedCd = 2.2;
+    let fleeTimer = 0;
 
-    if (kind === 'runner') {
+    if (kind === 'thief') {
+      hp = Math.round(
+        (320 + s.wave * 110 + Math.pow(Math.max(0, s.wave - 3), 1.65) * 75) *
+          (1 + (s.stage.index - 1) * 0.34)
+      );
+      speed = 214;
+      radius = 25;
+      damage = 0;
+      cash = 130;
+      xp = 42;
+      color = '#facc15';
+      rangedCd = 5; // 最多受击掉落 5 枚金币，杜绝高频冲锋枪无限刷钱！
+      fleeTimer = 15;
+    } else if (kind === 'runner') {
       hp = 50 * hpScale;
       speed = 182 + Math.min(92, s.wave * 7.8);
       radius = 21;
@@ -986,8 +979,18 @@ export class GameEngine {
       color = '#ef4444';
     }
 
-    const wx = win.x + win.w / 2 + win.spawnOutsideOffset.dx + (Math.random() - 0.5) * 35;
-    const wy = win.y + win.h / 2 + win.spawnOutsideOffset.dy + (Math.random() - 0.5) * 35;
+    // 统一从地图外围边缘 + 屏幕视野外生成，沿户外泥泞通道一路奔袭至防线窗户（100% 杜绝窗前凭空闪现！）
+    const laneJitter = (Math.random() - 0.5) * 64;
+    let wx = wf.wcx + win.spawnOutsideOffset.dx + wf.latX * laneJitter;
+    let wy = wf.wcy + win.spawnOutsideOffset.dy + wf.latY * laneJitter;
+
+    const zoom = Math.max(0.45, s.camera.zoom || 1);
+    const camHalfW = this.lastViewW / (2 * zoom) + radius + 68;
+    const camHalfH = this.lastViewH / (2 * zoom) + radius + 68;
+    if (wf.outX < 0) wx = Math.min(wx, s.camera.x - camHalfW);
+    else if (wf.outX > 0) wx = Math.max(wx, s.camera.x + camHalfW);
+    if (wf.outY < 0) wy = Math.min(wy, s.camera.y - camHalfH);
+    else if (wf.outY > 0) wy = Math.max(wy, s.camera.y + camHalfH);
 
     s.zombies.push({
       id: this.nextEntityId++,
@@ -1011,12 +1014,16 @@ export class GameEngine {
       slowTimer: 0,
       stunTimer: 0,
       attackCd: 0,
-      rangedCd: 2.2,
-      fleeTimer: 0,
+      rangedCd,
+      fleeTimer,
       wobblePhase: Math.random() * Math.PI * 2,
-      facingAngle: Math.atan2(s.player.y - wy, s.player.x - wx),
+      facingAngle: Math.atan2(wf.inY, wf.inX),
       attackAnim: 0,
     });
+
+    if (kind === 'thief') {
+      this.showBanner('💰 黄金盗宝僵尸正从地图边缘潜入！打爆它抢夺神秘宝物箱！', 3.5);
+    }
   }
 
   private updatePlayer(dt: number, viewW: number, viewH: number): void {
@@ -1168,7 +1175,7 @@ export class GameEngine {
     if (win.planks > 0) return false;
     const wcx = win.x + win.w / 2;
     const wcy = win.y + win.h / 2;
-    return Math.hypot(z.x - wcx, z.y - wcy) <= 48;
+    return Math.hypot(z.x - wcx, z.y - wcy) <= z.radius + 64;
   }
 
   private findNearestTarget(x: number, y: number, maxRange: number): ZombieEntity | null {
@@ -1372,7 +1379,7 @@ export class GameEngine {
     const p = s.player;
     const pStats = SaveManager.getEffectivePlayerStats();
 
-    // 1. 自动修窗
+    // 1. 自动修窗（若僵尸正骑跨在空窗台上翻窗而入，需先击退/消灭再封钉木板，杜绝把僵尸卡进木板里！）
     let repairingAny = false;
     for (const win of s.windows) {
       const room = s.rooms.find((r) => r.id === win.roomId);
@@ -1380,11 +1387,15 @@ export class GameEngine {
       const cx = win.x + win.w / 2;
       const cy = win.y + win.h / 2;
       if (Math.hypot(p.x - cx, p.y - cy) <= 82) {
+        if (win.planks === 0 && this.hasZombieVaultingWindow(win)) {
+          continue;
+        }
         repairingAny = true;
         p.repairProgress += dt * 1.35 * pStats.repairSpeedMultiplier;
         if (p.repairProgress >= 1) {
           p.repairProgress = 0;
           win.planks += 1;
+          this.pushOutdoorZombiesOutsidePlanks(win);
           SoundFX.repair();
           // 每波最多前 6 块修补木板发放赏金，杜绝留最后一只僵尸无限修窗刷钱！
           if (s.repairsPaidThisWave < 6) {
@@ -1940,6 +1951,11 @@ export class GameEngine {
     z.y += ky * 0.08 * kbResist;
     if (z.insideBuilding) {
       this.resolveEntityInsideWalls(z);
+    } else if (z.targetWindowId) {
+      const win = s.windows.find((w) => w.id === z.targetWindowId);
+      if (win) {
+        this.resolveOutdoorZombieObstacles(z, win, win.planks <= 0);
+      }
     }
 
     if (isCrit || (s.floatingTexts.length < 28 && (dmg >= 12 || Math.random() < 0.2))) {
@@ -1954,11 +1970,12 @@ export class GameEngine {
 
     if (z.kind === 'thief' && z.rangedCd > 0 && Math.random() < 0.38) {
       z.rangedCd -= 1;
+      const dp = this.getSafeIndoorDropPoint(z);
       this.spawnMergedDrop(
         'cash',
         12,
-        z.x + (Math.random() - 0.5) * 28,
-        z.y + (Math.random() - 0.5) * 28,
+        dp.x + (Math.random() - 0.5) * 28,
+        dp.y + (Math.random() - 0.5) * 28,
         22
       );
     }
@@ -2032,29 +2049,30 @@ export class GameEngine {
       }
     }
 
+    const dropPt = this.getSafeIndoorDropPoint(z);
     const cashMult = s.modifiers.cashMult * (s.powerUpTimers.double_cash > 0 ? 2 : 1);
     const cashVal = Math.round(z.cashReward * cashMult);
     this.spawnMergedDrop(
       'cash',
       cashVal,
-      z.x + (Math.random() - 0.5) * 18,
-      z.y + (Math.random() - 0.5) * 18,
+      dropPt.x + (Math.random() - 0.5) * 18,
+      dropPt.y + (Math.random() - 0.5) * 18,
       25
     );
     this.spawnMergedDrop(
       'xp',
       z.xpReward,
-      z.x + (Math.random() - 0.5) * 22,
-      z.y + (Math.random() - 0.5) * 22,
+      dropPt.x + (Math.random() - 0.5) * 22,
+      dropPt.y + (Math.random() - 0.5) * 22,
       25
     );
 
     if (z.kind === 'thief') {
-      const rm = this.getRoomAt(z.x, z.y) || s.rooms[0];
+      const rm = this.getRoomAt(dropPt.x, dropPt.y) || s.rooms[0];
       s.chests.push({
         id: this.nextEntityId++,
-        x: z.x,
-        y: z.y,
+        x: dropPt.x,
+        y: dropPt.y,
         roomId: rm.id,
         progress: 0,
         bobPhase: 0,
@@ -2069,8 +2087,8 @@ export class GameEngine {
         kind: 'powerup',
         powerUp: pType,
         value: 0,
-        x: z.x,
-        y: z.y,
+        x: dropPt.x,
+        y: dropPt.y,
         life: 18,
         bobPhase: 0,
       });
@@ -2178,6 +2196,201 @@ export class GameEngine {
         continue;
       }
 
+      const bossEnraged = z.kind === 'boss' && z.hp < z.maxHp * 0.55;
+      const chargeBoost = z.insideBuilding && z.kind === 'miniboss' && z.fleeTimer > 0 ? 1.85 : 1;
+      const spd = z.speed * freezeMult * (z.slowTimer > 0 ? 0.55 : 1) * (bossEnraged ? 1.28 : 1) * chargeBoost;
+
+      if (!z.insideBuilding && z.targetWindowId) {
+        const win = s.windows.find((w) => w.id === z.targetWindowId);
+        if (!win) {
+          z.insideBuilding = true;
+          z.targetWindowId = null;
+          continue;
+        }
+
+        const wf = this.getWindowFrame(win);
+        const relX = z.x - wf.wcx;
+        const relY = z.y - wf.wcy;
+        // outDist > 0 表示位于窗心外侧；outDist = 0 为窗框中心；outDist < 0 为跨入室内侧
+        const outDist = relX * wf.outX + relY * wf.outY;
+        const latOff = relX * wf.latX + relY * wf.latY;
+
+        // 窗户净通行半宽（扣除两侧 14px 混凝土窗框立柱与僵尸自身半径，确保尸王翻窗也绝不卡墙角！）
+        const clearHalfSpan = Math.max(0, wf.winSpan / 2 - 14 - z.radius - 3);
+        const slotFrac = ((z.id * 73) % 19) / 9 - 1;
+        const slotOffset = slotFrac * Math.min(clearHalfSpan, 28);
+        const standOutDist = 14 + z.radius + 3;
+
+        // 户外远端荒野冲刺倍率：从地图边缘快步冲向建筑防线，抵达沙袋区后平滑恢复标准战斗移速
+        const approachMult =
+          outDist > 160 ? Math.min(1.58, 1 + (outDist - 160) / 360) : 1;
+
+        if (win.planks > 0) {
+          const tx = wf.wcx + wf.outX * standOutDist + wf.latX * slotOffset;
+          const ty = wf.wcy + wf.outY * standOutDist + wf.latY * slotOffset;
+          const dx = tx - z.x;
+          const dy = ty - z.y;
+          const distToSlot = Math.hypot(dx, dy);
+
+          if (outDist > standOutDist + 6 || Math.abs(latOff) > clearHalfSpan + 20) {
+            const d = distToSlot || 1;
+            z.vx = (dx / d) * spd * approachMult;
+            z.vy = (dy / d) * spd * approachMult;
+
+            // 户外冲锋尸群轻柔分散，避免多只僵尸完全重叠成一点
+            for (let j = 0; j < s.zombies.length; j++) {
+              const oz = s.zombies[j];
+              if (!oz || oz.id === z.id || oz.insideBuilding) continue;
+              const minD = (z.radius + oz.radius) * 0.85;
+              const sx = z.x - oz.x;
+              if (Math.abs(sx) >= minD) continue;
+              const sy = z.y - oz.y;
+              if (Math.abs(sy) >= minD) continue;
+              const sd = Math.hypot(sx, sy);
+              if (sd > 0 && sd < minD) {
+                z.vx += (sx / sd) * 58;
+                z.vy += (sy / sd) * 58;
+              }
+            }
+
+            z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 10));
+            z.x += z.vx * dt;
+            z.y += z.vy * dt;
+            this.resolveOutdoorZombieObstacles(z, win, false);
+          } else {
+            // 紧贴外窗台外侧挥爪拆木板（绝不把半截身体穿模戳进完好木板内！）
+            z.x += dx * Math.min(1, dt * 8);
+            z.y += dy * Math.min(1, dt * 8);
+            z.vx = 0;
+            z.vy = 0;
+            this.resolveOutdoorZombieObstacles(z, win, false);
+            z.facingAngle = this.lerpAngle(
+              z.facingAngle,
+              Math.atan2(wf.inY, wf.inX),
+              Math.min(1, dt * 12)
+            );
+
+            if (z.attackCd <= 0) {
+              const baseTearCd =
+                z.kind === 'boss' || z.kind === 'miniboss'
+                  ? 0.42
+                  : z.kind === 'runner' || z.kind === 'thief'
+                    ? Math.max(0.36, 0.7 - s.wave * 0.03)
+                    : Math.max(0.44, 0.94 - s.wave * 0.04);
+              z.attackCd = baseTearCd;
+              z.attackAnim = 1.0;
+
+              const prevPlanks = win.planks;
+              win.planks = Math.max(0, win.planks - (z.kind === 'boss' ? 2 : 1));
+              this.spawnHitSparks(wf.wcx, wf.wcy, '#fbbf24', 4);
+
+              // 高压电击钢网：仅提供非致命麻痹减速与拆窗迟滞，绝不让僵尸撞窗暴毙！
+              if (s.electricFortifyWaves > 0) {
+                z.attackCd *= 1.85;
+                z.stunTimer = 0.42;
+                z.slowTimer = 2.8;
+                z.hitFlash = 0.1;
+                if (z.hp > z.maxHp * 0.45) {
+                  z.hp = Math.max(z.maxHp * 0.45, z.hp - z.maxHp * 0.08);
+                }
+                s.lightnings.push({
+                  points: [
+                    { x: wf.wcx, y: wf.wcy },
+                    { x: z.x, y: z.y },
+                  ],
+                  color: '#38bdf8',
+                  life: 0.18,
+                });
+              }
+
+              // 震荡铆钉板：仅在最后一块木板被彻底拆破时触发非致命气浪击退与眩晕！
+              if (prevPlanks > 0 && win.planks === 0 && s.relicIds.includes('explosive_planks')) {
+                this.spawnHitSparks(wf.wcx, wf.wcy, '#38bdf8', 14);
+                this.spawnFloatingText(wf.wcx, wf.wcy - 18, '🛡️ 震荡弹开!', '#38bdf8', 1.2);
+                for (const oz of s.zombies) {
+                  if (!oz.insideBuilding && Math.hypot(oz.x - wf.wcx, oz.y - wf.wcy) <= 130) {
+                    oz.x += wf.outX * 78;
+                    oz.y += wf.outY * 78;
+                    oz.stunTimer = Math.max(oz.stunTimer, 1.5);
+                    oz.slowTimer = Math.max(oz.slowTimer, 3.0);
+                    this.resolveOutdoorZombieObstacles(oz, win, true);
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          // 木板已破：杜绝旧版瞬间瞬移 80px 的穿窗闪烁 Bug，改为平滑对齐窗心、真实翻越窗框进入室内！
+          const entryCompleteDist = -(14 + z.radius + 4);
+          if (outDist > standOutDist + 8) {
+            // 仍在窗外远处：先跑向窗台外口净空区
+            const alignLat = slotOffset * 0.55;
+            const tx = wf.wcx + wf.outX * (14 + z.radius * 0.45) + wf.latX * alignLat;
+            const ty = wf.wcy + wf.outY * (14 + z.radius * 0.45) + wf.latY * alignLat;
+            const dx = tx - z.x;
+            const dy = ty - z.y;
+            const d = Math.hypot(dx, dy) || 1;
+            z.vx = (dx / d) * spd * approachMult;
+            z.vy = (dy / d) * spd * approachMult;
+            z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 10));
+            z.x += z.vx * dt;
+            z.y += z.vy * dt;
+            this.resolveOutdoorZombieObstacles(z, win, true);
+          } else {
+            // 正在跨越窗台：横向丝滑收束在窗框净空内（绝不刮蹭左右墙垛），纵向平滑爬入室内！
+            const clampedLat = Math.max(
+              -clearHalfSpan,
+              Math.min(clearHalfSpan, latOff * Math.max(0, 1 - dt * 6) + slotOffset * 0.25 * dt * 6)
+            );
+            const targetInDist = 14 + z.radius + 10;
+            const tx = wf.wcx + wf.inX * targetInDist + wf.latX * clampedLat;
+            const ty = wf.wcy + wf.inY * targetInDist + wf.latY * clampedLat;
+            const dx = tx - z.x;
+            const dy = ty - z.y;
+            const d = Math.hypot(dx, dy) || 1;
+            const vaultSpd = spd * 0.9;
+            z.vx = (dx / d) * vaultSpd;
+            z.vy = (dy / d) * vaultSpd;
+            z.facingAngle = this.lerpAngle(
+              z.facingAngle,
+              Math.atan2(wf.inY, wf.inX),
+              Math.min(1, dt * 12)
+            );
+            z.x += z.vx * dt;
+            z.y += z.vy * dt;
+
+            // 严格约束翻窗期间横向不碰两侧墙柱
+            const newRelX = z.x - wf.wcx;
+            const newRelY = z.y - wf.wcy;
+            const newOutDist = newRelX * wf.outX + newRelY * wf.outY;
+            const newLat = Math.max(
+              -clearHalfSpan,
+              Math.min(clearHalfSpan, newRelX * wf.latX + newRelY * wf.latY)
+            );
+            z.x = wf.wcx + wf.outX * newOutDist + wf.latX * newLat;
+            z.y = wf.wcy + wf.outY * newOutDist + wf.latY * newLat;
+
+            // 若玩家贴脸堵在破开的空窗台前，翻窗中的僵尸同样可挥爪攻击
+            if (z.damage > 0) {
+              const pDist = Math.hypot(p.x - z.x, p.y - z.y);
+              if (pDist <= p.radius + z.radius + 6 && z.attackCd <= 0) {
+                z.attackCd = bossEnraged ? 0.65 : 0.82;
+                z.attackAnim = 1.0;
+                this.damagePlayer(z.damage);
+              }
+            }
+
+            // 完全跨过内侧窗沿后无缝切换为室内流场寻路（此时距窗框已有 ≥4px 净空，零弹跳零卡墙！）
+            if (newOutDist <= entryCompleteDist) {
+              z.insideBuilding = true;
+              z.targetWindowId = null;
+              this.resolveEntityInsideWalls(z);
+            }
+          }
+        }
+        continue;
+      }
+
       if (z.kind === 'thief') {
         z.fleeTimer -= dt;
         if (z.fleeTimer <= 0) {
@@ -2195,90 +2408,7 @@ export class GameEngine {
         continue;
       }
 
-      const bossEnraged = z.kind === 'boss' && z.hp < z.maxHp * 0.55;
-      const chargeBoost = z.kind === 'miniboss' && z.fleeTimer > 0 ? 1.85 : 1;
-      const spd = z.speed * freezeMult * (z.slowTimer > 0 ? 0.55 : 1) * (bossEnraged ? 1.28 : 1) * chargeBoost;
-
-      if (!z.insideBuilding && z.targetWindowId) {
-        const win = s.windows.find((w) => w.id === z.targetWindowId);
-        if (!win) {
-          z.insideBuilding = true;
-          z.targetWindowId = null;
-          continue;
-        }
-        const wcx = win.x + win.w / 2;
-        const wcy = win.y + win.h / 2;
-        const dx = wcx - z.x;
-        const dy = wcy - z.y;
-        const dist = Math.hypot(dx, dy) || 1;
-        z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 10));
-
-        if (dist > 28) {
-          z.vx = (dx / dist) * spd;
-          z.vy = (dy / dist) * spd;
-          z.x += z.vx * dt;
-          z.y += z.vy * dt;
-        } else if (win.planks > 0) {
-          z.vx = dx * 0.2;
-          z.vy = dy * 0.2;
-          if (z.attackCd <= 0) {
-            const baseTearCd =
-              z.kind === 'boss' || z.kind === 'miniboss'
-                ? 0.42
-                : z.kind === 'runner'
-                  ? Math.max(0.38, 0.72 - s.wave * 0.03)
-                  : Math.max(0.44, 0.94 - s.wave * 0.04);
-            z.attackCd = baseTearCd;
-            z.attackAnim = 1.0;
-
-            const prevPlanks = win.planks;
-            win.planks = Math.max(0, win.planks - (z.kind === 'boss' ? 2 : 1));
-            this.spawnHitSparks(wcx, wcy, '#fbbf24', 4);
-
-            // 高压电击钢网：仅提供非致命麻痹减速与拆窗迟滞，绝不让僵尸撞窗暴毙！
-            if (s.electricFortifyWaves > 0) {
-              z.attackCd *= 1.85;
-              z.stunTimer = 0.42;
-              z.slowTimer = 2.8;
-              z.hitFlash = 0.1;
-              if (z.hp > z.maxHp * 0.45) {
-                z.hp = Math.max(z.maxHp * 0.45, z.hp - z.maxHp * 0.08);
-              }
-              s.lightnings.push({
-                points: [
-                  { x: wcx, y: wcy },
-                  { x: z.x, y: z.y },
-                ],
-                color: '#38bdf8',
-                life: 0.18,
-              });
-            }
-
-            // 震荡铆钉板：仅在最后一块木板被彻底拆破时触发非致命气浪击退与眩晕！
-            if (prevPlanks > 0 && win.planks === 0 && s.relicIds.includes('explosive_planks')) {
-              this.spawnHitSparks(wcx, wcy, '#38bdf8', 14);
-              this.spawnFloatingText(wcx, wcy - 18, '🛡️ 震荡弹开!', '#38bdf8', 1.2);
-              for (const oz of s.zombies) {
-                if (!oz.insideBuilding && Math.hypot(oz.x - wcx, oz.y - wcy) <= 130) {
-                  const pushAng = Math.atan2(oz.y - wcy, oz.x - wcx);
-                  oz.x += Math.cos(pushAng) * 78;
-                  oz.y += Math.sin(pushAng) * 78;
-                  oz.stunTimer = Math.max(oz.stunTimer, 1.5);
-                  oz.slowTimer = Math.max(oz.slowTimer, 3.0);
-                }
-              }
-            }
-          }
-        } else {
-          // 跨入窗内房间安全点
-          const inSignX = win.spawnOutsideOffset.dx !== 0 ? -Math.sign(win.spawnOutsideOffset.dx) : 0;
-          const inSignY = win.spawnOutsideOffset.dy !== 0 ? -Math.sign(win.spawnOutsideOffset.dy) : 0;
-          z.x = wcx + inSignX * (z.radius + 18);
-          z.y = wcy + inSignY * (z.radius + 18);
-          z.insideBuilding = true;
-          z.targetWindowId = null;
-        }
-      } else {
+      {
         if (z.kind === 'miniboss') {
           if (z.fleeTimer > 0) z.fleeTimer = Math.max(0, z.fleeTimer - dt);
           z.rangedCd -= dt;
@@ -2536,7 +2666,10 @@ export class GameEngine {
           }
         }
       } else if (d.powerUp === 'carpenter') {
-        for (const w of s.windows) w.planks = w.maxPlanks;
+        for (const w of s.windows) {
+          w.planks = w.maxPlanks;
+          this.pushOutdoorZombiesOutsidePlanks(w);
+        }
         s.cash += 40;
       } else {
         s.powerUpTimers[d.powerUp] = meta.duration;
@@ -2626,7 +2759,91 @@ export class GameEngine {
     });
   }
 
-  // ==================== 墙壁、门锁与室内掩体碰撞 ====================
+  // ==================== 窗户坐标系、翻窗保护与墙壁碰撞 ====================
+
+  private getWindowFrame(win: RunSnapshot['windows'][number]) {
+    const wcx = win.x + win.w / 2;
+    const wcy = win.y + win.h / 2;
+    const outX = Math.sign(win.spawnOutsideOffset.dx);
+    const outY = Math.sign(win.spawnOutsideOffset.dy);
+    const inX = -outX;
+    const inY = -outY;
+    const latX = outY !== 0 ? 1 : 0;
+    const latY = outX !== 0 ? 1 : 0;
+    const winSpan = win.orientation === 'horizontal' ? win.w : win.h;
+    return { wcx, wcy, outX, outY, inX, inY, latX, latY, winSpan };
+  }
+
+  private hasZombieVaultingWindow(win: RunSnapshot['windows'][number]): boolean {
+    const s = this.state!;
+    const wf = this.getWindowFrame(win);
+    for (const z of s.zombies) {
+      if (!z || z.hp <= 0 || z.insideBuilding) continue;
+      const rx = z.x - wf.wcx;
+      const ry = z.y - wf.wcy;
+      const outDist = rx * wf.outX + ry * wf.outY;
+      const latOff = rx * wf.latX + ry * wf.latY;
+      if (Math.abs(outDist) < 14 + z.radius * 0.65 && Math.abs(latOff) <= wf.winSpan * 0.52) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private pushOutdoorZombiesOutsidePlanks(win: RunSnapshot['windows'][number]): void {
+    const s = this.state!;
+    const wf = this.getWindowFrame(win);
+    for (const z of s.zombies) {
+      if (!z || z.hp <= 0 || z.insideBuilding) continue;
+      const rx = z.x - wf.wcx;
+      const ry = z.y - wf.wcy;
+      const outDist = rx * wf.outX + ry * wf.outY;
+      const latOff = rx * wf.latX + ry * wf.latY;
+      const minOut = 14 + z.radius + 4;
+      if (Math.abs(latOff) <= wf.winSpan * 0.65 && outDist < minOut && outDist > -z.radius) {
+        z.x = wf.wcx + wf.outX * minOut + wf.latX * latOff;
+        z.y = wf.wcy + wf.outY * minOut + wf.latY * latOff;
+      }
+    }
+  }
+
+  private resolveOutdoorZombieObstacles(
+    z: { x: number; y: number; radius: number },
+    targetWin: RunSnapshot['windows'][number],
+    allowOpenWindowPass: boolean
+  ): void {
+    const s = this.state!;
+    for (const w of s.walls) {
+      this.pushCircleOutOfRect(z, w);
+    }
+    for (const d of s.doors) {
+      if (!d.unlocked) this.pushCircleOutOfRect(z, d);
+    }
+    for (const win of s.windows) {
+      if (allowOpenWindowPass && win.id === targetWin.id && win.planks <= 0) {
+        continue;
+      }
+      this.pushCircleOutOfRect(z, win);
+    }
+  }
+
+  private getSafeIndoorDropPoint(z: ZombieEntity): { x: number; y: number } {
+    if (z.insideBuilding || !z.targetWindowId) {
+      return { x: z.x, y: z.y };
+    }
+    const win = this.state!.windows.find((w) => w.id === z.targetWindowId);
+    if (!win) {
+      return { x: z.x, y: z.y };
+    }
+    const wf = this.getWindowFrame(win);
+    const rx = z.x - wf.wcx;
+    const ry = z.y - wf.wcy;
+    const latOff = Math.max(-32, Math.min(32, rx * wf.latX + ry * wf.latY));
+    return {
+      x: wf.wcx + wf.inX * 42 + wf.latX * latOff,
+      y: wf.wcy + wf.inY * 42 + wf.latY * latOff,
+    };
+  }
 
   private resolveEntityInsideWalls(ent: { x: number; y: number; radius: number }): void {
     for (let i = 0; i < this.staticBlockers.length; i++) {
