@@ -94,8 +94,19 @@ export interface GrenadeEntity {
   z: number; // height above floor
   vz: number;
   fuse: number;
+  maxFuse: number;
+  spinAngle: number;
   damage: number;
   radius: number;
+}
+
+export interface ExplosionFX {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+  maxLife: number;
+  seed: number;
 }
 
 export interface AcidSpitEntity {
@@ -153,6 +164,7 @@ export interface GroundDecal {
   life: number;
   maxLife: number;
   seed: number;
+  isScorch?: boolean;
 }
 
 export interface Particle {
@@ -165,6 +177,9 @@ export interface Particle {
   life: number;
   maxLife: number;
   isShell?: boolean;
+  isSmoke?: boolean;
+  isShard?: boolean;
+  angle?: number;
 }
 
 export interface FloatingText {
@@ -263,6 +278,7 @@ export interface RunSnapshot {
   zombies: ZombieEntity[];
   bullets: BulletEntity[];
   grenadesThrown: GrenadeEntity[];
+  explosions: ExplosionFX[];
   spits: AcidSpitEntity[];
   acidPools: AcidPoolEntity[];
   drops: DropItem[];

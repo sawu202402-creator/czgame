@@ -234,7 +234,10 @@ export class UIManager {
       <div class="hud-bottom">
         <button class="hud-dock-btn hud-shop-btn" id="btn-open-armory">🛒 商店</button>
         <div class="weapon-slots" id="hud-weapons"></div>
-        <button class="hud-dock-btn hud-gren-btn" id="btn-grenade">💣 2</button>
+        <button class="hud-dock-btn hud-gren-btn" id="btn-grenade">
+          <img class="hud-gren-icon" src="./assets/prop_grenade.png" alt="" />
+          <span id="hud-gren-count">2</span>
+        </button>
       </div>
     `;
     this.uiLayer.appendChild(hud);
@@ -448,7 +451,7 @@ export class UIManager {
             <button class="btn-cartoon btn-mini ${s.cash >= 300 && s.player.hp < s.player.maxHp ? 'btn-green' : 'btn-disabled'}" data-tac="medkit">$300 恢复满血</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name">💣 破片手雷 x3</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_grenade.png" alt="" /> M67 破片手雷 x3</div>
             <div class="sup-meta">当前持有 x${s.player.grenades}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 220 ? 'btn-yellow' : 'btn-disabled'}" data-tac="grenades">$220 购买</button>
           </div>
@@ -690,10 +693,11 @@ export class UIManager {
       );
     });
 
-    const grenStr = `💣 ${s.player.grenades}`;
+    const grenStr = `${s.player.grenades}`;
     setIfChanged('gren', grenStr, () => {
       const grenBtn = this.hudRoot!.querySelector('#btn-grenade') as HTMLButtonElement;
-      grenBtn.textContent = grenStr;
+      const grenCnt = this.hudRoot!.querySelector('#hud-gren-count') as HTMLElement;
+      grenCnt.textContent = grenStr;
       grenBtn.disabled = s.player.grenades <= 0;
     });
 
@@ -809,13 +813,17 @@ export class UIManager {
       </div>
     `;
 
-    (this.modalRoot.querySelector('#btn-do-revive') as HTMLButtonElement).onclick = async () => {
+    const reviveBtn = this.modalRoot.querySelector('#btn-do-revive') as HTMLButtonElement;
+    reviveBtn.onclick = async () => {
+      reviveBtn.disabled = true;
       const ok = await PlatformSDK.showRewardedAd('revive_shockwave', '绝境震爆复活 + 全窗加固');
       if (ok) {
         this.modalRoot.innerHTML = '';
         this.engine.modalPaused = false;
         this.engine.applyTacticalRevive();
         this.engine.flushQueuedModals();
+      } else {
+        reviveBtn.disabled = false;
       }
     };
 

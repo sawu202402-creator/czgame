@@ -28,6 +28,11 @@ const PROP_SPRITE_MAP: Record<PropKind, SpriteKey> = {
   crates: 'prop_crates',
   swat_van: 'prop_swat_van',
   fountain: 'prop_fountain',
+  police_car: 'prop_police_car',
+  sofa: 'prop_sofa',
+  lockers: 'prop_lockers',
+  cryo_pod: 'prop_cryo_pod',
+  arcade: 'prop_arcade',
 };
 
 const MAP_PAD = 560;
@@ -242,10 +247,15 @@ export class CartoonRenderer {
       mctx.restore();
     }
 
-    // B2. 破窗外侧丧尸突袭泥泞血迹通道、碎玻璃渣与两侧沙袋掩体
+    // B2. 户外环城沥青公路、废弃巡逻警车封锁线、街灯与丧尸突袭泥泞通道
     this.bakeExteriorSiegeDetails(mctx, state, allRoomRects, stageSeed);
 
-    // C. 各房间高精度石材/钢板/实验室地砖 + 内嵌地脚线 + 战术标线 + 排水格栅 + 地面动力线缆
+    // B3. 第 3 关专属：双连廊中央围合地下反应堆深渊涡轮天井（消除中庭草地违和感！）
+    if (state.stage.id === 'stage_lab') {
+      this.bakeLabCentralAbyssShaft(mctx, state.stage.cellSize);
+    }
+
+    // C. 各房间高精度石材/钢板/实验室地砖 + 内嵌地脚线 + 战术标线 + 场景叙事细节 + 地面动力线缆
     for (const room of state.rooms) {
       const tileKey = FLOOR_THEME_TILE[room.floorTheme];
       const pat = Assets.getPattern(mctx, tileKey, 0.68);
@@ -261,11 +271,14 @@ export class CartoonRenderer {
         mctx.fillStyle = pat || '#475569';
         mctx.fillRect(r.x, r.y, r.w, r.h);
 
-        // 房间内侧战术装饰地垫/警戒标线/地漏格栅
+        // 房间内侧战术装饰地垫/地砖缝隙/警戒标线/地漏格栅
         this.bakeRoomFloorMarkings(mctx, room.floorTheme, r, stageSeed);
       }
 
       if (room.unlocked) {
+        // 房间专属真实感场景叙事细节（警徽地毯/牢房分区线/快餐黑白棋盘地砖/电玩霓虹地毯/冷冻管线/散落卷宗/防滑门垫）
+        this.bakeRoomStorytellingDetails(mctx, room, state, stageSeed);
+
         // 站点连接至最近墙体的橡胶护线槽电缆（让军火终端与改造台真正锚定在地面建筑中！）
         for (const st of state.stations) {
           if (st.roomId !== room.id) continue;
@@ -339,40 +352,72 @@ export class CartoonRenderer {
       mctx.translate(pr.x, pr.y);
       if (pr.rotation) mctx.rotate(pr.rotation);
 
-      // 特警装甲车红蓝爆闪灯地面环境反光 / 喷泉水波蓝光晕
-      if (pr.kind === 'swat_van') {
-        const rg = mctx.createRadialGradient(8, -26, 4, 8, -26, 68);
-        rg.addColorStop(0, 'rgba(239, 68, 68, 0.22)');
+      // 车辆警灯/前大灯、喷泉/冷冻舱冷光、街机霓虹环境反光
+      if (pr.kind === 'swat_van' || pr.kind === 'police_car') {
+        const rg = mctx.createRadialGradient(4, -22, 4, 4, -22, 68);
+        rg.addColorStop(0, 'rgba(239, 68, 68, 0.25)');
         rg.addColorStop(1, 'rgba(239, 68, 68, 0)');
         mctx.fillStyle = rg;
-        mctx.fillRect(-70, -95, 150, 140);
+        mctx.fillRect(-72, -92, 150, 140);
 
-        const bg = mctx.createRadialGradient(8, 26, 4, 8, 26, 68);
-        bg.addColorStop(0, 'rgba(59, 130, 246, 0.22)');
+        const bg = mctx.createRadialGradient(4, 22, 4, 4, 22, 68);
+        bg.addColorStop(0, 'rgba(59, 130, 246, 0.25)');
         bg.addColorStop(1, 'rgba(59, 130, 246, 0)');
         mctx.fillStyle = bg;
-        mctx.fillRect(-70, -45, 150, 140);
-      } else if (pr.kind === 'fountain') {
-        const fg = mctx.createRadialGradient(0, 0, pr.w * 0.2, 0, 0, pr.w * 0.72);
-        fg.addColorStop(0, 'rgba(56, 189, 248, 0.16)');
-        fg.addColorStop(1, 'rgba(56, 189, 248, 0)');
+        mctx.fillRect(-72, -45, 150, 140);
+
+        if (pr.kind === 'police_car') {
+          // 巡逻警车车头双束暖白近光灯锥
+          const hg = mctx.createLinearGradient(pr.w * 0.42, 0, pr.w * 0.42 + 125, 0);
+          hg.addColorStop(0, 'rgba(254, 249, 195, 0.24)');
+          hg.addColorStop(1, 'rgba(254, 249, 195, 0)');
+          mctx.fillStyle = hg;
+          mctx.beginPath();
+          mctx.moveTo(pr.w * 0.42, -24);
+          mctx.lineTo(pr.w * 0.42 + 125, -52);
+          mctx.lineTo(pr.w * 0.42 + 125, 52);
+          mctx.lineTo(pr.w * 0.42, 24);
+          mctx.closePath();
+          mctx.fill();
+        }
+      } else if (pr.kind === 'fountain' || pr.kind === 'cryo_pod') {
+        const glowRgb = pr.kind === 'cryo_pod' ? '34, 211, 238' : '56, 189, 248';
+        const fg = mctx.createRadialGradient(0, 0, pr.w * 0.18, 0, 0, pr.w * 0.82);
+        fg.addColorStop(0, `rgba(${glowRgb}, ${pr.kind === 'cryo_pod' ? 0.28 : 0.16})`);
+        fg.addColorStop(1, `rgba(${glowRgb}, 0)`);
         mctx.fillStyle = fg;
         mctx.beginPath();
-        mctx.arc(0, 0, pr.w * 0.72, 0, Math.PI * 2);
+        mctx.arc(0, 0, pr.w * 0.82, 0, Math.PI * 2);
+        mctx.fill();
+      } else if (pr.kind === 'arcade') {
+        const ag = mctx.createRadialGradient(0, pr.h * 0.35, 6, 0, pr.h * 0.35, 76);
+        ag.addColorStop(0, 'rgba(232, 121, 249, 0.22)');
+        ag.addColorStop(0.55, 'rgba(34, 211, 238, 0.12)');
+        ag.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        mctx.fillStyle = ag;
+        mctx.beginPath();
+        mctx.arc(0, pr.h * 0.35, 76, 0, Math.PI * 2);
         mctx.fill();
       }
 
       // 柔和接地 AO + 定向投影
-      mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+      mctx.fillStyle = 'rgba(2, 6, 23, 0.44)';
       mctx.beginPath();
-      if (pr.kind === 'fountain') {
+      if (pr.kind === 'fountain' || pr.kind === 'cryo_pod') {
         mctx.arc(5, 7, pr.w * 0.49, 0, Math.PI * 2);
       } else {
         mctx.roundRect(-pr.w / 2 + 5, -pr.h / 2 + 7, pr.w + 2, pr.h + 2, 10);
       }
       mctx.fill();
 
-      const scaleMult = pr.kind === 'desk' ? 1.24 : pr.kind === 'swat_van' ? 1.12 : 1.08;
+      const scaleMult =
+        pr.kind === 'desk'
+          ? 1.22
+          : pr.kind === 'swat_van' || pr.kind === 'police_car'
+            ? 1.12
+            : pr.kind === 'sofa' || pr.kind === 'lockers' || pr.kind === 'arcade'
+              ? 1.06
+              : 1.08;
       const drawDim = Math.max(pr.w, pr.h) * scaleMult;
       if (img) {
         mctx.drawImage(img, -drawDim / 2, -drawDim / 2, drawDim, drawDim);
@@ -400,12 +445,85 @@ export class CartoonRenderer {
     mctx.restore();
   }
 
+  private isNearAnyWindowLane(
+    tx: number,
+    ty: number,
+    windows: RunSnapshot['windows'],
+    minDist: number
+  ): boolean {
+    for (const win of windows) {
+      const wcx = win.x + win.w / 2;
+      const wcy = win.y + win.h / 2;
+      const ox = wcx + win.spawnOutsideOffset.dx;
+      const oy = wcy + win.spawnOutsideOffset.dy;
+      const segDx = ox - wcx;
+      const segDy = oy - wcy;
+      const segLenSq = segDx * segDx + segDy * segDy || 1;
+      const proj = Math.max(0, Math.min(1, ((tx - wcx) * segDx + (ty - wcy) * segDy) / segLenSq));
+      const distToLane = Math.hypot(tx - (wcx + segDx * proj), ty - (wcy + segDy * proj));
+      if (distToLane < minDist) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private bakeExteriorSiegeDetails(
     mctx: CanvasRenderingContext2D,
     state: RunSnapshot,
     allRoomRects: Rect[],
     stageSeed: number
   ): void {
+    const bb = state.stage.buildingBounds;
+    const asphaltPat = Assets.getPattern(mctx, 'tile_asphalt', 0.68);
+
+    // 0. 环绕建筑外围的真实城市沥青双车道封锁线（双黄虚线 + 斑马线 + 急刹轮胎印）
+    const roadOffset = 148;
+    const roadW = 104;
+    const rx = bb.x - roadOffset;
+    const ry = bb.y - roadOffset;
+    const rw = bb.w + roadOffset * 2;
+    const rh = bb.h + roadOffset * 2;
+
+    mctx.save();
+    mctx.strokeStyle = '#090e17';
+    mctx.lineWidth = roadW + 8;
+    mctx.lineJoin = 'round';
+    mctx.strokeRect(rx, ry, rw, rh);
+
+    mctx.strokeStyle = asphaltPat || '#262f3d';
+    mctx.lineWidth = roadW;
+    mctx.strokeRect(rx, ry, rw, rh);
+
+    // 道路两侧做旧白实线
+    mctx.strokeStyle = 'rgba(226, 232, 240, 0.24)';
+    mctx.lineWidth = 2;
+    mctx.strokeRect(rx - roadW * 0.43, ry - roadW * 0.43, rw + roadW * 0.86, rh + roadW * 0.86);
+    mctx.strokeRect(rx + roadW * 0.43, ry + roadW * 0.43, rw - roadW * 0.86, rh - roadW * 0.86);
+
+    // 道路中央城市交通黄虚线
+    mctx.strokeStyle = 'rgba(234, 179, 8, 0.42)';
+    mctx.lineWidth = 3;
+    mctx.setLineDash([24, 20]);
+    mctx.strokeRect(rx, ry, rw, rh);
+    mctx.setLineDash([]);
+
+    // 四向路口人行横道斑马线
+    mctx.fillStyle = 'rgba(226, 232, 240, 0.22)';
+    for (const cxCross of [bb.x + bb.w * 0.28, bb.x + bb.w * 0.72]) {
+      for (let i = -3; i <= 3; i++) {
+        mctx.fillRect(cxCross - 18, ry + i * 11 - 3, 36, 6);
+        mctx.fillRect(cxCross - 18, ry + rh + i * 11 - 3, 36, 6);
+      }
+    }
+    for (const cyCross of [bb.y + bb.h * 0.32, bb.y + bb.h * 0.68]) {
+      for (let i = -3; i <= 3; i++) {
+        mctx.fillRect(rx + i * 11 - 3, cyCross - 18, 6, 36);
+        mctx.fillRect(rx + rw + i * 11 - 3, cyCross - 18, 6, 36);
+      }
+    }
+    mctx.restore();
+
     // 1. 每扇破窗外侧：丧尸冲锋泥泞血痕路径、散落碎玻璃与两侧战术沙袋堆
     for (const win of state.windows) {
       const wcx = win.x + win.w / 2;
@@ -416,9 +534,9 @@ export class CartoonRenderer {
       // 从地图外围边缘一路延伸至破窗的泥泞尸潮踩踏土路（直观提示户外来袭方向！）
       const mudGrad = mctx.createLinearGradient(ox, oy, wcx, wcy);
       mudGrad.addColorStop(0, 'rgba(15, 12, 10, 0.05)');
-      mudGrad.addColorStop(0.25, 'rgba(24, 18, 14, 0.28)');
-      mudGrad.addColorStop(0.75, 'rgba(28, 18, 14, 0.38)');
-      mudGrad.addColorStop(1, 'rgba(38, 16, 16, 0.48)');
+      mudGrad.addColorStop(0.25, 'rgba(24, 18, 14, 0.3)');
+      mudGrad.addColorStop(0.75, 'rgba(28, 18, 14, 0.42)');
+      mudGrad.addColorStop(1, 'rgba(38, 16, 16, 0.52)');
       mctx.strokeStyle = mudGrad;
       mctx.lineWidth = 64;
       mctx.lineCap = 'round';
@@ -430,7 +548,7 @@ export class CartoonRenderer {
       // 土路两侧车辙/踩踏暗痕
       const rutPerpX = win.spawnOutsideOffset.dy !== 0 ? 1 : 0;
       const rutPerpY = win.spawnOutsideOffset.dx !== 0 ? 1 : 0;
-      mctx.strokeStyle = 'rgba(12, 10, 8, 0.22)';
+      mctx.strokeStyle = 'rgba(12, 10, 8, 0.24)';
       mctx.lineWidth = 6;
       mctx.setLineDash([18, 14]);
       for (const rSide of [-18, 18]) {
@@ -462,9 +580,9 @@ export class CartoonRenderer {
       const perpX = ny !== 0 ? 1 : 0;
       const perpY = nx !== 0 ? 1 : 0;
       for (const side of [-1, 1]) {
-        const sbx = wcx + nx * 46 + perpX * side * 66;
-        const sby = wcy + ny * 46 + perpY * side * 66;
-        if (!pointInAnyRect(sbx, sby, allRoomRects, 14)) {
+        const sbx = wcx + nx * 46 + perpX * side * 68;
+        const sby = wcy + ny * 46 + perpY * side * 68;
+        if (!pointInAnyRect(sbx, sby, allRoomRects, 16)) {
           this.bakeSandbagCluster(mctx, sbx, sby, Math.atan2(ny, nx) + side * 0.35);
         }
       }
@@ -481,41 +599,262 @@ export class CartoonRenderer {
       mctx.fill();
     }
 
-    // 2. 户外远端荒野：俯视暗调针叶灌木丛与战术混凝土拒马（严格避开所有房间及整条地图边缘至窗户的冲锋通道！）
-    const bb = state.stage.buildingBounds;
-    for (let gy = bb.y - 460; gy <= bb.y + bb.h + 460; gy += 160) {
-      for (let gx = bb.x - 460; gx <= bb.x + bb.w + 460; gx += 160) {
+    // 2. 公路沿线废弃封锁警车/特警车 + 高杆钠灯路灯（严格避开所有窗户冲锋通道，绝不让僵尸穿模踩车！）
+    const cruiserImg = Assets.getSprite('prop_police_car');
+    const vanImg = Assets.getSprite('prop_swat_van');
+    const crateImg = Assets.getSprite('prop_crates');
+
+    const roadCandidates: { x: number; y: number; baseAng: number }[] = [];
+    for (let x = rx + 110; x <= rx + rw - 110; x += 240) {
+      roadCandidates.push({ x, y: ry, baseAng: 0.16 });
+      roadCandidates.push({ x, y: ry + rh, baseAng: Math.PI - 0.18 });
+    }
+    for (let y = ry + 120; y <= ry + rh - 120; y += 240) {
+      roadCandidates.push({ x: rx, y, baseAng: Math.PI / 2 + 0.15 });
+      roadCandidates.push({ x: rx + rw, y, baseAng: -Math.PI / 2 + 0.18 });
+    }
+
+    let placedVehicles = 0;
+    for (let idx = 0; idx < roadCandidates.length; idx++) {
+      const c = roadCandidates[idx];
+      const hVal = hash2D(c.x, c.y, stageSeed + 311);
+      if (pointInAnyRect(c.x, c.y, allRoomRects, 110)) continue;
+      if (this.isNearAnyWindowLane(c.x, c.y, state.windows, 128)) continue;
+
+      if (hVal > 0.56 && placedVehicles < 8 && (cruiserImg || vanImg)) {
+        placedVehicles += 1;
+        const ang = c.baseAng + (hVal - 0.5) * 0.65;
+        const useVan = idx % 4 === 0 && vanImg;
+        const vImg = useVan ? vanImg! : cruiserImg!;
+        const vDim = useVan ? 156 : 142;
+
+        // 急刹双道黑胎印
+        mctx.save();
+        mctx.translate(c.x, c.y);
+        mctx.rotate(ang);
+        mctx.strokeStyle = 'rgba(9, 13, 22, 0.46)';
+        mctx.lineWidth = 5;
+        mctx.beginPath();
+        mctx.moveTo(-98, -18);
+        mctx.quadraticCurveTo(-55, -24, -20, -18);
+        mctx.moveTo(-98, 18);
+        mctx.quadraticCurveTo(-55, 12, -20, 18);
+        mctx.stroke();
+
+        // 车头前照灯光束与红蓝顶灯反光
+        const hg = mctx.createLinearGradient(45, 0, 165, 0);
+        hg.addColorStop(0, 'rgba(254, 249, 195, 0.22)');
+        hg.addColorStop(1, 'rgba(254, 249, 195, 0)');
+        mctx.fillStyle = hg;
+        mctx.beginPath();
+        mctx.moveTo(45, -22);
+        mctx.lineTo(165, -54);
+        mctx.lineTo(165, 54);
+        mctx.lineTo(45, 22);
+        mctx.closePath();
+        mctx.fill();
+
+        const rg = mctx.createRadialGradient(0, -20, 3, 0, -20, 62);
+        rg.addColorStop(0, 'rgba(239, 68, 68, 0.24)');
+        rg.addColorStop(1, 'rgba(239, 68, 68, 0)');
+        mctx.fillStyle = rg;
+        mctx.fillRect(-65, -85, 130, 130);
+
+        const bg = mctx.createRadialGradient(0, 20, 3, 0, 20, 62);
+        bg.addColorStop(0, 'rgba(59, 130, 246, 0.24)');
+        bg.addColorStop(1, 'rgba(59, 130, 246, 0)');
+        mctx.fillStyle = bg;
+        mctx.fillRect(-65, -45, 130, 130);
+
+        mctx.fillStyle = 'rgba(2, 6, 23, 0.48)';
+        mctx.beginPath();
+        mctx.roundRect(-58, -28, 122, 62, 12);
+        mctx.fill();
+
+        mctx.drawImage(vImg, -vDim / 2, -vDim / 2, vDim, vDim);
+        mctx.restore();
+
+        // 车旁配套封锁拒马
+        this.bakeJerseyBarrier(mctx, c.x + Math.cos(ang + 1.4) * 58, c.y + Math.sin(ang + 1.4) * 58, ang + 0.6);
+      } else {
+        // 公路内侧高杆路灯柱 + 暖黄钠灯光晕池
+        this.bakeStreetLampPost(mctx, c.x, c.y, c.baseAng + Math.PI / 2);
+      }
+    }
+
+    // 3. 户外远端荒野：针叶树林、混凝土封锁拒马与遗弃军火木箱（严格避开所有窗户冲锋通道！）
+    for (let gy = bb.y - 460; gy <= bb.y + bb.h + 460; gy += 150) {
+      for (let gx = bb.x - 460; gx <= bb.x + bb.w + 460; gx += 150) {
         const r1 = hash2D(gx, gy, stageSeed + 101);
-        if (r1 < 0.42) continue;
-        const tx = gx + (hash2D(gx, gy, stageSeed + 109) - 0.5) * 95;
-        const ty = gy + (hash2D(gy, gx, stageSeed + 113) - 0.5) * 95;
+        if (r1 < 0.36) continue;
+        const tx = gx + (hash2D(gx, gy, stageSeed + 109) - 0.5) * 90;
+        const ty = gy + (hash2D(gy, gx, stageSeed + 113) - 0.5) * 90;
         if (pointInAnyRect(tx, ty, allRoomRects, 96)) continue;
+        // 避开环城公路主路面，让树丛长在公路外侧荒野与绿化带
+        const onRoadX = Math.abs(tx - rx) < 58 || Math.abs(tx - (rx + rw)) < 58;
+        const onRoadY = Math.abs(ty - ry) < 58 || Math.abs(ty - (ry + rh)) < 58;
+        const inRoadBand =
+          tx >= rx - 58 && tx <= rx + rw + 58 && ty >= ry - 58 && ty <= ry + rh + 58 && (onRoadX || onRoadY);
+        if (this.isNearAnyWindowLane(tx, ty, state.windows, 96)) continue;
 
-        let nearWindowLane = false;
-        for (const win of state.windows) {
-          const wcx = win.x + win.w / 2;
-          const wcy = win.y + win.h / 2;
-          const ox = wcx + win.spawnOutsideOffset.dx;
-          const oy = wcy + win.spawnOutsideOffset.dy;
-          const segDx = ox - wcx;
-          const segDy = oy - wcy;
-          const segLenSq = segDx * segDx + segDy * segDy || 1;
-          const proj = Math.max(0, Math.min(1, ((tx - wcx) * segDx + (ty - wcy) * segDy) / segLenSq));
-          const distToLane = Math.hypot(tx - (wcx + segDx * proj), ty - (wcy + segDy * proj));
-          if (distToLane < 94) {
-            nearWindowLane = true;
-            break;
-          }
-        }
-        if (nearWindowLane) continue;
-
-        if (r1 > 0.72) {
-          this.bakeTopDownShrubCluster(mctx, tx, ty, 24 + r1 * 18, stageSeed + gx);
-        } else if (r1 > 0.58) {
+        if (!inRoadBand && r1 > 0.68) {
+          this.bakeTopDownShrubCluster(mctx, tx, ty, 24 + r1 * 20, stageSeed + gx);
+        } else if (r1 > 0.52) {
           this.bakeJerseyBarrier(mctx, tx, ty, r1 * Math.PI);
+        } else if (!inRoadBand && crateImg && r1 > 0.44) {
+          mctx.save();
+          mctx.translate(tx, ty);
+          mctx.rotate(r1 * 2.4);
+          mctx.fillStyle = 'rgba(2, 6, 23, 0.44)';
+          mctx.fillRect(-24, -22, 52, 52);
+          mctx.drawImage(crateImg, -28, -28, 56, 56);
+          mctx.restore();
         }
       }
     }
+  }
+
+  private bakeStreetLampPost(mctx: CanvasRenderingContext2D, x: number, y: number, armAngle: number): void {
+    mctx.save();
+    mctx.translate(x, y);
+    const lx = Math.cos(armAngle) * 24;
+    const ly = Math.sin(armAngle) * 24;
+
+    const lg = mctx.createRadialGradient(lx, ly, 4, lx, ly, 108);
+    lg.addColorStop(0, 'rgba(253, 224, 71, 0.2)');
+    lg.addColorStop(0.55, 'rgba(245, 158, 11, 0.06)');
+    lg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    mctx.fillStyle = lg;
+    mctx.beginPath();
+    mctx.arc(lx, ly, 108, 0, Math.PI * 2);
+    mctx.fill();
+
+    // 灯杆底座与挑臂
+    mctx.strokeStyle = '#090e17';
+    mctx.lineWidth = 6;
+    mctx.lineCap = 'round';
+    mctx.beginPath();
+    mctx.moveTo(0, 0);
+    mctx.lineTo(lx, ly);
+    mctx.stroke();
+
+    mctx.strokeStyle = '#64748b';
+    mctx.lineWidth = 3;
+    mctx.stroke();
+
+    mctx.fillStyle = '#334155';
+    mctx.beginPath();
+    mctx.arc(0, 0, 6, 0, Math.PI * 2);
+    mctx.fill();
+
+    mctx.fillStyle = '#fef08a';
+    mctx.beginPath();
+    mctx.arc(lx, ly, 4.2, 0, Math.PI * 2);
+    mctx.fill();
+    mctx.restore();
+  }
+
+  private bakeLabCentralAbyssShaft(mctx: CanvasRenderingContext2D, G: number): void {
+    // 73号研究所西翼(gx 20..24)与东翼(gx 32..36)之间的围合中庭 (gx: 24..32, gy: 15..26)
+    const sx = 24 * G;
+    const sy = 15 * G;
+    const sw = 8 * G;
+    const sh = 11 * G;
+
+    mctx.save();
+    mctx.beginPath();
+    mctx.rect(sx, sy, sw, sh);
+    mctx.clip();
+
+    // 深不见底的地下反应堆排热竖井黑蓝深渊
+    const bg = mctx.createRadialGradient(sx + sw / 2, sy + sh / 2, 24, sx + sw / 2, sy + sh / 2, sh * 0.62);
+    bg.addColorStop(0, '#082f49');
+    bg.addColorStop(0.55, '#071324');
+    bg.addColorStop(1, '#020617');
+    mctx.fillStyle = bg;
+    mctx.fillRect(sx, sy, sw, sh);
+
+    // 井壁四周黄黑工程防坠警戒斜纹框
+    mctx.strokeStyle = '#eab308';
+    mctx.lineWidth = 10;
+    mctx.strokeRect(sx + 16, sy + 16, sw - 32, sh - 32);
+    mctx.strokeStyle = '#090e17';
+    mctx.setLineDash([14, 14]);
+    mctx.strokeRect(sx + 16, sy + 16, sw - 32, sh - 32);
+    mctx.setLineDash([]);
+
+    // 上下两座巨型工业冷却涡轮风机井口
+    for (const fy of [sy + sh * 0.3, sy + sh * 0.7]) {
+      const fx = sx + sw / 2;
+      const fr = sw * 0.33;
+
+      const glow = mctx.createRadialGradient(fx, fy, 8, fx, fy, fr * 1.15);
+      glow.addColorStop(0, 'rgba(34, 211, 238, 0.34)');
+      glow.addColorStop(0.7, 'rgba(14, 116, 144, 0.14)');
+      glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      mctx.fillStyle = glow;
+      mctx.beginPath();
+      mctx.arc(fx, fy, fr * 1.15, 0, Math.PI * 2);
+      mctx.fill();
+
+      // 涡轮扇叶
+      mctx.save();
+      mctx.translate(fx, fy);
+      for (let b = 0; b < 7; b++) {
+        mctx.rotate((Math.PI * 2) / 7);
+        mctx.fillStyle = '#1e293b';
+        mctx.strokeStyle = '#090e17';
+        mctx.lineWidth = 2;
+        mctx.beginPath();
+        mctx.moveTo(14, -6);
+        mctx.lineTo(fr - 8, -18);
+        mctx.lineTo(fr - 4, 10);
+        mctx.lineTo(14, 8);
+        mctx.closePath();
+        mctx.fill();
+        mctx.stroke();
+      }
+      mctx.fillStyle = '#334155';
+      mctx.beginPath();
+      mctx.arc(0, 0, 22, 0, Math.PI * 2);
+      mctx.fill();
+      mctx.stroke();
+
+      mctx.fillStyle = '#22d3ee';
+      mctx.beginPath();
+      mctx.arc(0, 0, 8, 0, Math.PI * 2);
+      mctx.fill();
+      mctx.restore();
+
+      // 井口十字承重钢梁
+      mctx.strokeStyle = '#334155';
+      mctx.lineWidth = 8;
+      mctx.beginPath();
+      mctx.moveTo(sx + 20, fy);
+      mctx.lineTo(sx + sw - 20, fy);
+      mctx.stroke();
+
+      mctx.strokeStyle = '#475569';
+      mctx.lineWidth = 5;
+      mctx.beginPath();
+      mctx.arc(fx, fy, fr, 0, Math.PI * 2);
+      mctx.stroke();
+    }
+
+    // 贯穿竖井的纵向检修钢栈桥与红光警示灯
+    mctx.fillStyle = 'rgba(30, 41, 59, 0.88)';
+    mctx.strokeStyle = '#090e17';
+    mctx.lineWidth = 2;
+    mctx.fillRect(sx + sw / 2 - 14, sy + 18, 28, sh - 36);
+    mctx.strokeRect(sx + sw / 2 - 14, sy + 18, 28, sh - 36);
+    for (const ly of [sy + 48, sy + sh / 2, sy + sh - 48]) {
+      mctx.fillStyle = '#ef4444';
+      mctx.beginPath();
+      mctx.arc(sx + sw / 2, ly, 4.5, 0, Math.PI * 2);
+      mctx.fill();
+    }
+
+    mctx.restore();
   }
 
   private bakeSandbagCluster(mctx: CanvasRenderingContext2D, x: number, y: number, angle: number): void {
@@ -621,58 +960,269 @@ export class CartoonRenderer {
     r: Rect,
     seed: number
   ): void {
-    // 室内外周内嵌暗色金属收边条（让地板拥有建筑镶边细节）
-    mctx.strokeStyle = 'rgba(15, 23, 42, 0.32)';
+    // 1. 建筑板块接缝网格线（消除大面积地面空旷单调感，赋予真实石材/钢板/无菌舱拼接尺度！）
+    const step = theme === 'asphalt' ? 168 : theme === 'lobby' || theme === 'mall' ? 112 : 84;
+    mctx.strokeStyle =
+      theme === 'lab'
+        ? 'rgba(56, 189, 248, 0.08)'
+        : theme === 'lobby' || theme === 'mall'
+          ? 'rgba(15, 23, 42, 0.13)'
+          : 'rgba(9, 14, 23, 0.22)';
+    mctx.lineWidth = 1.2;
+    mctx.beginPath();
+    for (let gx = Math.ceil(r.x / step) * step; gx < r.x + r.w; gx += step) {
+      mctx.moveTo(gx, r.y);
+      mctx.lineTo(gx, r.y + r.h);
+    }
+    for (let gy = Math.ceil(r.y / step) * step; gy < r.y + r.h; gy += step) {
+      mctx.moveTo(r.x, gy);
+      mctx.lineTo(r.x + r.w, gy);
+    }
+    mctx.stroke();
+
+    // 2. 室内外周内嵌暗色金属收边条
+    mctx.strokeStyle = 'rgba(15, 23, 42, 0.34)';
     mctx.lineWidth = 2;
     mctx.strokeRect(r.x + 18, r.y + 18, Math.max(0, r.w - 36), Math.max(0, r.h - 36));
 
     if (theme === 'lobby' && r.w >= 300 && r.h >= 240) {
-      // 接待大厅中央深蓝战术防尘地毯边框与徽记线
-      const rw = Math.min(250, r.w * 0.42);
-      const rh = Math.min(150, r.h * 0.36);
+      // 接待大厅中央深蓝战术防尘地毯 + 金色双线徽章圆环
+      const rw = Math.min(280, r.w * 0.44);
+      const rh = Math.min(170, r.h * 0.38);
       const rx = r.x + (r.w - rw) / 2;
       const ry = r.y + (r.h - rh) / 2;
-      mctx.fillStyle = 'rgba(15, 23, 42, 0.24)';
+      mctx.fillStyle = 'rgba(15, 28, 52, 0.38)';
       mctx.beginPath();
       mctx.roundRect(rx, ry, rw, rh, 6);
       mctx.fill();
-      mctx.strokeStyle = 'rgba(234, 179, 8, 0.32)';
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.42)';
       mctx.lineWidth = 2;
       mctx.strokeRect(rx + 6, ry + 6, rw - 12, rh - 12);
+      mctx.beginPath();
+      mctx.arc(rx + rw / 2, ry + rh / 2, Math.min(rw, rh) * 0.28, 0, Math.PI * 2);
+      mctx.stroke();
+    } else if (theme === 'mall' && r.w >= 320 && r.h >= 260) {
+      // 商场中庭星芒八角拼花水磨石纹饰
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      const rad = Math.min(r.w, r.h) * 0.26;
+      mctx.strokeStyle = 'rgba(244, 114, 182, 0.22)';
+      mctx.lineWidth = 2.5;
+      mctx.beginPath();
+      mctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      mctx.stroke();
+      mctx.strokeStyle = 'rgba(56, 189, 248, 0.2)';
+      mctx.beginPath();
+      mctx.arc(cx, cy, rad * 0.72, 0, Math.PI * 2);
+      mctx.stroke();
     } else if (theme === 'armory' || theme === 'asphalt') {
-      // 工业区与停机坪黄黑安全警戒虚线与金属排水地漏
+      // 工业区与停机坪黄黑安全警戒虚线与双金属排水地漏
       mctx.save();
-      mctx.strokeStyle = 'rgba(234, 179, 8, 0.22)';
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.25)';
       mctx.lineWidth = 3;
       mctx.setLineDash([16, 12]);
       mctx.strokeRect(r.x + 28, r.y + 28, Math.max(0, r.w - 56), Math.max(0, r.h - 56));
       mctx.restore();
 
       if (r.w >= 220 && r.h >= 200) {
-        const gx = r.x + r.w * 0.5 - 26;
-        const gy = r.y + r.h * 0.78 - 9;
-        this.bakeFloorGrate(mctx, gx, gy, 52, 18);
+        this.bakeFloorGrate(mctx, r.x + r.w * 0.32 - 26, r.y + r.h * 0.78 - 9, 52, 18);
+        if (r.w >= 520) {
+          this.bakeFloorGrate(mctx, r.x + r.w * 0.72 - 26, r.y + r.h * 0.24 - 9, 52, 18);
+        }
       }
     } else if (theme === 'lab') {
-      // 实验室高能蓝光导流槽节点
-      mctx.strokeStyle = 'rgba(56, 189, 248, 0.16)';
+      // 实验室高能蓝光导流槽节点与检修舱盖
+      mctx.strokeStyle = 'rgba(56, 189, 248, 0.19)';
       mctx.lineWidth = 2;
       mctx.strokeRect(r.x + 26, r.y + 26, Math.max(0, r.w - 52), Math.max(0, r.h - 52));
+      if (r.w >= 260 && r.h >= 220) {
+        this.bakeFloorGrate(mctx, r.x + 42, r.y + r.h - 60, 46, 16);
+      }
     }
 
-    // 自然地面微磨损暗斑（2~3处极柔和做旧痕迹，提升真实战场质感）
-    const wearCount = Math.min(4, Math.floor((r.w * r.h) / 95000) + 1);
+    // 自然地面微磨损暗斑与战场尘土痕迹
+    const wearCount = Math.min(6, Math.floor((r.w * r.h) / 75000) + 2);
     for (let i = 0; i < wearCount; i++) {
       const wx = r.x + 45 + hash2D(r.x + i * 31, r.y, seed) * Math.max(20, r.w - 90);
       const wy = r.y + 45 + hash2D(r.y + i * 47, r.x, seed + 13) * Math.max(20, r.h - 90);
-      const wr = 28 + hash2D(wx, wy, seed + 29) * 38;
+      const wr = 28 + hash2D(wx, wy, seed + 29) * 42;
       const wg = mctx.createRadialGradient(wx, wy, 2, wx, wy, wr);
-      wg.addColorStop(0, 'rgba(9, 13, 22, 0.18)');
+      wg.addColorStop(0, 'rgba(9, 13, 22, 0.2)');
       wg.addColorStop(1, 'rgba(9, 13, 22, 0)');
       mctx.fillStyle = wg;
       mctx.beginPath();
       mctx.arc(wx, wy, wr, 0, Math.PI * 2);
       mctx.fill();
+    }
+  }
+
+  private bakeRoomStorytellingDetails(
+    mctx: CanvasRenderingContext2D,
+    room: RunSnapshot['rooms'][number],
+    state: RunSnapshot,
+    seed: number
+  ): void {
+    const r0 = room.rects[0];
+    if (!r0) return;
+
+    // 1. 所有房门与窗户内侧自动铺设防滑重型橡胶迎宾/除菌地垫
+    for (const d of state.doors) {
+      if (d.roomA !== room.id && d.roomB !== room.id) continue;
+      const dcx = d.x + d.w / 2;
+      const dcy = d.y + d.h / 2;
+      for (const offset of [-32, 32]) {
+        const mx = d.orientation === 'vertical' ? dcx + offset : dcx;
+        const my = d.orientation === 'horizontal' ? dcy + offset : dcy;
+        if (pointInAnyRect(mx, my, room.rects, -12)) {
+          mctx.save();
+          mctx.translate(mx, my);
+          if (d.orientation === 'vertical') mctx.rotate(Math.PI / 2);
+          mctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+          mctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+          mctx.lineWidth = 1.4;
+          mctx.fillRect(-38, -12, 76, 24);
+          mctx.strokeRect(-38, -12, 76, 24);
+          mctx.restore();
+        }
+      }
+    }
+
+    // 2. 各关卡专属房间叙事装饰层（纯视觉零阻挡，彻底告别“空房间”！）
+    if (room.id === 'diner') {
+      // 快餐长廊：经典美式复古黑白棋盘格过道地砖 + 粉色霓虹灯带投影
+      const stripeX = r0.x + 34;
+      const tileSz = 24;
+      for (let y = r0.y + 36; y < r0.y + r0.h - 42; y += tileSz) {
+        for (let col = 0; col < 3; col++) {
+          const isWhite = ((Math.floor(y / tileSz) + col) & 1) === 0;
+          mctx.fillStyle = isWhite ? 'rgba(248, 250, 252, 0.22)' : 'rgba(15, 23, 42, 0.36)';
+          mctx.fillRect(stripeX + col * tileSz, y, tileSz, tileSz);
+        }
+      }
+    } else if (room.id === 'arcade') {
+      // 星际电玩城：深紫赛博霓虹地毯跑道与像素星芒图案
+      const pad = 42;
+      mctx.fillStyle = 'rgba(46, 16, 101, 0.34)';
+      mctx.strokeStyle = 'rgba(232, 121, 249, 0.32)';
+      mctx.lineWidth = 2.2;
+      mctx.beginPath();
+      mctx.roundRect(r0.x + pad, r0.y + pad, Math.max(40, r0.w - pad * 2), Math.max(40, r0.h - pad * 2), 12);
+      mctx.fill();
+      mctx.stroke();
+      for (let px = r0.x + 95; px < r0.x + r0.w - 80; px += 120) {
+        mctx.strokeStyle = 'rgba(34, 211, 238, 0.25)';
+        mctx.strokeRect(px - 14, r0.y + r0.h * 0.52 - 14, 28, 28);
+      }
+    } else if (room.id === 'cells') {
+      // 拘留羁押室：地面黄色警戒牢房隔间线与编号水印 (CELL-01 / CELL-02)
+      mctx.save();
+      mctx.strokeStyle = 'rgba(250, 204, 21, 0.28)';
+      mctx.lineWidth = 2.5;
+      mctx.setLineDash([10, 8]);
+      const cellY = r0.y + 150;
+      mctx.beginPath();
+      mctx.moveTo(r0.x + 30, cellY);
+      mctx.lineTo(r0.x + r0.w - 30, cellY);
+      mctx.moveTo(r0.x + r0.w * 0.5, r0.y + 24);
+      mctx.lineTo(r0.x + r0.w * 0.5, cellY);
+      mctx.stroke();
+      mctx.setLineDash([]);
+      mctx.font = '800 13px monospace';
+      mctx.fillStyle = 'rgba(250, 204, 21, 0.26)';
+      mctx.fillText('CELL-01', r0.x + r0.w * 0.25, r0.y + 62);
+      mctx.fillText('CELL-02', r0.x + r0.w * 0.75, r0.y + 62);
+      mctx.restore();
+    } else if (room.id === 'corridor') {
+      // 审讯狭长走廊：中央红白紧急疏散导向带
+      mctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+      mctx.fillRect(r0.x + 36, r0.y + r0.h / 2 - 5, Math.max(20, r0.w - 72), 10);
+      mctx.fillStyle = 'rgba(254, 240, 138, 0.26)';
+      for (let ax = r0.x + 65; ax < r0.x + r0.w - 65; ax += 95) {
+        mctx.beginPath();
+        mctx.moveTo(ax + 12, r0.y + r0.h / 2);
+        mctx.lineTo(ax - 4, r0.y + r0.h / 2 - 5);
+        mctx.lineTo(ax - 4, r0.y + r0.h / 2 + 5);
+        mctx.closePath();
+        mctx.fill();
+      }
+    } else if (room.id === 'west_wing' || room.id === 'east_wing') {
+      // 73号研究所双翼：地面嵌入式液氮/高能冷却金属管道槽
+      mctx.strokeStyle = '#0f172a';
+      mctx.lineWidth = 10;
+      mctx.lineCap = 'round';
+      mctx.beginPath();
+      mctx.moveTo(r0.x + r0.w * 0.5, r0.y + 45);
+      mctx.lineTo(r0.x + r0.w * 0.5, r0.y + r0.h - 45);
+      mctx.stroke();
+      mctx.strokeStyle = room.id === 'west_wing' ? 'rgba(34, 211, 238, 0.36)' : 'rgba(248, 113, 113, 0.34)';
+      mctx.lineWidth = 3.5;
+      mctx.stroke();
+    } else if (room.id === 'courtyard' || room.id === 'cargo') {
+      // 停机坪与卸货区：地面车位标线与叉车/装甲车轮胎印
+      mctx.save();
+      mctx.strokeStyle = 'rgba(250, 204, 21, 0.24)';
+      mctx.lineWidth = 2.5;
+      mctx.strokeRect(r0.x + 48, r0.y + 44, 145, 78);
+      mctx.strokeStyle = 'rgba(9, 14, 23, 0.28)';
+      mctx.lineWidth = 5;
+      mctx.beginPath();
+      mctx.moveTo(r0.x + 70, r0.y + r0.h - 60);
+      mctx.quadraticCurveTo(r0.x + r0.w * 0.45, r0.y + r0.h * 0.65, r0.x + r0.w * 0.72, r0.y + r0.h * 0.52);
+      mctx.stroke();
+      mctx.restore();
+    }
+
+    // 3. 办公桌/掩体周边散落的紧急撤离纸张档案与战术警示雪糕筒（营造仓促沦陷真实氛围！）
+    const roomProps = state.props.filter((p) => p.roomId === room.id);
+    for (let i = 0; i < roomProps.length; i++) {
+      const pr = roomProps[i];
+      if (pr.kind === 'desk' || pr.kind === 'lockers') {
+        for (let pIdx = 0; pIdx < 3; pIdx++) {
+          const ang = hash2D(pr.x + pIdx * 19, pr.y, seed) * Math.PI * 2;
+          const dist = 36 + hash2D(pr.y + pIdx * 23, pr.x, seed + 7) * 24;
+          const px = pr.x + Math.cos(ang) * dist;
+          const py = pr.y + Math.sin(ang) * dist;
+          if (!pointInAnyRect(px, py, room.rects, -16)) continue;
+          mctx.save();
+          mctx.translate(px, py);
+          mctx.rotate(ang * 1.7);
+          mctx.fillStyle = pIdx === 0 ? 'rgba(254, 243, 199, 0.72)' : 'rgba(226, 232, 240, 0.68)';
+          mctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
+          mctx.lineWidth = 1;
+          mctx.fillRect(-5, -6.5, 10, 13);
+          mctx.strokeRect(-5, -6.5, 10, 13);
+          mctx.fillStyle = 'rgba(71, 85, 105, 0.55)';
+          mctx.fillRect(-3, -3.5, 6, 1.5);
+          mctx.fillRect(-3, 0, 5, 1.5);
+          mctx.restore();
+        }
+      } else if (pr.kind === 'crates' || pr.kind === 'police_car' || pr.kind === 'swat_van') {
+        // 车辆/货箱边摆放俯视橙白反光警示锥（雪糕筒）
+        const cx = pr.x + pr.w * 0.52 + 16;
+        const cy = pr.y + pr.h * 0.32;
+        if (pointInAnyRect(cx, cy, room.rects, -18)) {
+          mctx.save();
+          mctx.translate(cx, cy);
+          mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+          mctx.fillRect(-6, -5, 14, 14);
+          mctx.fillStyle = '#ea580c';
+          mctx.strokeStyle = '#090e17';
+          mctx.lineWidth = 1.6;
+          mctx.beginPath();
+          mctx.roundRect(-7, -7, 14, 14, 3);
+          mctx.fill();
+          mctx.stroke();
+          mctx.beginPath();
+          mctx.arc(0, 0, 4.6, 0, Math.PI * 2);
+          mctx.fillStyle = '#f8fafc';
+          mctx.fill();
+          mctx.beginPath();
+          mctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+          mctx.fillStyle = '#f97316';
+          mctx.fill();
+          mctx.restore();
+        }
+      }
     }
   }
 
@@ -1010,20 +1560,57 @@ export class CartoonRenderer {
 
   private drawDecals(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     for (const dc of state.decals) {
-      if (!this.inView(dc.x, dc.y, 40)) continue;
+      if (!this.inView(dc.x, dc.y, dc.radius + 30)) continue;
       ctx.save();
-      ctx.globalAlpha = Math.min(0.88, dc.life / 3.5);
-      ctx.fillStyle = dc.color;
-      ctx.beginPath();
-      ctx.arc(dc.x, dc.y, dc.radius * 0.72, 0, Math.PI * 2);
-      ctx.arc(
-        dc.x + Math.cos(dc.seed) * dc.radius * 0.44,
-        dc.y + Math.sin(dc.seed) * dc.radius * 0.44,
-        dc.radius * 0.42,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
+      if (dc.isScorch) {
+        // 高爆焦黑放射状弹坑贴花 + 初爆余烬微光边
+        const alpha = Math.min(0.9, dc.life / 3.2);
+        ctx.globalAlpha = alpha;
+        ctx.translate(dc.x, dc.y);
+
+        const cg = ctx.createRadialGradient(0, 0, dc.radius * 0.12, 0, 0, dc.radius);
+        cg.addColorStop(0, 'rgba(2, 6, 23, 0.86)');
+        cg.addColorStop(0.55, 'rgba(15, 23, 42, 0.56)');
+        cg.addColorStop(1, 'rgba(15, 23, 42, 0)');
+        ctx.fillStyle = cg;
+        ctx.beginPath();
+        ctx.arc(0, 0, dc.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 放射状冲击波灼痕射线
+        ctx.strokeStyle = 'rgba(9, 13, 22, 0.62)';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        for (let r = 0; r < 10; r++) {
+          const ang = (r / 10) * Math.PI * 2 + dc.seed;
+          const rLen = dc.radius * (0.72 + ((r * 37) % 5) * 0.11);
+          ctx.moveTo(Math.cos(ang) * dc.radius * 0.2, Math.sin(ang) * dc.radius * 0.2);
+          ctx.lineTo(Math.cos(ang) * rLen, Math.sin(ang) * rLen);
+        }
+        ctx.stroke();
+
+        // 刚爆炸后 2.5 秒内的坑心暗红余烬
+        const fresh = Math.max(0, 1 - (dc.maxLife - dc.life) / 2.5);
+        if (fresh > 0) {
+          ctx.fillStyle = `rgba(249, 115, 22, ${0.42 * fresh})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, dc.radius * 0.28, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        ctx.globalAlpha = Math.min(0.88, dc.life / 3.5);
+        ctx.fillStyle = dc.color;
+        ctx.beginPath();
+        ctx.arc(dc.x, dc.y, dc.radius * 0.72, 0, Math.PI * 2);
+        ctx.arc(
+          dc.x + Math.cos(dc.seed) * dc.radius * 0.44,
+          dc.y + Math.sin(dc.seed) * dc.radius * 0.44,
+          dc.radius * 0.42,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
       ctx.restore();
     }
 
@@ -1425,43 +2012,108 @@ export class CartoonRenderer {
   private drawDropsAndChests(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const now = performance.now() * 0.006;
     for (const d of state.drops) {
-      if (!this.inView(d.x, d.y, 40)) continue;
+      if (!this.inView(d.x, d.y, 44)) continue;
       const bob = Math.sin(now + d.bobPhase) * 2.5;
       ctx.save();
       ctx.translate(d.x, d.y + bob);
       if (d.kind === 'cash') {
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.35)';
-        ctx.fillRect(-9, -4, 20, 14);
-        ctx.fillStyle = '#15803d';
-        ctx.strokeStyle = '#052e16';
-        ctx.lineWidth = 2.2;
-        ctx.fillRect(-10, -7, 20, 14);
-        ctx.strokeRect(-10, -7, 20, 14);
-        ctx.fillStyle = '#86efac';
-        ctx.fillRect(-3, -7, 6, 14);
-        this.drawCachedLabel(ctx, '$', 0, 0, '#fef08a', 11);
+        // 立体成捆美金钞票叠层 + 银行扎带与高光
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+        ctx.beginPath();
+        ctx.ellipse(2, 6 - bob * 0.4, 13, 6.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.rotate(-0.16);
+        // 底层钞票厚度侧边
+        ctx.fillStyle = '#064e3b';
+        ctx.strokeStyle = '#022c22';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.roundRect(-11, -4, 22, 13, 2.5);
+        ctx.fill();
+        ctx.stroke();
+
+        // 顶层翠绿钞票面与内框防伪纹
+        ctx.fillStyle = '#16a34a';
+        ctx.beginPath();
+        ctx.roundRect(-11, -7.5, 22, 12.5, 2.5);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(187, 247, 208, 0.55)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-8.5, -5.5, 17, 8.5);
+
+        // 中央米白封签扎带
+        ctx.fillStyle = '#fef3c7';
+        ctx.fillRect(-3.2, -7.5, 6.4, 15.5);
+        ctx.strokeStyle = '#78350f';
+        ctx.strokeRect(-3.2, -7.5, 6.4, 15.5);
+        this.drawCachedLabel(ctx, '$', 0, -1, '#15803d', 10);
       } else if (d.kind === 'xp') {
+        // 战术棱镜能量数据晶片（多层折射切面 + 柔和蓝青光晕）
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.24)';
+        ctx.beginPath();
+        ctx.arc(0, 0, 12, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.fillStyle = '#0284c7';
-        ctx.strokeStyle = '#0f172a';
+        ctx.strokeStyle = '#090d16';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(0, -8);
-        ctx.lineTo(7.5, 0);
-        ctx.lineTo(0, 8);
-        ctx.lineTo(-7.5, 0);
+        ctx.moveTo(0, -9.5);
+        ctx.lineTo(7.5, -2.5);
+        ctx.lineTo(5.5, 8.5);
+        ctx.lineTo(-5.5, 8.5);
+        ctx.lineTo(-7.5, -2.5);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+
+        // 内部高光切面
+        ctx.fillStyle = '#7dd3fc';
+        ctx.beginPath();
+        ctx.moveTo(0, -6.5);
+        ctx.lineTo(4.2, -1.5);
+        ctx.lineTo(0, 4.5);
+        ctx.lineTo(-4.2, -1.5);
+        ctx.closePath();
+        ctx.fill();
       } else if (d.kind === 'powerup' && d.powerUp) {
         const meta = POWERUP_META[d.powerUp];
+        // 军用战术补给能量罐（外发光呼吸环 + 金属装甲边圈 + 玻璃高光）
         ctx.beginPath();
-        ctx.arc(0, 0, 15, 0, Math.PI * 2);
-        ctx.fillStyle = meta.color;
+        ctx.arc(0, 0, 21 + Math.sin(now * 2) * 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(0, 2, 16.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.5)';
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(0, 0, 16, 0, Math.PI * 2);
+        ctx.fillStyle = '#1e293b';
         ctx.fill();
         ctx.lineWidth = 2.5;
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = '#090d16';
         ctx.stroke();
-        this.drawCachedLabel(ctx, meta.icon, 0, 0, '#ffffff', 12);
+
+        ctx.beginPath();
+        ctx.arc(0, 0, 12.5, 0, Math.PI * 2);
+        ctx.fillStyle = meta.color;
+        ctx.fill();
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = '#f8fafc';
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.beginPath();
+        ctx.ellipse(-3.5, -4.5, 5, 2.5, -0.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        this.drawCachedLabel(ctx, meta.icon, 0, 0.5, '#ffffff', 12);
       }
       ctx.restore();
     }
@@ -1533,7 +2185,7 @@ export class CartoonRenderer {
   private drawZombies(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const frozen = state.powerUpTimers.freeze > 0;
     for (const z of state.zombies) {
-      if (!this.inView(z.x, z.y, 115)) continue;
+      if (z.hp <= 0 || !this.inView(z.x, z.y, 115)) continue;
       const spKey = ZOMBIE_SPRITE_MAP[z.kind];
       const sway = Math.sin(z.wobblePhase) * 0.12;
       const squash = 1 + Math.sin(z.wobblePhase * 2) * 0.05;
@@ -1612,20 +2264,34 @@ export class CartoonRenderer {
 
   private drawSpits(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     for (const s of state.spits) {
-      if (!this.inView(s.x, s.y, 28)) continue;
+      if (!this.inView(s.x, s.y, 36)) continue;
       const isBossOrb = s.radius >= 9;
+      const ang = Math.atan2(s.vy, s.vx);
       ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(ang);
+
+      // 腐蚀酸液彗星尾迹与液滴
+      ctx.fillStyle = isBossOrb ? 'rgba(244, 63, 94, 0.34)' : 'rgba(163, 230, 53, 0.32)';
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.radius + 4, 0, Math.PI * 2);
-      ctx.fillStyle = isBossOrb ? 'rgba(244, 63, 94, 0.44)' : 'rgba(163, 230, 53, 0.38)';
+      ctx.moveTo(s.radius, -s.radius * 0.85);
+      ctx.lineTo(-s.radius * 2.8, 0);
+      ctx.lineTo(s.radius, s.radius * 0.85);
+      ctx.closePath();
       ctx.fill();
+
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, s.radius * 1.25, s.radius * 0.92, 0, 0, Math.PI * 2);
       ctx.fillStyle = isBossOrb ? '#fb7185' : '#a3e635';
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = isBossOrb ? '#4c0519' : '#1a2e05';
       ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(s.radius * 0.25, -s.radius * 0.2, s.radius * 0.42, 0, Math.PI * 2);
+      ctx.fillStyle = isBossOrb ? '#ffe4e6' : '#ecfccb';
+      ctx.fill();
       ctx.restore();
     }
   }
@@ -2703,28 +3369,126 @@ export class CartoonRenderer {
   // ==================== 投掷物、极速子弹曳光与粒子 ====================
 
   private drawGrenades(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    const grenImg = Assets.getSprite('prop_grenade');
+    const grenFlash = Assets.getWhiteFlash('prop_grenade');
+
     for (const g of state.grenadesThrown) {
-      if (!this.inView(g.x, g.y, 40)) continue;
+      if (!this.inView(g.x, g.y, g.radius + 20)) continue;
+      const progress = Math.max(0, Math.min(1, 1 - g.fuse / Math.max(0.1, g.maxFuse || 1.05)));
+      const urgent = g.fuse < 0.36;
+
       ctx.save();
+      // 1. 地面战术爆炸杀伤范围预警圈（随引信倒计时收缩聚能，临爆高频红光警示！）
       ctx.beginPath();
-      ctx.ellipse(g.x, g.y + 4, 8, 4, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+      ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
+      ctx.fillStyle = urgent ? 'rgba(239, 68, 68, 0.12)' : 'rgba(239, 68, 68, 0.05)';
+      ctx.fill();
+      ctx.lineWidth = urgent ? 2.2 : 1.4;
+      ctx.strokeStyle = urgent ? 'rgba(248, 113, 113, 0.62)' : 'rgba(248, 113, 113, 0.28)';
+      ctx.setLineDash([10, 8]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 内圈充能扩散进度环
+      ctx.beginPath();
+      ctx.arc(g.x, g.y, Math.max(8, g.radius * progress), 0, Math.PI * 2);
+      ctx.strokeStyle = urgent ? 'rgba(254, 240, 138, 0.55)' : 'rgba(251, 146, 60, 0.28)';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+
+      // 2. 随抛物线高度动态缩放的真实地面投影
+      const shadowScale = Math.max(0.45, 1 - g.z / 120);
+      ctx.beginPath();
+      ctx.ellipse(g.x + 2, g.y + 5, 12 * shadowScale, 6.5 * shadowScale, 0, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(2, 6, 23, ${0.48 * shadowScale})`;
       ctx.fill();
 
+      // 3. 空中旋转高精度 M67 铸铁破片手雷贴图 + 引信红热火花
+      const drawSz = 30 + Math.min(10, g.z * 0.14);
       ctx.translate(g.x, g.y - g.z);
+      ctx.rotate(g.spinAngle);
+
+      if (grenImg) {
+        ctx.drawImage(grenImg, -drawSz / 2, -drawSz / 2, drawSz, drawSz);
+        if (urgent && Math.floor(g.fuse * 18) % 2 === 0 && grenFlash) {
+          ctx.globalAlpha = 0.48;
+          ctx.drawImage(grenFlash, -drawSz / 2, -drawSz / 2, drawSz, drawSz);
+          ctx.globalAlpha = 1;
+        }
+      } else {
+        ctx.fillStyle = '#3f6212';
+        ctx.strokeStyle = '#090d16';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 8, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // 引信颈部闪烁火星
+      ctx.fillStyle = Math.floor(g.fuse * 22) % 2 === 0 ? '#fef08a' : '#ef4444';
       ctx.beginPath();
-      ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
-      ctx.fillStyle = Math.floor(g.fuse * 10) % 2 === 0 ? '#ef4444' : '#3f6212';
+      ctx.arc(2, -drawSz * 0.36, urgent ? 4.2 : 2.8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.lineWidth = 2.5;
-      ctx.strokeStyle = '#090d16';
-      ctx.stroke();
+
       ctx.restore();
     }
   }
 
   private drawBulletsAndFX(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const now = performance.now();
+
+    // 0. 多层立体高爆火球 + 超音速冲击波扩散光环（彻底告别简陋小圆点爆炸！）
+    for (const ex of state.explosions) {
+      if (!this.inView(ex.x, ex.y, ex.radius + 45)) continue;
+      const t = 1 - ex.life / ex.maxLife; // 0 -> 1
+      const shockR = ex.radius * (0.22 + 0.88 * Math.pow(t, 0.55));
+      const fireR = ex.radius * (t < 0.32 ? (t / 0.32) * 0.78 : 0.78 * (1 - (t - 0.32) * 0.45));
+      const alpha = Math.max(0, 1 - Math.pow(t, 1.35));
+
+      ctx.save();
+      ctx.translate(ex.x, ex.y);
+
+      // 外层超音速空气折射冲击波环
+      ctx.beginPath();
+      ctx.arc(0, 0, shockR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(254, 243, 199, ${alpha * 0.78})`;
+      ctx.lineWidth = Math.max(2, (1 - t) * 10);
+      ctx.stroke();
+
+      // 初爆瞬间锋利爆裂星芒尖刺
+      if (t < 0.38) {
+        const spikeAlpha = (1 - t / 0.38) * 0.85;
+        ctx.fillStyle = `rgba(254, 240, 138, ${spikeAlpha})`;
+        ctx.beginPath();
+        const spikes = 9;
+        for (let i = 0; i < spikes * 2; i++) {
+          const ang = (i / (spikes * 2)) * Math.PI * 2 + ex.seed;
+          const rad = i % 2 === 0 ? ex.radius * 0.85 * (0.5 + t) : ex.radius * 0.28;
+          if (i === 0) ctx.moveTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
+          else ctx.lineTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // 立体炽白→烈焰橙→暗红滚滚火球核心
+      if (fireR > 4) {
+        const fg = ctx.createRadialGradient(0, 0, fireR * 0.08, 0, 0, fireR);
+        fg.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+        fg.addColorStop(0.28, `rgba(254, 240, 138, ${alpha * 0.95})`);
+        fg.addColorStop(0.62, `rgba(249, 115, 22, ${alpha * 0.82})`);
+        fg.addColorStop(0.88, `rgba(185, 28, 28, ${alpha * 0.45})`);
+        fg.addColorStop(1, 'rgba(30, 41, 59, 0)');
+        ctx.fillStyle = fg;
+        ctx.beginPath();
+        ctx.arc(0, 0, fireR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
     for (const b of state.bullets) {
       if (!this.inView(b.x, b.y, 65)) continue;
       const ang = Math.atan2(b.vy, b.vx);
@@ -2781,7 +3545,67 @@ export class CartoonRenderer {
         continue;
       }
 
-      const trailLen = b.laser ? 56 : b.explosiveRadius > 0 ? 22 : 28;
+      if (b.explosiveRadius > 0) {
+        // 40mm 尾翼高爆榴弹/爆破弹头（推进尾焰 + 浓烟拖尾 + 军绿弹体 + 红金引信尖锥！）
+        const smokeGrad = ctx.createLinearGradient(-44, 0, -6, 0);
+        smokeGrad.addColorStop(0, 'rgba(148, 163, 184, 0)');
+        smokeGrad.addColorStop(0.65, 'rgba(203, 213, 225, 0.36)');
+        smokeGrad.addColorStop(1, 'rgba(251, 146, 60, 0.72)');
+        ctx.strokeStyle = smokeGrad;
+        ctx.lineWidth = 7;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-42, 0);
+        ctx.lineTo(-7, 0);
+        ctx.stroke();
+
+        // 尾部推进喷火核
+        ctx.fillStyle = '#fef08a';
+        ctx.beginPath();
+        ctx.moveTo(-8, -3.2);
+        ctx.lineTo(-18 - Math.sin(now * 0.06) * 4, 0);
+        ctx.lineTo(-8, 3.2);
+        ctx.closePath();
+        ctx.fill();
+
+        // 稳定尾翼
+        ctx.fillStyle = '#334155';
+        ctx.strokeStyle = '#090d16';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(-6, -3);
+        ctx.lineTo(-11, -7);
+        ctx.lineTo(-4, -3);
+        ctx.moveTo(-6, 3);
+        ctx.lineTo(-11, 7);
+        ctx.lineTo(-4, 3);
+        ctx.stroke();
+
+        // 圆柱金属弹体 + 金色高爆铜环 + 赤红尖拱弹头
+        ctx.fillStyle = '#3f6212';
+        ctx.strokeStyle = '#090d16';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.roundRect(-8, -4.4, 13, 8.8, 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(1, -4.2, 3, 8.4);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.moveTo(5, -4.3);
+        ctx.quadraticCurveTo(13, 0, 5, 4.3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.restore();
+        continue;
+      }
+
+      const trailLen = b.laser ? 56 : 28;
       ctx.globalAlpha = 0.48;
       ctx.strokeStyle = b.color;
       ctx.lineWidth = b.radius * 1.95;
@@ -2792,12 +3616,14 @@ export class CartoonRenderer {
       ctx.stroke();
 
       ctx.globalAlpha = 1;
-      const len = b.laser ? 26 : b.explosiveRadius > 0 ? 14 : 12;
-      ctx.fillStyle = b.explosiveRadius > 0 ? '#facc15' : '#ffffff';
+      const len = b.laser ? 26 : 13;
+      ctx.fillStyle = '#ffffff';
       ctx.strokeStyle = '#090d16';
-      ctx.lineWidth = 1.8;
-      ctx.fillRect(-len / 2, -b.radius * 0.85, len, b.radius * 1.7);
-      ctx.strokeRect(-len / 2, -b.radius * 0.85, len, b.radius * 1.7);
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.roundRect(-len / 2, -b.radius * 0.78, len, b.radius * 1.56, 2);
+      ctx.fill();
+      ctx.stroke();
       ctx.restore();
     }
 
@@ -2822,13 +3648,38 @@ export class CartoonRenderer {
     }
 
     for (const pt of state.particles) {
-      if (!this.inView(pt.x, pt.y, 20)) continue;
+      if (!this.inView(pt.x, pt.y, 26)) continue;
+      const lifeRatio = Math.max(0, pt.life / pt.maxLife);
       ctx.save();
-      ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
-      ctx.fillStyle = pt.color;
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalAlpha = lifeRatio;
+      if (pt.isShell) {
+        // 抛壳窗飞旋黄铜弹壳
+        ctx.translate(pt.x, pt.y);
+        ctx.rotate((pt.angle || 0) + pt.life * 16);
+        ctx.fillStyle = '#f59e0b';
+        ctx.strokeStyle = '#451a03';
+        ctx.lineWidth = 1.1;
+        ctx.fillRect(-3.5, -1.5, 7, 3);
+        ctx.strokeRect(-3.5, -1.5, 7, 3);
+        ctx.fillStyle = '#fef3c7';
+        ctx.fillRect(-2.5, -1, 4, 1);
+      } else if (pt.isShard) {
+        // 爆炸高热破片流光棱刺
+        ctx.translate(pt.x, pt.y);
+        ctx.rotate(Math.atan2(pt.vy, pt.vx));
+        ctx.fillStyle = pt.color;
+        ctx.beginPath();
+        ctx.moveTo(pt.size * 1.8, 0);
+        ctx.lineTo(-pt.size * 1.4, -pt.size * 0.55);
+        ctx.lineTo(-pt.size * 1.4, pt.size * 0.55);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillStyle = pt.color;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
 

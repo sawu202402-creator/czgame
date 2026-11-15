@@ -16,6 +16,12 @@ export type SpriteKey =
   | 'prop_crates'
   | 'prop_swat_van'
   | 'prop_fountain'
+  | 'prop_grenade'
+  | 'prop_police_car'
+  | 'prop_sofa'
+  | 'prop_lockers'
+  | 'prop_cryo_pod'
+  | 'prop_arcade'
   | 'prop_armory_kiosk'
   | 'prop_ammo_box'
   | 'prop_vending'
@@ -62,6 +68,12 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   prop_crates: './assets/prop_crates.png',
   prop_swat_van: './assets/prop_swat_van.png',
   prop_fountain: './assets/prop_fountain.png',
+  prop_grenade: './assets/prop_grenade.png',
+  prop_police_car: './assets/prop_police_car.png',
+  prop_sofa: './assets/prop_sofa.png',
+  prop_lockers: './assets/prop_lockers.png',
+  prop_cryo_pod: './assets/prop_cryo_pod.png',
+  prop_arcade: './assets/prop_arcade.png',
   prop_armory_kiosk: './assets/prop_armory_kiosk.png',
   prop_ammo_box: './assets/prop_ammo_box.png',
   prop_vending: './assets/prop_vending.png',

@@ -426,12 +426,30 @@ const stagePolice = buildArchitecturalStage({
     { id: 'p_w11', roomId: 'courtyard', orientation: 'horizontal', gx: 35, gy: 33, span: 3, outDir: 'S' },
   ],
   props: [
-    { id: 'pr_1', roomId: 'lobby', kind: 'desk', x: 16.5 * G, y: 16.2 * G, w: 80, h: 50, blocksBullets: false },
-    { id: 'pr_2', roomId: 'detective', kind: 'desk', x: 18.2 * G, y: 10.2 * G, w: 80, h: 50, rotation: 0.18, blocksBullets: false },
-    { id: 'pr_3', roomId: 'detective', kind: 'crates', x: 10 * G, y: 8.5 * G, w: 66, h: 66, blocksBullets: true },
-    { id: 'pr_4', roomId: 'cells', kind: 'crates', x: 43.2 * G, y: 13.8 * G, w: 66, h: 66, blocksBullets: true },
-    { id: 'pr_5', roomId: 'vault', kind: 'crates', x: 15.2 * G, y: 28 * G, w: 68, h: 68, blocksBullets: true },
-    { id: 'pr_6', roomId: 'courtyard', kind: 'swat_van', x: 33 * G, y: 29.2 * G, w: 152, h: 84, rotation: -0.18, blocksBullets: true },
+    // 报案接待大厅：前台接待桌、市民等候皮沙发、警务装备铁柜、值班警长办公台
+    { id: 'pr_1', roomId: 'lobby', kind: 'desk', x: 16.4 * G, y: 16.4 * G, w: 92, h: 54, blocksBullets: false },
+    { id: 'pr_1b', roomId: 'lobby', kind: 'sofa', x: 15.2 * G, y: 18.8 * G, w: 92, h: 46, rotation: Math.PI / 2, blocksBullets: false },
+    { id: 'pr_1c', roomId: 'lobby', kind: 'lockers', x: 26.6 * G, y: 15.0 * G, w: 88, h: 42, blocksBullets: true },
+    { id: 'pr_1d', roomId: 'lobby', kind: 'desk', x: 23.6 * G, y: 18.6 * G, w: 84, h: 50, blocksBullets: false },
+    // 重案组办公翼：双排刑侦办公桌、档案卷宗重型铁柜、证物木箱与审讯休息沙发
+    { id: 'pr_2', roomId: 'detective', kind: 'desk', x: 18.2 * G, y: 10.6 * G, w: 86, h: 52, rotation: 0.12, blocksBullets: false },
+    { id: 'pr_2b', roomId: 'detective', kind: 'desk', x: 11.8 * G, y: 11.2 * G, w: 86, h: 52, rotation: -0.08, blocksBullets: false },
+    { id: 'pr_2c', roomId: 'detective', kind: 'lockers', x: 17.8 * G, y: 7.0 * G, w: 92, h: 42, blocksBullets: true },
+    { id: 'pr_3', roomId: 'detective', kind: 'crates', x: 9.6 * G, y: 7.8 * G, w: 66, h: 66, blocksBullets: true },
+    { id: 'pr_3b', roomId: 'detective', kind: 'sofa', x: 12.6 * G, y: 19.6 * G, w: 90, h: 46, rotation: -Math.PI / 2, blocksBullets: false },
+    // 审讯狭长走廊：东端防暴器械铁柜
+    { id: 'pr_cor1', roomId: 'corridor', kind: 'lockers', x: 38.4 * G, y: 19.8 * G, w: 84, h: 40, rotation: Math.PI, blocksBullets: true },
+    // 拘留羁押室：看守登记台、囚犯随身物铁柜与防暴补给箱
+    { id: 'pr_4', roomId: 'cells', kind: 'crates', x: 43.6 * G, y: 14.2 * G, w: 66, h: 66, blocksBullets: true },
+    { id: 'pr_4b', roomId: 'cells', kind: 'desk', x: 39.8 * G, y: 12.0 * G, w: 84, h: 50, blocksBullets: false },
+    { id: 'pr_4c', roomId: 'cells', kind: 'lockers', x: 35.1 * G, y: 12.8 * G, w: 84, h: 42, rotation: Math.PI / 2, blocksBullets: true },
+    // 特警重装金库：重装防弹衣铁柜与军火箱
+    { id: 'pr_5', roomId: 'vault', kind: 'crates', x: 16.0 * G, y: 28.4 * G, w: 68, h: 68, blocksBullets: true },
+    { id: 'pr_5b', roomId: 'vault', kind: 'lockers', x: 15.6 * G, y: 24.0 * G, w: 86, h: 42, blocksBullets: true },
+    // 后院装甲停机坪：SWAT重型防暴车、洛城黑白巡逻警车与空投物资垛
+    { id: 'pr_6', roomId: 'courtyard', kind: 'swat_van', x: 31.2 * G, y: 29.4 * G, w: 152, h: 84, rotation: -0.18, blocksBullets: true },
+    { id: 'pr_6b', roomId: 'courtyard', kind: 'police_car', x: 42.2 * G, y: 22.8 * G, w: 134, h: 68, rotation: 0.22, blocksBullets: true },
+    { id: 'pr_6c', roomId: 'courtyard', kind: 'crates', x: 26.0 * G, y: 28.6 * G, w: 64, h: 64, blocksBullets: true },
   ],
   stations: [
     { id: 'st_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 25.8 * G, y: 21 * G, cost: 0, label: '军火终端 [B]' },
@@ -464,7 +482,7 @@ const stageMall = buildArchitecturalStage({
   wallTopColor: '#3b4366',
   cols: 58,
   rows: 42,
-  playerSpawnCell: { gx: 26, gy: 20 },
+  playerSpawnCell: { gx: 24, gy: 21 },
   helipadCell: { gx: 40, gy: 31 },
   rooms: [
     {
@@ -528,11 +546,29 @@ const stageMall = buildArchitecturalStage({
     { id: 'mw9', roomId: 'courtyard', orientation: 'vertical', gx: 46, gy: 29, span: 3, outDir: 'E' },
   ],
   props: [
-    { id: 'mp1', roomId: 'lobby', kind: 'fountain', x: 27 * G, y: 19.5 * G, w: 88, h: 88, blocksBullets: false },
-    { id: 'mp2', roomId: 'diner', kind: 'desk', x: 15 * G, y: 14.8 * G, w: 82, h: 52, blocksBullets: false },
-    { id: 'mp3', roomId: 'diner', kind: 'desk', x: 15 * G, y: 21.2 * G, w: 82, h: 52, blocksBullets: false },
-    { id: 'mp4', roomId: 'cargo', kind: 'crates', x: 40 * G, y: 20.5 * G, w: 68, h: 68, blocksBullets: true },
-    { id: 'mp5', roomId: 'courtyard', kind: 'fountain', x: 32 * G, y: 31.5 * G, w: 82, h: 82, blocksBullets: false },
+    // 喷泉迎宾中庭：中央景观喷泉、两侧真皮休息沙发区与导购服务台
+    { id: 'mp1', roomId: 'lobby', kind: 'fountain', x: 27 * G, y: 19.5 * G, w: 92, h: 92, blocksBullets: false },
+    { id: 'mp1b', roomId: 'lobby', kind: 'sofa', x: 22.4 * G, y: 16.0 * G, w: 94, h: 48, blocksBullets: false },
+    { id: 'mp1c', roomId: 'lobby', kind: 'sofa', x: 32.2 * G, y: 22.2 * G, w: 94, h: 48, rotation: -Math.PI / 2, blocksBullets: false },
+    { id: 'mp1d', roomId: 'lobby', kind: 'desk', x: 25.8 * G, y: 28.0 * G, w: 84, h: 50, blocksBullets: false },
+    // 霓虹快餐长廊：美式卡座皮沙发与快餐桌组合
+    { id: 'mp2', roomId: 'diner', kind: 'sofa', x: 17.6 * G, y: 12.6 * G, w: 92, h: 46, blocksBullets: false },
+    { id: 'mp2b', roomId: 'diner', kind: 'desk', x: 17.6 * G, y: 14.8 * G, w: 84, h: 50, blocksBullets: false },
+    { id: 'mp3', roomId: 'diner', kind: 'desk', x: 13.4 * G, y: 20.6 * G, w: 84, h: 50, blocksBullets: false },
+    { id: 'mp3b', roomId: 'diner', kind: 'sofa', x: 13.4 * G, y: 22.6 * G, w: 92, h: 46, rotation: Math.PI, blocksBullets: false },
+    // 星际电玩城：三组双联霓虹复古街机框体 + 玩家休息沙发
+    { id: 'mp_arc1', roomId: 'arcade', kind: 'arcade', x: 23.0 * G, y: 7.3 * G, w: 94, h: 54, blocksBullets: true },
+    { id: 'mp_arc2', roomId: 'arcade', kind: 'arcade', x: 22.6 * G, y: 12.4 * G, w: 94, h: 54, rotation: Math.PI, blocksBullets: true },
+    { id: 'mp_arc3', roomId: 'arcade', kind: 'arcade', x: 31.6 * G, y: 12.5 * G, w: 94, h: 54, rotation: Math.PI, blocksBullets: true },
+    { id: 'mp_arc4', roomId: 'arcade', kind: 'sofa', x: 37.0 * G, y: 15.5 * G, w: 88, h: 44, rotation: Math.PI, blocksBullets: false },
+    // 东侧卸货通道：仓储重型货架柜与双层集装木箱垛
+    { id: 'mp4', roomId: 'cargo', kind: 'crates', x: 40.0 * G, y: 20.2 * G, w: 70, h: 70, blocksBullets: true },
+    { id: 'mp4b', roomId: 'cargo', kind: 'crates', x: 43.6 * G, y: 23.2 * G, w: 68, h: 68, blocksBullets: true },
+    { id: 'mp4c', roomId: 'cargo', kind: 'lockers', x: 37.6 * G, y: 18.0 * G, w: 92, h: 42, blocksBullets: true },
+    // 星空露台广场：露台喷泉、商场安保巡逻警车与观景长椅
+    { id: 'mp5', roomId: 'courtyard', kind: 'fountain', x: 31.5 * G, y: 31.8 * G, w: 86, h: 86, blocksBullets: false },
+    { id: 'mp5b', roomId: 'courtyard', kind: 'police_car', x: 42.4 * G, y: 34.0 * G, w: 132, h: 68, rotation: -0.22, blocksBullets: true },
+    { id: 'mp5c', roomId: 'courtyard', kind: 'sofa', x: 33.4 * G, y: 26.4 * G, w: 90, h: 44, blocksBullets: false },
   ],
   stations: [
     { id: 'ms_shop', roomId: 'lobby', type: 'armory_kiosk', x: 31.4 * G, y: 16.5 * G, cost: 0, label: '军火终端 [B]' },
@@ -620,11 +656,24 @@ const stageLab = buildArchitecturalStage({
     { id: 'lw8', roomId: 'courtyard', orientation: 'vertical', gx: 18, gy: 30, span: 3, outDir: 'W' },
   ],
   props: [
-    { id: 'lp1', roomId: 'lobby', kind: 'desk', x: 25 * G, y: 10.8 * G, w: 82, h: 52, blocksBullets: false },
-    { id: 'lp2', roomId: 'west_wing', kind: 'fountain', x: 15.5 * G, y: 17.2 * G, w: 82, h: 82, blocksBullets: false },
-    { id: 'lp3', roomId: 'west_wing', kind: 'fountain', x: 15.5 * G, y: 22.4 * G, w: 82, h: 82, blocksBullets: false },
-    { id: 'lp4', roomId: 'east_wing', kind: 'crates', x: 41 * G, y: 16.2 * G, w: 68, h: 68, blocksBullets: true },
-    { id: 'lp5', roomId: 'courtyard', kind: 'swat_van', x: 23.2 * G, y: 31.5 * G, w: 148, h: 82, rotation: 0.15, blocksBullets: true },
+    // 无菌隔离气闸大厅：检疫主控台、隔离样本冷冻舱与防化服服务器机柜
+    { id: 'lp1', roomId: 'lobby', kind: 'desk', x: 25.2 * G, y: 10.8 * G, w: 86, h: 52, blocksBullets: false },
+    { id: 'lp1b', roomId: 'lobby', kind: 'cryo_pod', x: 21.8 * G, y: 7.8 * G, w: 76, h: 76, blocksBullets: false },
+    { id: 'lp1c', roomId: 'lobby', kind: 'lockers', x: 32.0 * G, y: 7.1 * G, w: 88, h: 42, blocksBullets: true },
+    // 西翼冷冻培养室：三座高能生物低温培养舱阵列 + 低温监控服务器机柜
+    { id: 'lp2', roomId: 'west_wing', kind: 'cryo_pod', x: 15.6 * G, y: 17.2 * G, w: 82, h: 82, blocksBullets: false },
+    { id: 'lp3', roomId: 'west_wing', kind: 'cryo_pod', x: 15.6 * G, y: 21.6 * G, w: 82, h: 82, blocksBullets: false },
+    { id: 'lp3b', roomId: 'west_wing', kind: 'cryo_pod', x: 18.6 * G, y: 19.4 * G, w: 74, h: 74, blocksBullets: false },
+    { id: 'lp3c', roomId: 'west_wing', kind: 'lockers', x: 12.6 * G, y: 14.1 * G, w: 84, h: 42, blocksBullets: true },
+    // 东翼高能反应堆：反应堆冷却核心舱、主机服务器阵列、同位素防爆箱与监控台
+    { id: 'lp4', roomId: 'east_wing', kind: 'crates', x: 43.2 * G, y: 14.8 * G, w: 68, h: 68, blocksBullets: true },
+    { id: 'lp4b', roomId: 'east_wing', kind: 'lockers', x: 38.6 * G, y: 14.1 * G, w: 92, h: 42, blocksBullets: true },
+    { id: 'lp4c', roomId: 'east_wing', kind: 'cryo_pod', x: 37.5 * G, y: 23.0 * G, w: 78, h: 78, blocksBullets: false },
+    { id: 'lp4d', roomId: 'east_wing', kind: 'desk', x: 44.2 * G, y: 22.6 * G, w: 82, h: 48, rotation: -Math.PI / 2, blocksBullets: false },
+    // 南区地下升降平台：重装特勤装甲车、安保巡逻警车与高危物资集装箱
+    { id: 'lp5', roomId: 'courtyard', kind: 'swat_van', x: 23.0 * G, y: 31.2 * G, w: 148, h: 82, rotation: 0.15, blocksBullets: true },
+    { id: 'lp5b', roomId: 'courtyard', kind: 'police_car', x: 35.4 * G, y: 34.0 * G, w: 132, h: 68, rotation: -0.2, blocksBullets: true },
+    { id: 'lp5c', roomId: 'courtyard', kind: 'crates', x: 29.8 * G, y: 27.6 * G, w: 66, h: 66, blocksBullets: true },
   ],
   stations: [
     { id: 'ls_shop', roomId: 'lobby', type: 'armory_kiosk', x: 32.5 * G, y: 11.8 * G, cost: 0, label: '军火终端 [B]' },

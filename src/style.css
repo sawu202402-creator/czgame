@@ -578,11 +578,29 @@ body {
 }
 .hud-gren-btn {
   background: rgba(234, 88, 12, 0.85);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px 4px 8px;
+}
+.hud-gren-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+.sup-inline-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  vertical-align: -3px;
 }
 .hud-gren-btn:disabled {
   background: rgba(51, 65, 85, 0.55);
   color: #94a3b8;
   cursor: not-allowed;
+}
+.hud-gren-btn:disabled .hud-gren-icon {
+  opacity: 0.5;
 }
 
 .weapon-slots {

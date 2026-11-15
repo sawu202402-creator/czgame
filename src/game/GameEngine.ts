@@ -173,6 +173,7 @@ export class GameEngine {
       zombies: [],
       bullets: [],
       grenadesThrown: [],
+      explosions: [],
       spits: [],
       acidPools: [],
       drops: [],
@@ -224,10 +225,11 @@ export class GameEngine {
 
     // 标记室内大型家具障碍物中心格不可穿过，让僵尸自动丝滑绕开桌子/车/喷泉！
     for (const pr of s.props) {
-      const x0 = Math.max(0, Math.floor((pr.x - pr.w * 0.36) / G));
-      const y0 = Math.max(0, Math.floor((pr.y - pr.h * 0.36) / G));
-      const x1 = Math.min(cols - 1, Math.floor((pr.x + pr.w * 0.36) / G));
-      const y1 = Math.min(rows - 1, Math.floor((pr.y + pr.h * 0.36) / G));
+      const { ew, eh } = this.getEffectivePropDims(pr);
+      const x0 = Math.max(0, Math.floor((pr.x - ew * 0.36) / G));
+      const y0 = Math.max(0, Math.floor((pr.y - eh * 0.36) / G));
+      const x1 = Math.min(cols - 1, Math.floor((pr.x + ew * 0.36) / G));
+      const y1 = Math.min(rows - 1, Math.floor((pr.y + eh * 0.36) / G));
       for (let gy = y0; gy <= y1; gy++) {
         for (let gx = x0; gx <= x1; gx++) {
           this.walkableGrid[gy * cols + gx] = 0;
@@ -235,18 +237,31 @@ export class GameEngine {
       }
     }
 
-    const propRects: Rect[] = s.props.map((pr) => ({
-      x: pr.x - pr.w * 0.42,
-      y: pr.y - pr.h * 0.42,
-      w: pr.w * 0.84,
-      h: pr.h * 0.84,
-    }));
+    const propRects: Rect[] = s.props.map((pr) => {
+      const { ew, eh } = this.getEffectivePropDims(pr);
+      return {
+        x: pr.x - ew * 0.42,
+        y: pr.y - eh * 0.42,
+        w: ew * 0.84,
+        h: eh * 0.84,
+      };
+    });
     this.staticBlockers = [
       ...s.walls,
       ...s.windows,
       ...s.doors.filter((d) => !d.unlocked),
       ...propRects,
     ];
+  }
+
+  private getEffectivePropDims(pr: RunSnapshot['props'][number]): { ew: number; eh: number } {
+    const rot = pr.rotation || 0;
+    const c = Math.abs(Math.cos(rot));
+    const s = Math.abs(Math.sin(rot));
+    return {
+      ew: pr.w * c + pr.h * s,
+      eh: pr.w * s + pr.h * c,
+    };
   }
 
   private canStepBetweenCells(gx1: number, gy1: number, gx2: number, gy2: number): boolean {
@@ -382,7 +397,8 @@ export class GameEngine {
       const my = y1 + (y2 - y1) * t;
       if (this.findBlockingWallOrLockedDoor(mx, my, 14)) return false;
       for (const pr of this.state!.props) {
-        if (this.circleIntersectsRect(mx, my, 14, { x: pr.x - pr.w / 2, y: pr.y - pr.h / 2, w: pr.w, h: pr.h })) {
+        const { ew, eh } = this.getEffectivePropDims(pr);
+        if (this.circleIntersectsRect(mx, my, 14, { x: pr.x - ew / 2, y: pr.y - eh / 2, w: ew, h: eh })) {
           return false;
         }
       }
@@ -522,6 +538,8 @@ export class GameEngine {
       z: 18,
       vz: 190,
       fuse: 1.05,
+      maxFuse: 1.05,
+      spinAngle: p.angle,
       damage: 320 * s.modifiers.damageMult,
       radius: 175,
     });
@@ -683,10 +701,14 @@ export class GameEngine {
   public applyTacticalRevive(): void {
     const s = this.state;
     if (!s) return;
+    this.paused = false;
+    this.modalPaused = false;
     s.reviveUsed = true;
     s.player.hp = s.player.maxHp;
     s.player.invulnTimer = 4.5;
     s.player.grenades += 2;
+    s.spits = [];
+    s.acidPools = [];
     for (const w of s.player.weapons) {
       const def = WEAPONS[w.defId];
       w.mag = this.getMaxMag(w.defId, w.evolved);
@@ -696,7 +718,9 @@ export class GameEngine {
       win.planks = win.maxPlanks;
       this.pushOutdoorZombiesOutsidePlanks(win);
     }
-    for (const z of s.zombies) {
+    const snapshot = [...s.zombies];
+    for (const z of snapshot) {
+      if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
       const dx = z.x - s.player.x;
       const dy = z.y - s.player.y;
       const d = Math.hypot(dx, dy) || 1;
@@ -709,11 +733,16 @@ export class GameEngine {
         if (w) this.resolveOutdoorZombieObstacles(z, w, false);
       }
       z.stunTimer = 3.2;
-      if (z.kind !== 'boss' && z.kind !== 'miniboss') z.hp -= z.maxHp * 0.65;
+      if (z.kind !== 'boss' && z.kind !== 'miniboss') {
+        z.hp -= z.maxHp * 0.65;
+        if (z.hp <= 0) {
+          this.killZombie(z);
+        }
+      }
     }
     s.camera.shake = 1.2;
     SoundFX.explosion();
-    this.showBanner('⚡ 震爆空投支援抵达！全窗加固 + 满血满弹复活！', 3.5);
+    this.showBanner('⚡ 震爆空投支援抵达 · 满血复活', 2.6);
     PlatformSDK.gameplayStart();
   }
 
@@ -1310,11 +1339,12 @@ export class GameEngine {
         y: p.y,
         vx: Math.cos(shellAng) * 95,
         vy: Math.sin(shellAng) * 95,
-        size: 3,
+        size: 3.4,
         color: '#fbbf24',
-        life: 0.35,
-        maxLife: 0.35,
+        life: 0.42,
+        maxLife: 0.42,
         isShell: true,
+        angle: Math.random() * Math.PI * 2,
       });
     }
 
@@ -1351,6 +1381,7 @@ export class GameEngine {
         g.vx *= 0.65;
         g.vy *= 0.65;
       }
+      g.spinAngle += dt * (g.z > 2 ? 10.5 : Math.hypot(g.vx, g.vy) * 0.045);
 
       const nx = g.x + g.vx * dt;
       const ny = g.y + g.vy * dt;
@@ -1358,6 +1389,22 @@ export class GameEngine {
       else g.x = nx;
       if (this.findBlockingWallOrLockedDoor(g.x, ny, 8)) g.vy = -g.vy * 0.6;
       else g.y = ny;
+
+      // 引信白烟与火星拖尾粒子
+      if (s.particles.length < 135 && Math.random() < 0.65) {
+        const isSpark = Math.random() < 0.45;
+        s.particles.push({
+          x: g.x + (Math.random() - 0.5) * 6,
+          y: g.y - g.z - 6 + (Math.random() - 0.5) * 5,
+          vx: -g.vx * 0.12 + (Math.random() - 0.5) * 36,
+          vy: -g.vy * 0.12 - 18 + (Math.random() - 0.5) * 36,
+          size: isSpark ? 2.4 : 4.5,
+          color: isSpark ? '#fde047' : 'rgba(203, 213, 225, 0.52)',
+          life: isSpark ? 0.16 : 0.34,
+          maxLife: isSpark ? 0.16 : 0.34,
+          isSmoke: !isSpark,
+        });
+      }
 
       if (g.fuse <= 0) {
         this.explodeAt(g.x, g.y, g.radius, g.damage);
@@ -1984,8 +2031,8 @@ export class GameEngine {
           : z.kind === 'spitter'
             ? 'rgba(163, 230, 53, 0.42)'
             : 'rgba(34, 197, 94, 0.32)',
-      life: 14,
-      maxLife: 14,
+      life: 8,
+      maxLife: 8,
       seed: Math.random() * 10,
     });
 
@@ -2063,10 +2110,69 @@ export class GameEngine {
   private explodeAt(x: number, y: number, radius: number, damage: number): void {
     const s = this.state!;
     SoundFX.explosion();
-    s.camera.shake = Math.max(s.camera.shake, 0.9);
-    this.spawnHitSparks(x, y, '#f97316', 14);
+    s.camera.shake = Math.max(s.camera.shake, 0.95);
+
+    // 1. 多层立体火球与超音速冲击波环动画
+    if (s.explosions.length >= 10) s.explosions.shift();
+    s.explosions.push({
+      x,
+      y,
+      radius,
+      life: 0.46,
+      maxLife: 0.46,
+      seed: Math.random() * 10,
+    });
+
+    // 2. 地面焦黑放射状弹坑贴花
+    if (s.decals.length > 52) s.decals.shift();
+    s.decals.push({
+      x,
+      y,
+      radius: Math.min(76, radius * 0.46),
+      color: 'rgba(9, 13, 22, 0.68)',
+      life: 13,
+      maxLife: 13,
+      seed: Math.random() * 10,
+      isScorch: true,
+    });
+
+    // 3. 高热破片飞溅 + 翻滚浓烟团
+    const shardCount = Math.min(18, Math.max(4, 145 - s.particles.length));
+    for (let i = 0; i < shardCount; i++) {
+      const ang = (i / shardCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.35;
+      const spd = 130 + Math.random() * 240;
+      s.particles.push({
+        x,
+        y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        size: 3.8 + Math.random() * 3.8,
+        color: i % 3 === 0 ? '#fef08a' : i % 3 === 1 ? '#f97316' : '#ef4444',
+        life: 0.28 + Math.random() * 0.22,
+        maxLife: 0.5,
+        isShard: true,
+        angle: ang,
+      });
+    }
+    const smokeCount = Math.min(10, Math.max(2, 150 - s.particles.length));
+    for (let i = 0; i < smokeCount; i++) {
+      const ang = (i / smokeCount) * Math.PI * 2 + Math.random() * 0.5;
+      const spd = 35 + Math.random() * 85;
+      s.particles.push({
+        x: x + Math.cos(ang) * 12,
+        y: y + Math.sin(ang) * 12,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        size: 11 + Math.random() * 9,
+        color: i % 2 === 0 ? 'rgba(30, 41, 59, 0.65)' : 'rgba(51, 65, 85, 0.55)',
+        life: 0.52 + Math.random() * 0.25,
+        maxLife: 0.77,
+        isSmoke: true,
+      });
+    }
+
     if (this.explosionDepth === 0) {
-      this.spawnFloatingText(x, y - 16, '💥 BOOM!', '#fde047', 1.45);
+      this.spawnFloatingText(x, y - 18, '💥 高爆轰击!', '#fde047', 1.38);
     }
 
     this.explosionDepth += 1;
@@ -2136,7 +2242,14 @@ export class GameEngine {
         if (i < 0) break;
       }
       const z = s.zombies[i];
-      if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
+      if (!z || this.deadZombieIds.has(z.id)) {
+        s.zombies.splice(i, 1);
+        continue;
+      }
+      if (z.hp <= 0) {
+        this.killZombie(z);
+        continue;
+      }
       z.wobblePhase += dt * (z.kind === 'runner' ? 11 : 7.5);
       if (z.hitFlash > 0) z.hitFlash -= dt;
       if (z.attackCd > 0) z.attackCd -= dt;
@@ -2614,8 +2727,16 @@ export class GameEngine {
       SoundFX.fanfare();
       this.spawnFloatingText(s.player.x, s.player.y - 36, `${meta.icon} ${meta.name}!`, meta.color, 1.25);
       if (d.powerUp === 'nuke') {
-        s.camera.shake = 1.2;
+        s.camera.shake = 1.25;
         SoundFX.explosion();
+        s.explosions.push({
+          x: s.player.x,
+          y: s.player.y,
+          radius: 340,
+          life: 0.62,
+          maxLife: 0.62,
+          seed: Math.random() * 10,
+        });
         const snapshot = [...s.zombies];
         for (const z of snapshot) {
           if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
@@ -2653,6 +2774,10 @@ export class GameEngine {
 
   private updateFX(dt: number): void {
     const s = this.state!;
+    for (let i = s.explosions.length - 1; i >= 0; i--) {
+      s.explosions[i].life -= dt;
+      if (s.explosions[i].life <= 0) s.explosions.splice(i, 1);
+    }
     for (let i = s.decals.length - 1; i >= 0; i--) {
       s.decals[i].life -= dt;
       if (s.decals[i].life <= 0) s.decals.splice(i, 1);
@@ -2664,6 +2789,9 @@ export class GameEngine {
       pt.y += pt.vy * dt;
       pt.vx *= 0.92;
       pt.vy *= 0.92;
+      if (pt.isSmoke) {
+        pt.size += dt * 16;
+      }
       if (pt.life <= 0) s.particles.splice(i, 1);
     }
     for (let i = s.floatingTexts.length - 1; i >= 0; i--) {
@@ -2821,8 +2949,9 @@ export class GameEngine {
     const wall = this.findBlockingWallOrLockedDoor(x, y, radius);
     if (wall) return wall;
     for (const pr of this.state!.props) {
-      if (!pr.blocksBullets) continue; // 低矮办公桌和喷泉允许隔桌射击！高大军用箱和SWAT装甲车阻挡子弹
-      const r = { x: pr.x - pr.w * 0.4, y: pr.y - pr.h * 0.4, w: pr.w * 0.8, h: pr.h * 0.8 };
+      if (!pr.blocksBullets) continue; // 低矮办公桌/沙发/冷冻舱允许隔掩体射击！高大军用箱/铁柜/警车/街机阻挡子弹
+      const { ew, eh } = this.getEffectivePropDims(pr);
+      const r = { x: pr.x - ew * 0.4, y: pr.y - eh * 0.4, w: ew * 0.8, h: eh * 0.8 };
       if (this.circleIntersectsRect(x, y, radius, r)) return r;
     }
     return null;

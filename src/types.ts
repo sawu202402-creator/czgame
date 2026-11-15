@@ -124,7 +124,16 @@ export interface WindowConfig {
   spawnOutsideOffset: { dx: number; dy: number };
 }
 
-export type PropKind = 'desk' | 'crates' | 'swat_van' | 'fountain';
+export type PropKind =
+  | 'desk'
+  | 'crates'
+  | 'swat_van'
+  | 'fountain'
+  | 'police_car'
+  | 'sofa'
+  | 'lockers'
+  | 'cryo_pod'
+  | 'arcade';
 
 export interface InteriorPropConfig {
   id: string;
