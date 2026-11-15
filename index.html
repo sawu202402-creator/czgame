@@ -6,16 +6,39 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
+    <meta name="theme-color" content="#090e17" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="screen-orientation" content="landscape" />
+    <meta name="x5-orientation" content="landscape" />
+    <meta name="x5-fullscreen" content="true" />
+    <link rel="manifest" href="./manifest.json" />
     <title>僵尸防线大作战 | Zombie Room Defense</title>
     <!-- CrazyGames SDK v3 (异步无阻塞加载，离线环境自动走本地模拟 SDK) -->
     <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js" async></script>
-    <script type="module" crossorigin src="./assets/index-CKDLgsnA.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DIrCSEwE.css">
+    <script type="module" crossorigin src="./assets/index-Us-BtzvB.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-PZrqu5Im.css">
   </head>
   <body>
     <div id="game-root">
       <canvas id="game-canvas"></canvas>
       <div id="ui-layer"></div>
+      <div id="landscape-guard" class="landscape-guard" aria-hidden="true">
+        <div class="landscape-guard-card">
+          <div class="rotate-phone-anim" aria-hidden="true">
+            <div class="phone-frame">
+              <span class="phone-screen-icon">🧟</span>
+            </div>
+            <span class="rotate-arrow">↻</span>
+          </div>
+          <h2>请将手机横过来游玩</h2>
+          <p>横屏宽幅视野，双摇杆走位与射击体验最佳</p>
+          <button id="btn-guard-landscape" class="btn-cartoon btn-yellow" type="button">
+            ⛶ 一键全屏并锁定横屏
+          </button>
+        </div>
+      </div>
     </div>
   </body>
 </html>
