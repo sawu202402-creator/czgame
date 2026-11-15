@@ -29,7 +29,66 @@ export class UIManager {
     this.uiLayer.appendChild(this.modalRoot);
   }
 
-  // ==================== 极简特工基地大厅 ====================
+  // ==================== 特工战术指挥大厅 ====================
+
+  private getAgentRankTitle(level: number): string {
+    if (level >= 12) return '传奇统帅';
+    if (level >= 8) return '王牌指挥官';
+    if (level >= 5) return '铁血军士长';
+    if (level >= 3) return '破阵先锋';
+    return '新锐特工';
+  }
+
+  private isFullscreenSupported(): boolean {
+    const doc = document as Document & { webkitFullscreenEnabled?: boolean };
+    return Boolean(doc.fullscreenEnabled || doc.webkitFullscreenEnabled);
+  }
+
+  private isFullscreenActive(): boolean {
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    return Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element | null;
+        webkitExitFullscreen?: () => Promise<void>;
+      };
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (this.isFullscreenActive()) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
+      } else {
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+        const orient = screen.orientation as ScreenOrientation & {
+          lock?: (mode: string) => Promise<void>;
+        };
+        orient?.lock?.('landscape').catch(() => {});
+      }
+    } catch {
+      // 忽略部分移动浏览器全屏权限限制
+    }
+  }
+
+  private bindCombatTap(btn: HTMLButtonElement, action: () => void): void {
+    let lastTouchFire = 0;
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        e.preventDefault();
+        e.stopPropagation();
+        lastTouchFire = performance.now();
+        if (!btn.disabled) action();
+      }
+    });
+    btn.onclick = () => {
+      if (performance.now() - lastTouchFire < 420) return;
+      if (!btn.disabled) action();
+    };
+  }
 
   public showHomeHub(): void {
     cancelAnimationFrame(this.needleAnimId);
@@ -42,25 +101,42 @@ export class UIManager {
     this.engine.state = null;
 
     const save = SaveManager.get();
+    const hasAffordableUpgrade = UPGRADE_TRACKS.some(
+      (t) => save.upgrades[t.key] < t.maxLevel && save.gold >= SaveManager.getUpgradeCost(t.key)
+    );
+    const muted = SoundFX.isUserMuted();
+    const fsSupported = this.isFullscreenSupported();
+    const fsActive = this.isFullscreenActive();
 
     const bodyHtml =
       this.hubTab === 'stages' ? this.buildStagesHubView(save) : this.buildUpgradesHubView(save);
 
     this.modalRoot.innerHTML = `
       <div class="hub-screen">
+        <div class="hub-bg-art">
+          <img src="./assets/hub_banner.jpg" alt="" />
+        </div>
+
         <header class="hub-header">
           <div class="brand-block">
-            <h1>🧟 僵尸防线大作战</h1>
+            <img class="brand-avatar" src="./assets/player_hero.png" alt="" />
+            <div class="brand-titles">
+              <h1>僵尸防线大作战</h1>
+              <span class="brand-sub">SAS ZOMBIE FRONTLINE · 战术防区突围</span>
+            </div>
           </div>
 
           <div class="hub-nav-tabs">
-            <button class="seg-btn ${this.hubTab === 'stages' ? 'active' : ''}" data-hub-tab="stages">🗺️ 选关出击</button>
-            <button class="seg-btn ${this.hubTab === 'upgrades' ? 'active' : ''}" data-hub-tab="upgrades">⚡ 特工强化</button>
+            <button class="seg-btn ${this.hubTab === 'stages' ? 'active' : ''}" data-hub-tab="stages">🗺️ 战区出击</button>
+            <button class="seg-btn ${this.hubTab === 'upgrades' ? 'active' : ''}" data-hub-tab="upgrades">
+              ⚡ 特工强化${hasAffordableUpgrade ? '<span class="nav-dot"></span>' : ''}
+            </button>
           </div>
 
           <div class="agent-bar">
-            <span class="agent-badge">🎖️ Lv.${save.agentLevel}</span>
-            <span class="gold-pill">🪙 ${save.gold}</span>
+            <span class="gold-pill" title="永久特工金币">🪙 ${save.gold}</span>
+            <button class="hub-util-btn" id="btn-hub-mute" title="音效开关">${muted ? '🔇' : '🔊'}</button>
+            ${fsSupported ? `<button class="hub-util-btn ${fsActive ? 'active' : ''}" id="btn-hub-fs" title="全屏沉浸模式">⛶</button>` : ''}
           </div>
         </header>
 
@@ -69,10 +145,26 @@ export class UIManager {
         </main>
 
         <footer class="hub-footer-tip">
-          📱 手机左屏移动、右屏瞄准（默认自动开火） · 💻 电脑 WASD 移动、鼠标射击、B 键商店、G 键手雷
+          📱 触屏：左半屏摇杆移动 · 右半屏滑动瞄准（默认自动索敌开火） ｜ 💻 键鼠：WASD 移动 · 鼠标射击 · B 军火库 · G 手雷
         </footer>
       </div>
     `;
+
+    const muteBtn = this.modalRoot.querySelector('#btn-hub-mute') as HTMLButtonElement | null;
+    if (muteBtn) {
+      muteBtn.onclick = () => {
+        SoundFX.toggleUserMute();
+        this.showHomeHub();
+      };
+    }
+
+    const fsBtn = this.modalRoot.querySelector('#btn-hub-fs') as HTMLButtonElement | null;
+    if (fsBtn) {
+      fsBtn.onclick = async () => {
+        await this.toggleFullscreen();
+        this.showHomeHub();
+      };
+    }
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-hub-tab]').forEach((btn) => {
       btn.onclick = () => {
@@ -107,54 +199,180 @@ export class UIManager {
   }
 
   private buildStagesHubView(save: ReturnType<typeof SaveManager.get>): string {
-    const stageIcons = ['🚓', '🏬', '🧬'];
+    const xpNext = SaveManager.xpForNextLevel(save.agentLevel);
+    const xpPct = Math.min(100, Math.round((save.agentXp / Math.max(1, xpNext)) * 100));
+    const rankTitle = this.getAgentRankTitle(save.agentLevel);
+    const bestEndless = Math.max(0, ...Object.values(save.endlessBestWave));
+
+    const stageVisualMeta: {
+      theme: string;
+      sector: string;
+      diffLabel: string;
+      sprites: string[];
+      tags: string[];
+    }[] = [
+      {
+        theme: 'theme-police',
+        sector: 'SECTOR 01 · 城市防线',
+        diffLabel: '★☆☆ 推荐首战',
+        sprites: ['prop_police_car', 'player_hero', 'mech_dog'],
+        tags: ['🚪 6大防区', '🐕 机械警犬', '⚡ 超武改造机'],
+      },
+      {
+        theme: 'theme-mall',
+        sector: 'SECTOR 02 · 霓虹中庭',
+        diffLabel: '★★☆ 进阶战区',
+        sprites: ['prop_arcade', 'prop_vending', 'zombie_runner'],
+        tags: ['🚪 6大防区', '🎰 幸运贩卖机', '🕹️ 街机掩体阵'],
+      },
+      {
+        theme: 'theme-lab',
+        sector: 'SECTOR 03 · 绝密深渊',
+        diffLabel: '★★★ 高危禁区',
+        sprites: ['prop_cryo_pod', 'prop_laser_tower', 'zombie_boss'],
+        tags: ['🚪 6大防区', '🚨 旋转激光塔', '🧬 冷冻培养舱'],
+      },
+    ];
+
     const cards = STAGES.map((st, idx) => {
+      const meta = stageVisualMeta[idx] || stageVisualMeta[0];
       const cleared = save.clearedStages.includes(st.id);
       const bestWave = save.endlessBestWave[st.id] || 0;
       const statusText =
         this.selectedMode === 'standard'
           ? cleared
             ? '✅ 已通关'
-            : `难度 ★${idx + 1}`
+            : meta.diffLabel
           : bestWave > 0
-            ? `最高 ${bestWave} 波`
-            : '极限生存';
+            ? `🏆 最高 ${bestWave} 波`
+            : '♾️ 极限生存';
+
+      const spritesHtml = meta.sprites
+        .map((sp, sIdx) => `<img class="stage-vis-sp sp-${sIdx}" src="./assets/${sp}.png" alt="" />`)
+        .join('');
+
+      const tagsHtml = meta.tags.map((tag) => `<span class="stage-tag">${tag}</span>`).join('');
 
       return `
-        <div class="stage-card">
-          <div class="stage-card-top">
-            <span class="stage-emoji">${stageIcons[idx] || '🏢'}</span>
-            <span class="stage-badge">${statusText}</span>
+        <article class="stage-card ${cleared ? 'is-cleared' : ''}">
+          <div class="stage-visual-strip ${meta.theme}">
+            <div class="stage-vis-top">
+              <span class="stage-sector">${meta.sector}</span>
+              <span class="stage-badge ${cleared && this.selectedMode === 'standard' ? 'cleared' : ''}">${statusText}</span>
+            </div>
+            <div class="stage-vis-sprites">
+              ${spritesHtml}
+            </div>
           </div>
-          <h3>${st.name}</h3>
-          <p>${st.subtitle}</p>
-          <button class="btn-cartoon ${this.selectedMode === 'standard' ? 'btn-green' : 'btn-purple'} stage-go-btn" data-stage-go="${st.id}">
-            ${this.selectedMode === 'standard' ? '▶ 开始行动 (10波)' : '▶ 进入无尽尸潮'}
-          </button>
-        </div>
+
+          <div class="stage-card-body">
+            <h3>${st.name}</h3>
+            <p>${st.subtitle}</p>
+            <div class="stage-tags">${tagsHtml}</div>
+            <button class="btn-cartoon ${this.selectedMode === 'standard' ? 'btn-green' : 'btn-purple'} stage-go-btn" data-stage-go="${st.id}">
+              ${this.selectedMode === 'standard' ? '▶ 空降出击 (10波撤离)' : '▶ 迎战无尽尸潮'}
+            </button>
+          </div>
+        </article>
       `;
     }).join('');
 
+    const showcaseIds = [
+      'revolver',
+      'autoshotgun',
+      'flamethrower',
+      'cryogun',
+      'sawlauncher',
+      'minigun',
+      'tesla',
+      'plasma',
+    ];
+    const showcaseGunsHtml = showcaseIds
+      .map((id) => {
+        const w = WEAPONS[id];
+        if (!w) return '';
+        return `
+          <div class="arsenal-preview-chip">
+            <img src="./assets/gun_${w.id}.png" alt="${w.name}" />
+            <div class="arsenal-chip-meta">
+              <span class="arsenal-chip-name">${w.name}</span>
+              <span class="arsenal-chip-evo">⚡${w.superName}</span>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    const modeDesc =
+      this.selectedMode === 'standard'
+        ? '坚守 10 波防线并击毙狂暴尸王，前往停机坪搭乘直升机撤离'
+        : '无波次上限，精英暴君与尸王轮番压境，冲击最高生存波次纪录';
+
     return `
-      <div class="mode-bar-wrap">
-        <div class="seg-group">
-          <button class="seg-btn ${this.selectedMode === 'standard' ? 'active' : ''}" data-mode-pick="standard">🚁 10波撤离</button>
-          <button class="seg-btn ${this.selectedMode === 'endless' ? 'active' : ''}" data-mode-pick="endless">♾️ 无尽模式</button>
+      <section class="hub-hero-banner">
+        <div class="hero-dossier">
+          <div class="hero-rank-row">
+            <span class="hero-rank-pill">🎖️ Lv.${save.agentLevel} ${rankTitle}</span>
+            <span class="hero-dmg-bonus">全枪伤害 +${(save.agentLevel - 1) * 4}%</span>
+          </div>
+
+          <div class="hero-xp-wrap">
+            <div class="hero-xp-bar">
+              <div class="hero-xp-fill" style="width:${xpPct}%"></div>
+            </div>
+            <span class="hero-xp-text">经验 ${save.agentXp}/${xpNext}</span>
+          </div>
+
+          <div class="hero-stats-row">
+            <span class="hero-stat-chip">🏆 通关 ${save.clearedStages.length}/${STAGES.length}</span>
+            <span class="hero-stat-chip">♾️ 最高 ${bestEndless > 0 ? `${bestEndless} 波` : '待挑战'}</span>
+            <span class="hero-stat-chip">🔫 15把超武重火器</span>
+          </div>
+
+          <div class="hero-mode-box">
+            <div class="seg-group">
+              <button class="seg-btn ${this.selectedMode === 'standard' ? 'active' : ''}" data-mode-pick="standard">🚁 10波撤离</button>
+              <button class="seg-btn ${this.selectedMode === 'endless' ? 'active' : ''}" data-mode-pick="endless">♾️ 无尽尸潮</button>
+            </div>
+            <span class="hero-mode-desc">${modeDesc}</span>
+          </div>
         </div>
-      </div>
-      <div class="stage-grid">${cards}</div>
+
+        <div class="hero-art-panel">
+          <img class="hero-key-art" src="./assets/hub_banner.jpg" alt="僵尸防线大作战" />
+          <div class="hero-art-caption">🔨 修窗固防 · 🔓 开门拓荒 · ⚡ 超武觉醒</div>
+        </div>
+      </section>
+
+      <section class="stage-grid">${cards}</section>
+
+      <section class="hub-arsenal-strip">
+        <div class="arsenal-strip-head">
+          <span class="arsenal-strip-title">🔥 战地军火库图鉴 <small>局内开门解锁 · 全枪械支持超武进化</small></span>
+          <div class="tactical-loop-pills">
+            <span>🔨 近窗自动钉板</span>
+            <span>🎁 奇物空投箱</span>
+            <span>👑 决战狂暴尸王</span>
+          </div>
+        </div>
+        <div class="arsenal-preview-rail">${showcaseGunsHtml}</div>
+      </section>
     `;
   }
 
   private buildUpgradesHubView(save: ReturnType<typeof SaveManager.get>): string {
     const xpNext = SaveManager.xpForNextLevel(save.agentLevel);
+    const xpPct = Math.min(100, Math.round((save.agentXp / Math.max(1, xpNext)) * 100));
+    const rankTitle = this.getAgentRankTitle(save.agentLevel);
+
     const upgradesHtml = UPGRADE_TRACKS.map((t) => {
       const lvl = save.upgrades[t.key];
       const isMax = lvl >= t.maxLevel;
       const cost = SaveManager.getUpgradeCost(t.key);
       const canBuy = !isMax && save.gold >= cost;
+      const pct = Math.round((lvl / t.maxLevel) * 100);
       return `
-        <div class="upgrade-card">
+        <div class="upgrade-card ${isMax ? 'maxed' : ''}">
           <div class="upg-top">
             <span class="upg-icon">${t.icon}</span>
             <div class="upg-info">
@@ -162,17 +380,33 @@ export class UIManager {
               <div class="upg-val">${t.valueText(lvl)}</div>
             </div>
           </div>
+          <p class="upg-desc">${t.desc}</p>
+          <div class="upg-prog-track">
+            <div class="upg-prog-fill" style="width:${pct}%"></div>
+          </div>
           <button class="btn-cartoon btn-mini ${isMax ? 'btn-gray' : canBuy ? 'btn-yellow' : 'btn-disabled'}"
             data-upg="${t.key}" ${!canBuy ? 'disabled' : ''}>
-            ${isMax ? '已满级' : `🪙 ${cost} 升级`}
+            ${isMax ? '✅ 已满级' : `🪙 ${cost} 强化升级`}
           </button>
         </div>
       `;
     }).join('');
 
     return `
-      <div class="upg-summary-bar">
-        <span>🎖️ 特工等级 Lv.${save.agentLevel}（全枪伤害 +${(save.agentLevel - 1) * 4}% · 经验 ${save.agentXp}/${xpNext}）</span>
+      <div class="upg-dossier-card">
+        <img class="upg-hero-avatar" src="./assets/player_hero.png" alt="" />
+        <div class="upg-dossier-body">
+          <div class="upg-dossier-top">
+            <strong>🎖️ Lv.${save.agentLevel} ${rankTitle}</strong>
+            <span>全枪械永久伤害加成 +${(save.agentLevel - 1) * 4}%</span>
+          </div>
+          <div class="hero-xp-wrap">
+            <div class="hero-xp-bar">
+              <div class="hero-xp-fill" style="width:${xpPct}%"></div>
+            </div>
+            <span class="hero-xp-text">升级经验 ${save.agentXp}/${xpNext}</span>
+          </div>
+        </div>
       </div>
       <div class="upgrade-list">${upgradesHtml}</div>
     `;
@@ -183,6 +417,12 @@ export class UIManager {
     this.pauseOpen = false;
     this.armoryTab = 'guns';
     this.modalRoot.innerHTML = '';
+    if (this.engine.input.usingTouch && this.isFullscreenActive()) {
+      const orient = screen.orientation as ScreenOrientation & {
+        lock?: (mode: string) => Promise<void>;
+      };
+      orient?.lock?.('landscape').catch(() => {});
+    }
     this.mountHUD();
     this.engine.startRun(stage, mode);
   }
@@ -251,9 +491,9 @@ export class UIManager {
       this.toggleArmoryShop();
     };
 
-    (hud.querySelector('#btn-grenade') as HTMLButtonElement).onclick = () => {
+    this.bindCombatTap(hud.querySelector('#btn-grenade') as HTMLButtonElement, () => {
       this.engine.throwGrenade();
-    };
+    });
   }
 
   // ==================== 极简暂停与设置小面板 ====================
@@ -288,6 +528,8 @@ export class UIManager {
     if (!s) return;
     const autoOn = this.engine.input.autoFireEnabled;
     const muted = SoundFX.isUserMuted();
+    const fsSupported = this.isFullscreenSupported();
+    const fsActive = this.isFullscreenActive();
 
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop" id="pause-backdrop">
@@ -302,6 +544,13 @@ export class UIManager {
             <button class="btn-cartoon btn-gray" id="btn-toggle-mute">
               ${muted ? '🔇 音效：已静音' : '🔊 音效：开启'}
             </button>
+            ${
+              fsSupported
+                ? `<button class="btn-cartoon ${fsActive ? 'btn-yellow' : 'btn-gray'}" id="btn-toggle-fs">
+                    ⛶ 全屏模式：${fsActive ? '开启中' : '点击开启'}
+                  </button>`
+                : ''
+            }
             <button class="btn-cartoon btn-gray" id="btn-quit-hub">🏠 返回基地大厅</button>
           </div>
         </div>
@@ -325,6 +574,14 @@ export class UIManager {
       SoundFX.toggleUserMute();
       this.renderPauseMenu();
     };
+
+    const fsBtn = this.modalRoot.querySelector('#btn-toggle-fs') as HTMLButtonElement | null;
+    if (fsBtn) {
+      fsBtn.onclick = async () => {
+        await this.toggleFullscreen();
+        this.renderPauseMenu();
+      };
+    }
 
     (this.modalRoot.querySelector('#btn-quit-hub') as HTMLButtonElement).onclick = () => {
       this.pauseOpen = false;
@@ -751,14 +1008,14 @@ export class UIManager {
         .join('');
 
       this.wepDomRefs = Array.from(wContainer.querySelectorAll<HTMLButtonElement>('[data-slot]')).map((btn) => {
-        btn.onclick = () => {
+        this.bindCombatTap(btn, () => {
           const slot = Number(btn.dataset.slot);
           if (this.engine.state?.player.activeSlot === slot) {
             this.engine.startReload();
           } else {
             this.engine.switchWeapon(slot);
           }
-        };
+        });
         return {
           btn,
           ammoEl: btn.querySelector('.wep-ammo') as HTMLElement,

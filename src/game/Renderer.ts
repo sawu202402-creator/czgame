@@ -149,10 +149,10 @@ export class CartoonRenderer {
 
     ctx.restore();
 
-    // 11. 屏幕层：左下角紧凑雷达小地图、屏幕外目标箭头、触屏摇杆
-    this.drawTacticalMinimap(ctx, viewW, viewH, state);
+    // 11. 屏幕层：雷达小地图（手机端自动避让左拇指摇杆区）、屏幕外目标箭头、触屏双摇杆
+    this.drawTacticalMinimap(ctx, viewW, viewH, state, input.usingTouch);
     this.drawOffscreenIndicators(ctx, viewW, viewH, state);
-    this.drawTouchSticks(ctx, input);
+    this.drawTouchSticks(ctx, viewW, viewH, state, input);
   }
 
   // ==================== 离屏高精度建筑地图烘焙（仅在开局与开门瞬间执行 1 次） ====================
@@ -3698,13 +3698,17 @@ export class CartoonRenderer {
     ctx: CanvasRenderingContext2D,
     viewW: number,
     viewH: number,
-    state: RunSnapshot
+    state: RunSnapshot,
+    usingTouch: boolean
   ): void {
-    const compact = viewW < 760 || viewH < 500;
-    const mapW = compact ? 102 : 144;
-    const mapH = compact ? 74 : 104;
-    const mx = compact ? 8 : 12;
-    const my = compact ? viewH - mapH - 54 : viewH - mapH - 12;
+    const mobileLandscape = usingTouch || viewH < 520 || viewW < 920;
+    const mapW = mobileLandscape ? 104 : 144;
+    const mapH = mobileLandscape ? 72 : 104;
+    // 全面屏横屏避开左侧刘海/挖孔安全区，并上移至左上角血条下方避开左拇指摇杆区
+    const ultraWide = viewW / Math.max(1, viewH) > 1.9;
+    const mx = mobileLandscape ? (ultraWide ? 34 : 12) : 12;
+    const hasRelics = state.relicIds.length > 0;
+    const my = mobileLandscape ? (hasRelics ? 70 : 44) : viewH - mapH - 12;
     const bb = state.stage.buildingBounds;
     const scale = Math.min((mapW - 14) / bb.w, (mapH - 14) / bb.h);
     const ox = mx + (mapW - bb.w * scale) / 2 - bb.x * scale;
@@ -3811,22 +3815,87 @@ export class CartoonRenderer {
     }
   }
 
-  private drawTouchSticks(ctx: CanvasRenderingContext2D, input: InputManager): void {
-    for (const stick of [input.moveStick, input.aimStick]) {
-      if (!stick.active) continue;
+  private drawTouchSticks(
+    ctx: CanvasRenderingContext2D,
+    viewW: number,
+    viewH: number,
+    state: RunSnapshot,
+    input: InputManager
+  ): void {
+    // 触屏首波起步前轻量化手势引导圈（一移动即自动消隐，零弹窗遮挡）
+    if (
+      input.usingTouch &&
+      state.wave === 1 &&
+      state.player.walkPhase < 1.2 &&
+      !input.moveStick.active &&
+      !input.aimStick.active
+    ) {
+      const pulse = 0.28 + Math.sin(performance.now() * 0.005) * 0.08;
+      const guideY = Math.min(viewH - 112, Math.max(viewH * 0.68, 220));
+      const leftX = Math.min(96, viewW * 0.23);
+      const rightX = Math.max(viewW - 96, viewW * 0.77);
+
       ctx.save();
+      ctx.globalAlpha = pulse;
+      ctx.setLineDash([6, 5]);
+      ctx.lineWidth = 2;
+
+      ctx.strokeStyle = '#38bdf8';
       ctx.beginPath();
-      ctx.arc(stick.startX, stick.startY, 46, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(9, 14, 23, 0.34)';
-      ctx.fill();
-      ctx.lineWidth = 2.5;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+      ctx.arc(leftX, guideY, 38, 0, Math.PI * 2);
       ctx.stroke();
 
+      ctx.strokeStyle = '#fbbf24';
       ctx.beginPath();
-      ctx.arc(stick.curX, stick.curY, 20, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(250, 204, 21, 0.9)';
+      ctx.arc(rightX, guideY, 38, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.globalAlpha = Math.min(0.75, pulse * 2.1);
+      this.drawCachedLabel(ctx, '左屏移动', leftX, guideY, '#bae6fd', 11);
+      this.drawCachedLabel(ctx, '右屏瞄准', rightX, guideY, '#fde68a', 11);
+      ctx.restore();
+    }
+
+    const outerR = Math.min(viewW, viewH) < 420 ? 42 : 48;
+    const innerR = Math.min(viewW, viewH) < 420 ? 18 : 21;
+
+    const sticks: { stick: typeof input.moveStick; ringColor: string; nubColor: string; isAim: boolean }[] = [
+      { stick: input.moveStick, ringColor: 'rgba(56, 189, 248, 0.78)', nubColor: 'rgba(125, 211, 252, 0.92)', isAim: false },
+      { stick: input.aimStick, ringColor: 'rgba(251, 191, 36, 0.82)', nubColor: 'rgba(250, 204, 21, 0.94)', isAim: true },
+    ];
+
+    for (const item of sticks) {
+      const { stick, ringColor, nubColor, isAim } = item;
+      if (!stick.active) continue;
+      ctx.save();
+
+      ctx.beginPath();
+      ctx.arc(stick.startX, stick.startY, outerR, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(9, 14, 23, 0.36)';
       ctx.fill();
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = ringColor;
+      ctx.stroke();
+
+      // 摇杆连线与准星刻度
+      if (stick.curX !== stick.startX || stick.curY !== stick.startY) {
+        ctx.beginPath();
+        ctx.moveTo(stick.startX, stick.startY);
+        ctx.lineTo(stick.curX, stick.curY);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = isAim ? 'rgba(251, 191, 36, 0.55)' : 'rgba(56, 189, 248, 0.5)';
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(stick.curX, stick.curY, innerR, 0, Math.PI * 2);
+      ctx.fillStyle = nubColor;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#0f172a';
+      ctx.stroke();
+
       ctx.restore();
     }
   }

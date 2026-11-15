@@ -16,6 +16,7 @@ export class InputManager {
   public mouseDown = false;
   public usingTouch = false;
   public autoFireEnabled = false;
+  private touchAutoFireInitialized = false;
 
   public moveStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
   public aimStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
@@ -28,8 +29,22 @@ export class InputManager {
 
   constructor(private canvas: HTMLCanvasElement) {
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+      this.usingTouch = true;
       this.autoFireEnabled = true;
+      this.touchAutoFireInitialized = true;
     }
+
+    window.addEventListener(
+      'touchstart',
+      () => {
+        this.usingTouch = true;
+        if (!this.touchAutoFireInitialized) {
+          this.autoFireEnabled = true;
+          this.touchAutoFireInitialized = true;
+        }
+      },
+      { passive: true }
+    );
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
@@ -56,8 +71,13 @@ export class InputManager {
     });
 
     window.addEventListener('blur', () => {
-      this.keys.clear();
-      this.mouseDown = false;
+      this.resetStates();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.resetStates();
+      }
     });
 
     this.canvas.addEventListener('contextmenu', (e) => {
@@ -93,14 +113,19 @@ export class InputManager {
       (e) => {
         e.preventDefault();
         this.usingTouch = true;
-        this.autoFireEnabled = true;
+        if (!this.touchAutoFireInitialized) {
+          this.autoFireEnabled = true;
+          this.touchAutoFireInitialized = true;
+        }
         const rect = this.canvas.getBoundingClientRect();
         for (let i = 0; i < e.changedTouches.length; i++) {
           const t = e.changedTouches[i];
           const x = t.clientX - rect.left;
           const y = t.clientY - rect.top;
-          if (x < rect.width * 0.5 && !this.moveStick.active) {
-            this.moveStick = { active: true, id: t.identifier, startX: x, startY: y, curX: x, curY: y, dx: 0, dy: 0 };
+          if (x < rect.width * 0.5) {
+            if (!this.moveStick.active) {
+              this.moveStick = { active: true, id: t.identifier, startX: x, startY: y, curX: x, curY: y, dx: 0, dy: 0 };
+            }
           } else if (!this.aimStick.active) {
             this.aimStick = { active: true, id: t.identifier, startX: x, startY: y, curX: x, curY: y, dx: 0, dy: 0 };
           }
@@ -114,20 +139,29 @@ export class InputManager {
       (e) => {
         e.preventDefault();
         const rect = this.canvas.getBoundingClientRect();
-        const maxR = 52;
+        const maxR = Math.min(rect.width, rect.height) < 420 ? 44 : 52;
         for (let i = 0; i < e.changedTouches.length; i++) {
           const t = e.changedTouches[i];
           const x = t.clientX - rect.left;
           const y = t.clientY - rect.top;
           if (this.moveStick.active && t.identifier === this.moveStick.id) {
-            const vx = x - this.moveStick.startX;
-            const vy = y - this.moveStick.startY;
-            const dist = Math.hypot(vx, vy) || 1;
+            let vx = x - this.moveStick.startX;
+            let vy = y - this.moveStick.startY;
+            let dist = Math.hypot(vx, vy) || 1;
+            // 动态跟随圆心：大拇指大幅滑动后折返零延迟
+            if (dist > maxR + 18) {
+              const pull = dist - (maxR + 18);
+              this.moveStick.startX += (vx / dist) * pull;
+              this.moveStick.startY += (vy / dist) * pull;
+              vx = x - this.moveStick.startX;
+              vy = y - this.moveStick.startY;
+              dist = Math.hypot(vx, vy) || 1;
+            }
             const clamped = Math.min(dist, maxR);
             this.moveStick.curX = this.moveStick.startX + (vx / dist) * clamped;
             this.moveStick.curY = this.moveStick.startY + (vy / dist) * clamped;
-            this.moveStick.dx = dist > 6 ? (vx / dist) * (clamped / maxR) : 0;
-            this.moveStick.dy = dist > 6 ? (vy / dist) * (clamped / maxR) : 0;
+            this.moveStick.dx = dist > 5 ? (vx / dist) * (clamped / maxR) : 0;
+            this.moveStick.dy = dist > 5 ? (vy / dist) * (clamped / maxR) : 0;
           } else if (this.aimStick.active && t.identifier === this.aimStick.id) {
             const vx = x - this.aimStick.startX;
             const vy = y - this.aimStick.startY;
@@ -135,8 +169,8 @@ export class InputManager {
             const clamped = Math.min(dist, maxR);
             this.aimStick.curX = this.aimStick.startX + (vx / dist) * clamped;
             this.aimStick.curY = this.aimStick.startY + (vy / dist) * clamped;
-            this.aimStick.dx = dist > 8 ? vx / dist : 0;
-            this.aimStick.dy = dist > 8 ? vy / dist : 0;
+            this.aimStick.dx = dist > 7 ? vx / dist : 0;
+            this.aimStick.dy = dist > 7 ? vy / dist : 0;
           }
         }
       },

@@ -13,21 +13,38 @@ async function bootstrap() {
 
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
   const uiLayer = document.getElementById('ui-layer') as HTMLElement;
+  const landscapeGuard = document.getElementById('landscape-guard') as HTMLElement;
+  const guardBtn = document.getElementById('btn-guard-landscape') as HTMLButtonElement;
   const ctx = canvas.getContext('2d', { alpha: false })!;
+
+  const isMobileTouchDevice = () =>
+    'ontouchstart' in window ||
+    navigator.maxTouchPoints > 0 ||
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+  const docWithWebkit = document as Document & { webkitFullscreenEnabled?: boolean };
+  if (!document.fullscreenEnabled && !docWithWebkit.webkitFullscreenEnabled) {
+    guardBtn.style.display = 'none';
+  }
+
+  guardBtn.onclick = async () => {
+    try {
+      const rootEl = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      if (rootEl.requestFullscreen) await rootEl.requestFullscreen();
+      else if (rootEl.webkitRequestFullscreen) await rootEl.webkitRequestFullscreen();
+      const orient = screen.orientation as ScreenOrientation & {
+        lock?: (mode: string) => Promise<void>;
+      };
+      await orient?.lock?.('landscape');
+    } catch {
+      // 浏览器不支持自动锁定时由玩家手动旋转机身即可
+    }
+  };
 
   let viewW = window.innerWidth;
   let viewH = window.innerHeight;
-
-  const resize = () => {
-    viewW = window.innerWidth;
-    viewH = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, viewW > 1440 ? 1.25 : 1.5);
-    canvas.width = Math.floor(viewW * dpr);
-    canvas.height = Math.floor(viewH * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  };
-  window.addEventListener('resize', resize);
-  resize();
 
   const input = new InputManager(canvas);
 
@@ -38,6 +55,36 @@ async function bootstrap() {
     onPlayerDowned: (canRevive) => ui.showReviveModal(canRevive),
     onRunFinished: (victory, snapshot) => ui.showSettlementModal(victory, snapshot),
   });
+
+  const syncViewportAndOrientation = () => {
+    const vv = window.visualViewport;
+    viewW = Math.round(vv ? vv.width : window.innerWidth);
+    viewH = Math.round(vv ? vv.height : window.innerHeight);
+    const dpr = Math.min(window.devicePixelRatio || 1, viewW > 1440 ? 1.25 : 1.5);
+    canvas.width = Math.max(1, Math.floor(viewW * dpr));
+    canvas.height = Math.max(1, Math.floor(viewH * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // 手机端强制横屏体验：若处于竖屏握持，自动冻结战局并提示旋转手机
+    const portraitOnMobile = (isMobileTouchDevice() || input.usingTouch) && viewH > viewW;
+    landscapeGuard.classList.toggle('visible', portraitOnMobile);
+    if (engine.landscapePaused !== portraitOnMobile) {
+      engine.landscapePaused = portraitOnMobile;
+      if (portraitOnMobile) {
+        input.resetStates();
+      }
+    }
+  };
+
+  window.addEventListener('resize', syncViewportAndOrientation);
+  window.visualViewport?.addEventListener('resize', syncViewportAndOrientation);
+  document.addEventListener('fullscreenchange', syncViewportAndOrientation);
+  window.addEventListener('orientationchange', () => {
+    syncViewportAndOrientation();
+    setTimeout(syncViewportAndOrientation, 150);
+    setTimeout(syncViewportAndOrientation, 350);
+  });
+  syncViewportAndOrientation();
 
   ui = new UIManager(uiLayer, engine);
 

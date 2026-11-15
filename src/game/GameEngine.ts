@@ -25,6 +25,7 @@ export class GameEngine {
   public state: RunSnapshot | null = null;
   public paused = false;
   public modalPaused = false;
+  public landscapePaused = false;
   private renderer = new CartoonRenderer();
   private nextEntityId = 1;
 
@@ -524,7 +525,7 @@ export class GameEngine {
 
   public throwGrenade(): void {
     const s = this.state;
-    if (!s || this.paused || this.modalPaused || s.waveState === 'ended') return;
+    if (!s || this.paused || this.modalPaused || this.landscapePaused || s.waveState === 'ended') return;
     const p = s.player;
     if (p.grenades <= 0 || p.grenadeCooldown > 0) return;
 
@@ -780,6 +781,7 @@ export class GameEngine {
       !this.state ||
       this.paused ||
       this.modalPaused ||
+      this.landscapePaused ||
       this.state.waveState === 'ended' ||
       this.state.player.hp <= 0
     );
@@ -788,12 +790,21 @@ export class GameEngine {
   public update(dt: number, viewW: number, viewH: number): void {
     this.lastViewW = viewW;
     this.lastViewH = viewH;
-    if (!this.state || this.paused || this.modalPaused || this.state.waveState === 'ended') return;
+    if (
+      !this.state ||
+      this.paused ||
+      this.modalPaused ||
+      this.landscapePaused ||
+      this.state.waveState === 'ended'
+    ) {
+      return;
+    }
     const s = this.state;
 
-    // 自适应桌面与手机横竖屏视野缩放（手机端自动拉远镜头，完整看清宽敞房间与四面窗户！）
-    const fitZoom = Math.min(viewW / 1180, viewH / 680);
-    s.camera.zoom = Math.max(0.54, Math.min(1.1, fitZoom));
+    // 专注桌面与手机横屏宽幅视野缩放（16:9 ~ 21:9 全面屏自适应）
+    const fitZoom =
+      viewH < 520 ? Math.min(viewW / 1040, viewH / 540) : Math.min(viewW / 1180, viewH / 680);
+    s.camera.zoom = Math.max(0.66, Math.min(1.1, fitZoom));
 
     if (s.bannerTimer > 0) s.bannerTimer -= dt;
     if (s.hqSupportCooldown > 0) s.hqSupportCooldown -= dt;
@@ -1143,22 +1154,23 @@ export class GameEngine {
     if (this.input.aimStick.active && (this.input.aimStick.dx !== 0 || this.input.aimStick.dy !== 0)) {
       p.angle = Math.atan2(this.input.aimStick.dy, this.input.aimStick.dx);
       wantFire = true;
-    } else if (!this.input.usingTouch && !this.input.autoFireEnabled) {
+    } else if (!this.input.usingTouch && this.input.mouseDown) {
       p.angle = Math.atan2(worldMouseY - p.y, worldMouseX - p.x);
-      wantFire = this.input.mouseDown;
-    } else {
-      if (!this.input.usingTouch && this.input.mouseDown) {
-        p.angle = Math.atan2(worldMouseY - p.y, worldMouseX - p.x);
+      wantFire = true;
+    } else if (this.input.autoFireEnabled) {
+      const target = this.findNearestTarget(p.x, p.y, 480);
+      if (target) {
+        p.angle = Math.atan2(target.y - p.y, target.x - p.x);
         wantFire = true;
-      } else {
-        const target = this.findNearestTarget(p.x, p.y, 480);
-        if (target) {
-          p.angle = Math.atan2(target.y - p.y, target.x - p.x);
-          wantFire = true;
-        } else if (mv.x !== 0 || mv.y !== 0) {
-          p.angle = Math.atan2(mv.y, mv.x);
-        }
+      } else if (!this.input.usingTouch) {
+        p.angle = Math.atan2(worldMouseY - p.y, worldMouseX - p.x);
+      } else if (mv.x !== 0 || mv.y !== 0) {
+        p.angle = Math.atan2(mv.y, mv.x);
       }
+    } else if (!this.input.usingTouch) {
+      p.angle = Math.atan2(worldMouseY - p.y, worldMouseX - p.x);
+    } else if (mv.x !== 0 || mv.y !== 0) {
+      p.angle = Math.atan2(mv.y, mv.x);
     }
 
     if (wantFire) {
