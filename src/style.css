@@ -759,6 +759,24 @@ button {
 .upg-icon {
   font-size: 25px;
 }
+.upg-icon-box {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: radial-gradient(circle at 35% 30%, #1e293b, #090e17);
+  border: 1.5px solid rgba(148, 163, 184, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.upg-sprite-icon {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.65));
+}
 .upg-title {
   font-weight: 900;
   font-size: 14px;
@@ -1028,6 +1046,12 @@ button {
 .moba-shop-icon {
   font-size: 13px;
   line-height: 1;
+}
+.moba-shop-sprite {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
 .moba-shop-btn.shop-ready {
   background: linear-gradient(180deg, #4ade80, #16a34a);
@@ -1329,10 +1353,12 @@ button {
 }
 
 .sup-inline-icon {
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
-  vertical-align: -3px;
+  vertical-align: -5px;
+  margin-right: 2px;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
 }
 
 /* ==================== 简洁弹窗（暂停 / 复活 / 结算） ==================== */

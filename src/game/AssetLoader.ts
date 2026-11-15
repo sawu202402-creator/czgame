@@ -26,6 +26,35 @@ export type SpriteKey =
   | 'prop_ammo_box'
   | 'prop_vending'
   | 'prop_laser_tower'
+  | 'prop_blast_door'
+  | 'prop_wood_plank'
+  | 'prop_helipad'
+  | 'player_boot'
+  | 'prop_sandbags'
+  | 'prop_barrier'
+  | 'prop_tree'
+  | 'drop_powerup'
+  | 'drop_cash'
+  | 'drop_xp'
+  | 'proj_sawblade'
+  | 'item_armor'
+  | 'item_medkit'
+  | 'item_emp_grid'
+  | 'td_pistol'
+  | 'td_revolver'
+  | 'td_smg'
+  | 'td_shotgun'
+  | 'td_autoshotgun'
+  | 'td_rifle'
+  | 'td_crossbow'
+  | 'td_sniper'
+  | 'td_flamethrower'
+  | 'td_cryogun'
+  | 'td_launcher'
+  | 'td_sawlauncher'
+  | 'td_minigun'
+  | 'td_tesla'
+  | 'td_plasma'
   | 'gun_pistol'
   | 'gun_revolver'
   | 'gun_smg'
@@ -48,7 +77,8 @@ export type TileKey =
   | 'tile_floor_armory'
   | 'tile_floor_lab'
   | 'tile_floor_mall'
-  | 'tile_asphalt';
+  | 'tile_asphalt'
+  | 'tile_wall_top';
 
 const SPRITE_FILES: Record<SpriteKey, string> = {
   player_hero: './assets/player_hero.png',
@@ -78,6 +108,35 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   prop_ammo_box: './assets/prop_ammo_box.png',
   prop_vending: './assets/prop_vending.png',
   prop_laser_tower: './assets/prop_laser_tower.png',
+  prop_blast_door: './assets/prop_blast_door.png',
+  prop_wood_plank: './assets/prop_wood_plank.png',
+  prop_helipad: './assets/prop_helipad.png',
+  player_boot: './assets/player_boot.png',
+  prop_sandbags: './assets/prop_sandbags.png',
+  prop_barrier: './assets/prop_barrier.png',
+  prop_tree: './assets/prop_tree.png',
+  drop_powerup: './assets/drop_powerup.png',
+  drop_cash: './assets/drop_cash.png',
+  drop_xp: './assets/drop_xp.png',
+  proj_sawblade: './assets/proj_sawblade.png',
+  item_armor: './assets/item_armor.png',
+  item_medkit: './assets/item_medkit.png',
+  item_emp_grid: './assets/item_emp_grid.png',
+  td_pistol: './assets/td_pistol.png',
+  td_revolver: './assets/td_revolver.png',
+  td_smg: './assets/td_smg.png',
+  td_shotgun: './assets/td_shotgun.png',
+  td_autoshotgun: './assets/td_autoshotgun.png',
+  td_rifle: './assets/td_rifle.png',
+  td_crossbow: './assets/td_crossbow.png',
+  td_sniper: './assets/td_sniper.png',
+  td_flamethrower: './assets/td_flamethrower.png',
+  td_cryogun: './assets/td_cryogun.png',
+  td_launcher: './assets/td_launcher.png',
+  td_sawlauncher: './assets/td_sawlauncher.png',
+  td_minigun: './assets/td_minigun.png',
+  td_tesla: './assets/td_tesla.png',
+  td_plasma: './assets/td_plasma.png',
   gun_pistol: './assets/gun_pistol.png',
   gun_revolver: './assets/gun_revolver.png',
   gun_smg: './assets/gun_smg.png',
@@ -102,11 +161,13 @@ const TILE_FILES: Record<TileKey, string> = {
   tile_floor_lab: './assets/tile_floor_lab.png',
   tile_floor_mall: './assets/tile_floor_mall.png',
   tile_asphalt: './assets/tile_asphalt.png',
+  tile_wall_top: './assets/tile_wall_top.png',
 };
 
 class GameAssetManager {
   private sprites = new Map<SpriteKey, HTMLImageElement>();
   private whiteSilhouettes = new Map<SpriteKey, HTMLCanvasElement>();
+  private tintedSilhouettes = new Map<string, HTMLCanvasElement>();
   private tiles = new Map<TileKey, HTMLImageElement>();
   private patterns = new Map<string, CanvasPattern>();
 
@@ -162,6 +223,16 @@ class GameAssetManager {
 
   public getWhiteFlash(key: SpriteKey): HTMLCanvasElement | undefined {
     return this.whiteSilhouettes.get(key);
+  }
+
+  public getTintedSilhouette(key: SpriteKey, color: string): HTMLCanvasElement | undefined {
+    const ck = `${key}::${color}`;
+    if (this.tintedSilhouettes.has(ck)) return this.tintedSilhouettes.get(ck);
+    const img = this.sprites.get(key);
+    if (!img) return undefined;
+    const sil = this.createSilhouette(img, color);
+    this.tintedSilhouettes.set(ck, sil);
+    return sil;
   }
 
   public getPattern(ctx: CanvasRenderingContext2D, key: TileKey, scale = 0.72): CanvasPattern | null {

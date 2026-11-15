@@ -380,6 +380,14 @@ export class UIManager {
     const xpPct = Math.min(100, Math.round((save.agentXp / Math.max(1, xpNext)) * 100));
     const rankTitle = this.getAgentRankTitle(save.agentLevel);
 
+    const upgSpriteMap: Record<keyof typeof save.upgrades, string> = {
+      hp: './assets/item_medkit.png',
+      reload: './assets/prop_ammo_box.png',
+      speed: './assets/player_boot.png',
+      repair: './assets/prop_wood_plank.png',
+      startCash: './assets/drop_cash.png',
+    };
+
     const upgradesHtml = UPGRADE_TRACKS.map((t) => {
       const lvl = save.upgrades[t.key];
       const isMax = lvl >= t.maxLevel;
@@ -389,7 +397,7 @@ export class UIManager {
       return `
         <div class="upgrade-card ${isMax ? 'maxed' : ''}">
           <div class="upg-top">
-            <span class="upg-icon">${t.icon}</span>
+            <div class="upg-icon-box"><img class="upg-sprite-icon" src="${upgSpriteMap[t.key]}" alt="" /></div>
             <div class="upg-info">
               <div class="upg-title">${t.name} <small>Lv.${lvl}/${t.maxLevel}</small></div>
               <div class="upg-val">${t.valueText(lvl)}</div>
@@ -483,7 +491,7 @@ export class UIManager {
             <button class="hud-icon-btn" id="btn-pause" type="button" title="暂停 / 设置 (Esc)">⏸</button>
           </div>
           <button class="moba-shop-btn" id="btn-open-armory" type="button" title="军火商店 (B / Tab)">
-            <span class="moba-shop-icon">🛒</span>
+            <img class="moba-shop-sprite" src="./assets/prop_armory_kiosk.png" alt="" />
             <span>商店</span>
           </button>
         </div>
@@ -895,12 +903,12 @@ export class UIManager {
       contentHtml = `
         <div class="supply-grid">
           <div class="supply-card">
-            <div class="sup-name">🦺 防弹护甲 +65</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_armor.png" alt="" /> 防弹护甲 +65</div>
             <div class="sup-meta">当前 ${Math.round(s.player.armor)}/100 · 减伤70%</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 380 && s.player.armor < 100 ? 'btn-blue' : 'btn-disabled'}" data-tac="armor">$380 购买</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name">❤️ 战地急救包</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_medkit.png" alt="" /> 战地急救包</div>
             <div class="sup-meta">生命 ${Math.ceil(s.player.hp)}/${s.player.maxHp}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 300 && s.player.hp < s.player.maxHp ? 'btn-green' : 'btn-disabled'}" data-tac="medkit">$300 恢复满血</button>
           </div>
@@ -910,27 +918,27 @@ export class UIManager {
             <button class="btn-cartoon btn-mini ${s.cash >= 220 ? 'btn-yellow' : 'btn-disabled'}" data-tac="grenades">$220 购买</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name">📦 全枪弹药补满</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_ammo_box.png" alt="" /> 全枪弹药补满</div>
             <div class="sup-meta">补满携带的所有枪械</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 320 ? 'btn-blue' : 'btn-disabled'}" data-tac="all_ammo">$320 补满</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name">🛰️ 自动哨戒机枪塔</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_turret.png" alt="" /> 自动哨戒机枪塔</div>
             <div class="sup-meta">持续协防 38 秒</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 650 ? 'btn-yellow' : 'btn-disabled'}" data-tac="turret">$650 部署</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name">💰 紧急军费空投</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/drop_cash.png" alt="" /> 紧急军费空投</div>
             <div class="sup-meta">立即获得 $450 战地经费</div>
             <button class="btn-cartoon btn-mini ${s.armoryAdCooldown > 0 ? 'btn-disabled' : 'btn-yellow'}" id="btn-armory-ad" ${s.armoryAdCooldown > 0 ? 'disabled' : ''}>${cashSupportText}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name">🛰️ 总部炮塔+满弹支援</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_chest.png" alt="" /> 总部炮塔+满弹支援</div>
             <div class="sup-meta">满弹 + 手雷x2 + 45秒炮塔</div>
             <button class="btn-cartoon btn-mini ${s.hqSupportCooldown > 0 ? 'btn-disabled' : 'btn-green'}" id="btn-sup-turret" ${s.hqSupportCooldown > 0 ? 'disabled' : ''}>${turretSupportText}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name">⚡ 全图高压电网</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> 全图高压电网</div>
             <div class="sup-meta">全窗封满 + 持续2波电击减速</div>
             <button class="btn-cartoon btn-mini ${s.electricFortifyWaves > 0 ? 'btn-disabled' : 'btn-blue'}" id="btn-sup-elec" ${s.electricFortifyWaves > 0 ? 'disabled' : ''}>${elecSupportText}</button>
           </div>

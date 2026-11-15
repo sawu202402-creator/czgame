@@ -866,35 +866,17 @@ export class CartoonRenderer {
     mctx.save();
     mctx.translate(x, y);
     mctx.rotate(angle);
-    mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.44)';
     mctx.beginPath();
-    mctx.roundRect(-10, -20, 22, 42, 8);
+    mctx.ellipse(2, 4, 15, 24, 0, 0, Math.PI * 2);
     mctx.fill();
 
-    const offsets = [
-      { dx: -2, dy: -11, rot: -0.12 },
-      { dx: 1, dy: 0, rot: 0.06 },
-      { dx: -2, dy: 11, rot: 0.14 },
-      { dx: 4, dy: -5, rot: 0.08 },
-    ];
-    for (const o of offsets) {
-      mctx.save();
-      mctx.translate(o.dx, o.dy);
-      mctx.rotate(o.rot);
+    const sbImg = Assets.getSprite('prop_sandbags');
+    if (sbImg) {
+      mctx.drawImage(sbImg, -27, -27, 54, 54);
+    } else {
       mctx.fillStyle = '#6b6650';
-      mctx.strokeStyle = '#1e2019';
-      mctx.lineWidth = 1.8;
-      mctx.beginPath();
-      mctx.roundRect(-6.5, -7.5, 13, 15, 4.5);
-      mctx.fill();
-      mctx.stroke();
-      mctx.strokeStyle = 'rgba(214, 211, 196, 0.25)';
-      mctx.lineWidth = 1;
-      mctx.beginPath();
-      mctx.moveTo(-3, -4);
-      mctx.lineTo(-3, 4);
-      mctx.stroke();
-      mctx.restore();
+      mctx.fillRect(-8, -18, 16, 36);
     }
     mctx.restore();
   }
@@ -903,23 +885,16 @@ export class CartoonRenderer {
     mctx.save();
     mctx.translate(x, y);
     mctx.rotate(angle);
-    mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
-    mctx.fillRect(-24, -7, 52, 18);
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.45)';
+    mctx.fillRect(-26, -6, 56, 18);
 
-    mctx.fillStyle = '#475569';
-    mctx.strokeStyle = '#0f172a';
-    mctx.lineWidth = 2.2;
-    mctx.beginPath();
-    mctx.roundRect(-25, -9, 50, 16, 3);
-    mctx.fill();
-    mctx.stroke();
-
-    // 顶部混凝土脊梁高光与警示黄黑边标
-    mctx.fillStyle = '#64748b';
-    mctx.fillRect(-23, -4, 46, 6);
-    mctx.fillStyle = '#eab308';
-    mctx.fillRect(-22, -7, 8, 2.5);
-    mctx.fillRect(14, -7, 8, 2.5);
+    const barImg = Assets.getSprite('prop_barrier');
+    if (barImg) {
+      mctx.drawImage(barImg, -28, -9, 56, 18);
+    } else {
+      mctx.fillStyle = '#475569';
+      mctx.fillRect(-25, -8, 50, 16);
+    }
     mctx.restore();
   }
 
@@ -932,29 +907,21 @@ export class CartoonRenderer {
   ): void {
     mctx.save();
     mctx.translate(x, y);
-    // 树冠接地软投影
-    mctx.fillStyle = 'rgba(2, 6, 23, 0.45)';
+    mctx.fillStyle = 'rgba(2, 6, 23, 0.46)';
     mctx.beginPath();
-    mctx.arc(7, 9, radius * 1.04, 0, Math.PI * 2);
+    mctx.arc(6, 8, radius * 1.02, 0, Math.PI * 2);
     mctx.fill();
 
-    const shades = ['#132419', '#1c3323', '#26422d', '#315137'];
-    for (let layer = 0; layer < 4; layer++) {
-      const count = 6 - layer;
-      const lr = radius * (1 - layer * 0.2);
-      mctx.fillStyle = shades[layer];
-      mctx.strokeStyle = '#0a140e';
-      mctx.lineWidth = 1.6;
-      for (let i = 0; i < count; i++) {
-        const ang = (i / count) * Math.PI * 2 + hash2D(i, layer, seed) * 0.9;
-        const dist = lr * 0.36;
-        const lx = Math.cos(ang) * dist;
-        const ly = Math.sin(ang) * dist;
-        mctx.beginPath();
-        mctx.arc(lx, ly, lr * 0.68, 0, Math.PI * 2);
-        mctx.fill();
-        if (layer < 2) mctx.stroke();
-      }
+    const treeImg = Assets.getSprite('prop_tree');
+    if (treeImg) {
+      mctx.rotate(hash2D(Math.round(x), Math.round(y), seed) * Math.PI * 2);
+      const sz = radius * 2.28;
+      mctx.drawImage(treeImg, -sz / 2, -sz / 2, sz, sz);
+    } else {
+      mctx.fillStyle = '#1c3323';
+      mctx.beginPath();
+      mctx.arc(0, 0, radius, 0, Math.PI * 2);
+      mctx.fill();
     }
     mctx.restore();
   }
@@ -1437,6 +1404,7 @@ export class CartoonRenderer {
     const capMain = state.stage.wallTopColor;
     const capHighlight = shadeHex(capMain, 32);
     const capShadow = shadeHex(capMain, -24);
+    const wallTopPat = Assets.getPattern(mctx, 'tile_wall_top', 0.46);
 
     // 1. 先绘制所有墙段外部投影
     mctx.fillStyle = 'rgba(2, 6, 23, 0.5)';
@@ -1444,21 +1412,18 @@ export class CartoonRenderer {
       mctx.fillRect(w.x + 6, w.y + 8, w.w, w.h);
     }
 
-    // 2. 绘制多层 3D 倒角墙体结构与装甲接缝铆钉
+    // 2. 绘制多层 3D 倒角墙体结构与无缝重装钢混墙顶贴图
     const pillarMap = new Map<string, { x: number; y: number }>();
 
     for (const w of state.walls) {
       const isHoriz = w.w >= w.h;
 
-      // 外壳黑钢底座
       mctx.fillStyle = '#090e17';
       mctx.fillRect(w.x, w.y, w.w, w.h);
 
-      // 墙体斜坡立面
       mctx.fillStyle = baseDark;
       mctx.fillRect(w.x + 2, w.y + 2, Math.max(0, w.w - 4), Math.max(0, w.h - 4));
 
-      // 顶部装甲混凝土盖板（带北西向受光高光边与南东向背光暗边）
       const inset = 4.5;
       const cx = w.x + inset;
       const cy = w.y + inset - 1;
@@ -1468,15 +1433,26 @@ export class CartoonRenderer {
       mctx.fillStyle = capShadow;
       mctx.fillRect(cx, cy, cw, ch);
 
-      mctx.fillStyle = capMain;
-      mctx.fillRect(cx, cy, Math.max(0, cw - 2), Math.max(0, ch - 2));
+      const innerW = Math.max(0, cw - 2);
+      const innerH = Math.max(0, ch - 2);
+      if (wallTopPat) {
+        mctx.fillStyle = wallTopPat;
+        mctx.fillRect(cx, cy, innerW, innerH);
+        mctx.save();
+        mctx.globalAlpha = 0.34;
+        mctx.fillStyle = capMain;
+        mctx.fillRect(cx, cy, innerW, innerH);
+        mctx.restore();
+      } else {
+        mctx.fillStyle = capMain;
+        mctx.fillRect(cx, cy, innerW, innerH);
+      }
 
       // 受光亮边
       mctx.fillStyle = capHighlight;
       mctx.fillRect(cx, cy, cw, 2);
       mctx.fillRect(cx, cy, 2, ch);
 
-      // 每隔 56px 网格绘制装甲墙顶伸缩接缝与双铆钉
       mctx.strokeStyle = 'rgba(9, 14, 23, 0.55)';
       mctx.lineWidth = 1.6;
       mctx.fillStyle = 'rgba(226, 232, 240, 0.34)';
@@ -1490,7 +1466,6 @@ export class CartoonRenderer {
           mctx.fillRect(sx - 4, cy + 3, 2, 2);
           mctx.fillRect(sx + 2, cy + ch - 5, 2, 2);
         }
-        // 记录两端门框/转角钢柱坐标
         const py = w.y + w.h / 2;
         const p1x = w.x + 14;
         const p2x = w.x + w.w - 14;
@@ -1520,14 +1495,27 @@ export class CartoonRenderer {
       mctx.fillStyle = '#090e17';
       mctx.fillRect(p.x - pHalf, p.y - pHalf, pHalf * 2, pHalf * 2);
 
-      mctx.fillStyle = shadeHex(capMain, 10);
-      mctx.fillRect(p.x - pHalf + 2.5, p.y - pHalf + 2.5, pHalf * 2 - 5, pHalf * 2 - 6);
+      const px0 = p.x - pHalf + 2.5;
+      const py0 = p.y - pHalf + 2.5;
+      const pw0 = pHalf * 2 - 5;
+      const ph0 = pHalf * 2 - 6;
+      if (wallTopPat) {
+        mctx.fillStyle = wallTopPat;
+        mctx.fillRect(px0, py0, pw0, ph0);
+        mctx.save();
+        mctx.globalAlpha = 0.28;
+        mctx.fillStyle = shadeHex(capMain, 14);
+        mctx.fillRect(px0, py0, pw0, ph0);
+        mctx.restore();
+      } else {
+        mctx.fillStyle = shadeHex(capMain, 10);
+        mctx.fillRect(px0, py0, pw0, ph0);
+      }
 
       mctx.fillStyle = shadeHex(capMain, 38);
-      mctx.fillRect(p.x - pHalf + 2.5, p.y - pHalf + 2.5, pHalf * 2 - 5, 2.2);
-      mctx.fillRect(p.x - pHalf + 2.5, p.y - pHalf + 2.5, 2.2, pHalf * 2 - 6);
+      mctx.fillRect(px0, py0, pw0, 2.2);
+      mctx.fillRect(px0, py0, 2.2, ph0);
 
-      // 四角重型螺栓钉头
       mctx.fillStyle = '#cbd5e1';
       const bo = pHalf - 6.5;
       mctx.fillRect(p.x - bo - 1, p.y - bo - 1, 2.4, 2.4);
@@ -1657,43 +1645,39 @@ export class CartoonRenderer {
     const pulse = 0.85 + Math.sin(performance.now() * 0.008) * 0.15;
 
     ctx.save();
-    // 装甲停机坪八角战术底座与外圈警示标线
     ctx.beginPath();
-    ctx.arc(x, y, 78, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(9, 14, 23, 0.54)';
+    ctx.arc(x + 3, y + 5, 81, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.52)';
     ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(71, 85, 105, 0.8)';
-    ctx.stroke();
 
-    ctx.beginPath();
-    ctx.arc(x, y, 68, 0, Math.PI * 2);
-    ctx.fillStyle = isExtracting ? `rgba(34, 197, 94, ${0.32 * pulse})` : 'rgba(15, 23, 42, 0.36)';
-    ctx.fill();
-    ctx.lineWidth = 4.5;
-    ctx.strokeStyle = isExtracting ? '#4ade80' : 'rgba(234, 179, 8, 0.78)';
-    ctx.setLineDash([14, 9]);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    const padImg = Assets.getSprite('prop_helipad');
+    if (padImg) {
+      ctx.drawImage(padImg, x - 84, y - 84, 168, 168);
+    } else {
+      ctx.beginPath();
+      ctx.arc(x, y, 76, 0, Math.PI * 2);
+      ctx.fillStyle = '#1e293b';
+      ctx.fill();
+    }
 
-    // 四向跑道助航灯点
+    if (isExtracting) {
+      ctx.beginPath();
+      ctx.arc(x, y, 74, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(34, 197, 94, ${0.24 * pulse})`;
+      ctx.fill();
+    }
+
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       ctx.beginPath();
-      ctx.arc(x + Math.cos(a) * 73, y + Math.sin(a) * 73, 3.2, 0, Math.PI * 2);
+      ctx.arc(x + Math.cos(a) * 76, y + Math.sin(a) * 76, 3.2, 0, Math.PI * 2);
       ctx.fillStyle = isExtracting ? '#4ade80' : i % 2 === 0 ? '#facc15' : '#38bdf8';
       ctx.fill();
     }
 
-    ctx.font = '900 38px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = isExtracting ? '#4ade80' : 'rgba(250, 204, 21, 0.68)';
-    ctx.fillText('H', x, y);
-
     if (isExtracting) {
       ctx.beginPath();
-      ctx.arc(x, y, 82, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * state.extractionProgress);
+      ctx.arc(x, y, 86, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * state.extractionProgress);
       ctx.strokeStyle = '#fde047';
       ctx.lineWidth = 8;
       ctx.stroke();
@@ -1706,14 +1690,14 @@ export class CartoonRenderer {
       ctx.lineWidth = 9;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(-80, 0);
-      ctx.lineTo(80, 0);
-      ctx.moveTo(0, -80);
-      ctx.lineTo(0, 80);
+      ctx.moveTo(-82, 0);
+      ctx.lineTo(82, 0);
+      ctx.moveTo(0, -82);
+      ctx.lineTo(0, 82);
       ctx.stroke();
       ctx.restore();
 
-      this.drawCachedLabel(ctx, '踩入光圈撤离!', x, y - 96, '#fef08a', 15);
+      this.drawCachedLabel(ctx, '踩入光圈撤离!', x, y - 98, '#fef08a', 15);
     }
     ctx.restore();
   }
@@ -1829,13 +1813,15 @@ export class CartoonRenderer {
 
   private drawWindowsAndDoors(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const electricActive = state.electricFortifyWaves > 0;
+    const plankImg = Assets.getSprite('prop_wood_plank');
+    const plankElecSil = electricActive ? Assets.getTintedSilhouette('prop_wood_plank', '#38bdf8') : undefined;
+    const doorImg = Assets.getSprite('prop_blast_door');
 
-    // 1. 立体钢框窗户与带钉头木纹防线板
+    // 1. 立体钢框窗户与真实木纹铆钉防线板贴图
     for (const win of state.windows) {
       if (!this.inView(win.x + win.w / 2, win.y + win.h / 2, 85)) continue;
       ctx.save();
 
-      // 深色凹陷窗槽与两侧钢制窗托
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(win.x, win.y, win.w, win.h);
       ctx.fillStyle = '#1e293b';
@@ -1844,7 +1830,6 @@ export class CartoonRenderer {
       ctx.lineWidth = 1.6;
       ctx.strokeRect(win.x + 2, win.y + 2, win.w - 4, win.h - 4);
 
-      // 中央金属窗棂导轨
       ctx.strokeStyle = '#090d16';
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -1860,48 +1845,48 @@ export class CartoonRenderer {
       const count = win.planks;
       for (let i = 0; i < count; i++) {
         const ratio = (i + 0.5) / Math.max(1, win.maxPlanks);
-        const tilt = ((i % 3) - 1) * 0.022;
-        const plankMain = electricActive ? '#0284c7' : i % 2 === 0 ? '#92400e' : '#b45309';
-        const plankHi = electricActive ? '#7dd3fc' : i % 2 === 0 ? '#d97706' : '#f59e0b';
+        const tilt = ((i % 3) - 1) * 0.024;
+        const flipX = i % 2 === 0 ? 1 : -1;
 
         if (win.orientation === 'horizontal') {
           const cx = win.x + win.w / 2;
           const cy = win.y + 4 + ratio * (win.h - 8);
-          const pw = win.w - 14;
-          const ph = 6.5;
+          const pw = win.w - 10;
+          const ph = 9.5;
           ctx.save();
           ctx.translate(cx, cy);
           ctx.rotate(tilt);
-          ctx.fillStyle = plankMain;
-          ctx.strokeStyle = '#090d16';
-          ctx.lineWidth = 1.8;
-          ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
-          ctx.strokeRect(-pw / 2, -ph / 2, pw, ph);
-          ctx.fillStyle = plankHi;
-          ctx.fillRect(-pw / 2 + 1, -ph / 2 + 1, pw - 2, 1.8);
-          // 两端钢钉钉帽
-          ctx.fillStyle = '#e2e8f0';
-          ctx.fillRect(-pw / 2 + 5, -1.2, 2.5, 2.5);
-          ctx.fillRect(pw / 2 - 7.5, -1.2, 2.5, 2.5);
+          ctx.scale(flipX, 1);
+          if (plankImg) {
+            ctx.drawImage(plankImg, -pw / 2, -ph / 2, pw, ph);
+            if (plankElecSil) {
+              ctx.globalAlpha = 0.58;
+              ctx.drawImage(plankElecSil, -pw / 2, -ph / 2, pw, ph);
+            }
+          } else {
+            ctx.fillStyle = electricActive ? '#0284c7' : '#92400e';
+            ctx.fillRect(-pw / 2, -3.2, pw, 6.4);
+          }
           ctx.restore();
         } else {
           const cx = win.x + 4 + ratio * (win.w - 8);
           const cy = win.y + win.h / 2;
-          const pw = 6.5;
-          const ph = win.h - 14;
+          const plen = win.h - 10;
+          const pthick = 9.5;
           ctx.save();
           ctx.translate(cx, cy);
-          ctx.rotate(tilt);
-          ctx.fillStyle = plankMain;
-          ctx.strokeStyle = '#090d16';
-          ctx.lineWidth = 1.8;
-          ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
-          ctx.strokeRect(-pw / 2, -ph / 2, pw, ph);
-          ctx.fillStyle = plankHi;
-          ctx.fillRect(-pw / 2 + 1, -ph / 2 + 1, 1.8, ph - 2);
-          ctx.fillStyle = '#e2e8f0';
-          ctx.fillRect(-1.2, -ph / 2 + 5, 2.5, 2.5);
-          ctx.fillRect(-1.2, ph / 2 - 7.5, 2.5, 2.5);
+          ctx.rotate(Math.PI / 2 + tilt);
+          ctx.scale(flipX, 1);
+          if (plankImg) {
+            ctx.drawImage(plankImg, -plen / 2, -pthick / 2, plen, pthick);
+            if (plankElecSil) {
+              ctx.globalAlpha = 0.58;
+              ctx.drawImage(plankElecSil, -plen / 2, -pthick / 2, plen, pthick);
+            }
+          } else {
+            ctx.fillStyle = electricActive ? '#0284c7' : '#92400e';
+            ctx.fillRect(-plen / 2, -3.2, plen, 6.4);
+          }
           ctx.restore();
         }
       }
@@ -1914,82 +1899,103 @@ export class CartoonRenderer {
       ctx.restore();
     }
 
-    // 2. 重型液压对开防爆钢门（Blast Bulkhead Doors）
+    // 2. 重型液压对开防爆装甲钢门高精度贴图（Blast Bulkhead Doors）
     for (const door of state.doors) {
-      if (!this.inView(door.x + door.w / 2, door.y + door.h / 2, 90)) continue;
+      if (!this.inView(door.x + door.w / 2, door.y + door.h / 2, 95)) continue;
+      const cx = door.x + door.w / 2;
+      const cy = door.y + door.h / 2;
+
       if (door.unlocked) {
-        // 开启后露出两侧门框收纳钢槽
+        // 开启后露出两侧收入墙体门槽的装甲门叶边缘
         ctx.save();
-        ctx.fillStyle = '#334155';
-        ctx.strokeStyle = '#090d16';
-        ctx.lineWidth = 1.8;
         if (door.orientation === 'horizontal') {
-          ctx.fillRect(door.x, door.y + 2, 10, door.h - 4);
-          ctx.strokeRect(door.x, door.y + 2, 10, door.h - 4);
-          ctx.fillRect(door.x + door.w - 10, door.y + 2, 10, door.h - 4);
-          ctx.strokeRect(door.x + door.w - 10, door.y + 2, 10, door.h - 4);
+          if (doorImg) {
+            ctx.drawImage(doorImg, 0, 0, doorImg.width * 0.22, doorImg.height, door.x, door.y + 1, 13, door.h - 2);
+            ctx.drawImage(
+              doorImg,
+              doorImg.width * 0.78,
+              0,
+              doorImg.width * 0.22,
+              doorImg.height,
+              door.x + door.w - 13,
+              door.y + 1,
+              13,
+              door.h - 2
+            );
+          } else {
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(door.x, door.y + 2, 10, door.h - 4);
+            ctx.fillRect(door.x + door.w - 10, door.y + 2, 10, door.h - 4);
+          }
         } else {
-          ctx.fillRect(door.x + 2, door.y, door.w - 4, 10);
-          ctx.strokeRect(door.x + 2, door.y, door.w - 4, 10);
-          ctx.fillRect(door.x + 2, door.y + door.h - 10, door.w - 4, 10);
-          ctx.strokeRect(door.x + 2, door.y + door.h - 10, door.w - 4, 10);
+          if (doorImg) {
+            ctx.save();
+            ctx.translate(cx, door.y + 6.5);
+            ctx.rotate(Math.PI / 2);
+            ctx.drawImage(
+              doorImg,
+              0,
+              0,
+              doorImg.width * 0.22,
+              doorImg.height,
+              -6.5,
+              -(door.w - 2) / 2,
+              13,
+              door.w - 2
+            );
+            ctx.restore();
+            ctx.save();
+            ctx.translate(cx, door.y + door.h - 6.5);
+            ctx.rotate(Math.PI / 2);
+            ctx.drawImage(
+              doorImg,
+              doorImg.width * 0.78,
+              0,
+              doorImg.width * 0.22,
+              doorImg.height,
+              -6.5,
+              -(door.w - 2) / 2,
+              13,
+              door.w - 2
+            );
+            ctx.restore();
+          } else {
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(door.x + 2, door.y, door.w - 4, 10);
+            ctx.fillRect(door.x + 2, door.y + door.h - 10, door.w - 4, 10);
+          }
         }
         ctx.restore();
         continue;
       }
 
       ctx.save();
-      // 门体接地阴影
-      ctx.fillStyle = 'rgba(2, 6, 23, 0.45)';
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.48)';
       ctx.fillRect(door.x + 4, door.y + 6, door.w, door.h);
 
-      // 重型深灰装甲门扇主体 + 黄黑工程警戒边条
-      ctx.fillStyle = '#334155';
-      ctx.strokeStyle = '#090d16';
-      ctx.lineWidth = 3;
-      ctx.fillRect(door.x, door.y, door.w, door.h);
-      ctx.strokeRect(door.x, door.y, door.w, door.h);
-
-      const cx = door.x + door.w / 2;
-      const cy = door.y + door.h / 2;
-
-      if (door.orientation === 'horizontal') {
-        // 上下黄黑警戒封边
-        ctx.fillStyle = '#eab308';
-        ctx.fillRect(door.x + 3, door.y + 2, door.w - 6, 4.5);
-        ctx.fillRect(door.x + 3, door.y + door.h - 6.5, door.w - 6, 4.5);
-        ctx.fillStyle = '#0f172a';
-        for (let sx = door.x + 8; sx < door.x + door.w - 8; sx += 16) {
-          ctx.fillRect(sx, door.y + 2, 7, 4.5);
-          ctx.fillRect(sx + 4, door.y + door.h - 6.5, 7, 4.5);
+      if (doorImg) {
+        if (door.orientation === 'horizontal') {
+          ctx.drawImage(doorImg, door.x - 1, door.y - 2, door.w + 2, door.h + 4);
+        } else {
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(doorImg, -(door.h + 2) / 2, -(door.w + 4) / 2, door.h + 2, door.w + 4);
+          ctx.restore();
         }
-        // 中央对开门缝与液压闭锁栓
-        ctx.fillStyle = '#090d16';
-        ctx.fillRect(cx - 1.5, door.y + 2, 3, door.h - 4);
-        ctx.fillStyle = '#475569';
-        ctx.fillRect(cx - 14, cy - 6, 28, 12);
-        ctx.strokeRect(cx - 14, cy - 6, 28, 12);
       } else {
-        ctx.fillStyle = '#eab308';
-        ctx.fillRect(door.x + 2, door.y + 3, 4.5, door.h - 6);
-        ctx.fillRect(door.x + door.w - 6.5, door.y + 3, 4.5, door.h - 6);
-        ctx.fillStyle = '#0f172a';
-        for (let sy = door.y + 8; sy < door.y + door.h - 8; sy += 16) {
-          ctx.fillRect(door.x + 2, sy, 4.5, 7);
-          ctx.fillRect(door.x + door.w - 6.5, sy + 4, 4.5, 7);
-        }
-        ctx.fillStyle = '#090d16';
-        ctx.fillRect(door.x + 2, cy - 1.5, door.w - 4, 3);
-        ctx.fillStyle = '#475569';
-        ctx.fillRect(cx - 6, cy - 14, 12, 28);
-        ctx.strokeRect(cx - 6, cy - 14, 12, 28);
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(door.x, door.y, door.w, door.h);
       }
 
       // 门禁红/绿状态指示灯
       ctx.beginPath();
-      ctx.arc(cx, cy, 3.8, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
       ctx.fillStyle = state.cash >= door.cost ? '#4ade80' : '#ef4444';
       ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#090d16';
+      ctx.stroke();
 
       if (door.progress > 0) {
         ctx.beginPath();
@@ -2017,108 +2023,37 @@ export class CartoonRenderer {
   private drawDropsAndChests(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const now = performance.now() * 0.006;
     for (const d of state.drops) {
-      if (!this.inView(d.x, d.y, 44)) continue;
+      if (!this.inView(d.x, d.y, 48)) continue;
       const bob = Math.sin(now + d.bobPhase) * 2.5;
       ctx.save();
       ctx.translate(d.x, d.y + bob);
       if (d.kind === 'cash') {
-        // 立体成捆美金钞票叠层 + 银行扎带与高光
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.44)';
         ctx.beginPath();
-        ctx.ellipse(2, 6 - bob * 0.4, 13, 6.5, 0, 0, Math.PI * 2);
+        ctx.ellipse(2, 7 - bob * 0.4, 13, 7, 0, 0, Math.PI * 2);
         ctx.fill();
-
-        ctx.rotate(-0.16);
-        // 底层钞票厚度侧边
-        ctx.fillStyle = '#064e3b';
-        ctx.strokeStyle = '#022c22';
-        ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        ctx.roundRect(-11, -4, 22, 13, 2.5);
-        ctx.fill();
-        ctx.stroke();
-
-        // 顶层翠绿钞票面与内框防伪纹
-        ctx.fillStyle = '#16a34a';
-        ctx.beginPath();
-        ctx.roundRect(-11, -7.5, 22, 12.5, 2.5);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.strokeStyle = 'rgba(187, 247, 208, 0.55)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(-8.5, -5.5, 17, 8.5);
-
-        // 中央米白封签扎带
-        ctx.fillStyle = '#fef3c7';
-        ctx.fillRect(-3.2, -7.5, 6.4, 15.5);
-        ctx.strokeStyle = '#78350f';
-        ctx.strokeRect(-3.2, -7.5, 6.4, 15.5);
-        this.drawCachedLabel(ctx, '$', 0, -1, '#15803d', 10);
+        this.drawCenteredSprite(ctx, 'drop_cash', 0, 0, 34, -0.1);
       } else if (d.kind === 'xp') {
-        // 战术棱镜能量数据晶片（多层折射切面 + 柔和蓝青光晕）
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.24)';
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
         ctx.beginPath();
-        ctx.arc(0, 0, 12, 0, Math.PI * 2);
+        ctx.arc(0, 1, 13, 0, Math.PI * 2);
         ctx.fill();
-
-        ctx.fillStyle = '#0284c7';
-        ctx.strokeStyle = '#090d16';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, -9.5);
-        ctx.lineTo(7.5, -2.5);
-        ctx.lineTo(5.5, 8.5);
-        ctx.lineTo(-5.5, 8.5);
-        ctx.lineTo(-7.5, -2.5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        // 内部高光切面
-        ctx.fillStyle = '#7dd3fc';
-        ctx.beginPath();
-        ctx.moveTo(0, -6.5);
-        ctx.lineTo(4.2, -1.5);
-        ctx.lineTo(0, 4.5);
-        ctx.lineTo(-4.2, -1.5);
-        ctx.closePath();
-        ctx.fill();
+        this.drawCenteredSprite(ctx, 'drop_xp', 0, 0, 29, 0);
       } else if (d.kind === 'powerup' && d.powerUp) {
         const meta = POWERUP_META[d.powerUp];
-        // 军用战术补给能量罐（外发光呼吸环 + 金属装甲边圈 + 玻璃高光）
         ctx.beginPath();
-        ctx.arc(0, 0, 21 + Math.sin(now * 2) * 2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(0, 2, 16.5, 0, Math.PI * 2);
+        ctx.arc(0, 2, 18, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(2, 6, 23, 0.5)';
         ctx.fill();
 
         ctx.beginPath();
-        ctx.arc(0, 0, 16, 0, Math.PI * 2);
-        ctx.fillStyle = '#1e293b';
-        ctx.fill();
-        ctx.lineWidth = 2.5;
-        ctx.strokeStyle = '#090d16';
+        ctx.arc(0, 0, 21 + Math.sin(now * 2) * 2, 0, Math.PI * 2);
+        ctx.strokeStyle = meta.color;
+        ctx.lineWidth = 2.6;
         ctx.stroke();
 
-        ctx.beginPath();
-        ctx.arc(0, 0, 12.5, 0, Math.PI * 2);
-        ctx.fillStyle = meta.color;
-        ctx.fill();
-        ctx.lineWidth = 1.8;
-        ctx.strokeStyle = '#f8fafc';
-        ctx.stroke();
-
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-        ctx.beginPath();
-        ctx.ellipse(-3.5, -4.5, 5, 2.5, -0.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        this.drawCachedLabel(ctx, meta.icon, 0, 0.5, '#ffffff', 12);
+        this.drawCenteredSprite(ctx, 'drop_powerup', 0, 0, 38, now * 0.22);
+        this.drawCachedLabel(ctx, meta.name, 0, -24, meta.color, 10);
       }
       ctx.restore();
     }
@@ -2429,15 +2364,13 @@ export class CartoonRenderer {
   }
 
   private drawTacticalBoot(ctx: CanvasRenderingContext2D, fx: number, fy: number): void {
-    ctx.fillStyle = '#1c2430';
-    ctx.strokeStyle = '#090d16';
-    ctx.lineWidth = 2.4;
-    ctx.beginPath();
-    ctx.roundRect(fx - 7, fy - 4.5, 15, 9, 4);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#4b5563';
-    ctx.fillRect(fx + 2, fy - 2.5, 4, 5);
+    const bootImg = Assets.getSprite('player_boot');
+    if (bootImg) {
+      ctx.drawImage(bootImg, fx - 9.5, fy - 4.8, 19, 9.6);
+    } else {
+      ctx.fillStyle = '#1c2430';
+      ctx.fillRect(fx - 7, fy - 4.5, 15, 9);
+    }
   }
 
   private drawWeaponBackpackGear(
@@ -2612,20 +2545,21 @@ export class CartoonRenderer {
     const reloadPhase = isReloading ? 1 - p.reloadTimer / p.reloadDuration : 0;
     const reloadTilt = isReloading ? Math.sin(reloadPhase * Math.PI) * 0.42 : 0;
 
-    // 切枪瞬间（0.32s）干脆利落的上膛弹出与微放大反馈！
     const swapRatio = Math.max(0, Math.min(1, p.weaponSwapTimer / 0.32));
     const swapScale = 1 + Math.sin(swapRatio * Math.PI) * 0.22;
     const swapTilt = -swapRatio * 0.34;
 
     const def = WEAPONS[wepId];
     const isAkimbo = Boolean(def?.akimboOnEvolve && evolved);
+    const spKey = `td_${wepId}` as SpriteKey;
+    const wepImg = Assets.getSprite(spKey);
 
     ctx.save();
     ctx.translate(-kick, 0);
     ctx.rotate(reloadTilt + swapTilt);
     ctx.scale(swapScale, swapScale);
 
-    // ===== A. 超武双持模式（黄金双持沙鹰 / 猩红双持左轮 / 幻影双持冲锋枪） =====
+    // ===== A. 超武双持模式（双持高精度俯视沙漠之鹰 / 左轮 / 微冲贴图 + 超武流光描边） =====
     if (isAkimbo) {
       const leftKick = p.akimboAlt ? kick * 0.65 : 0;
       const rightKick = !p.akimboAlt ? kick * 0.65 : 0;
@@ -2637,68 +2571,34 @@ export class CartoonRenderer {
       this.drawForearmToHand(ctx, 2, -16, lhX, lhY);
       this.drawForearmToHand(ctx, 2, 16, rhX, rhY);
 
-      const drawSingleSidearm = (gx: number, gy: number, sideSign: number) => {
+      const akLen = wepId === 'pistol' ? 35 : wepId === 'revolver' ? 41 : 45;
+      const akH = wepImg ? Math.max(10.5, akLen * (wepImg.height / wepImg.width) * 1.25) : 11;
+      const auraCol = wepId === 'pistol' ? '#facc15' : wepId === 'revolver' ? '#fb7185' : '#38bdf8';
+      const auraSil = Assets.getTintedSilhouette(spKey, auraCol);
+
+      const drawSingleSidearm = (gx: number, gy: number) => {
         ctx.save();
         ctx.translate(gx, gy);
-        ctx.lineWidth = 2.4;
-        ctx.strokeStyle = '#090d16';
-        if (wepId === 'pistol') {
-          // 黄金双持沙漠之鹰
-          ctx.fillStyle = '#facc15';
-          ctx.beginPath();
-          ctx.roundRect(-2, -4.5, 28, 9, 2.5);
-          ctx.fill();
-          ctx.stroke();
-          ctx.fillStyle = '#fef08a';
-          ctx.fillRect(4, -2.2, 18, 4.4);
-          ctx.fillStyle = '#0f172a';
-          ctx.fillRect(24, -2.5, 4, 5);
-        } else if (wepId === 'revolver') {
-          // 猩红鎏金双持长管左轮
-          ctx.fillStyle = '#7f1d1d';
-          ctx.fillRect(-3, -3.5, 10, 7);
-          ctx.fillStyle = '#facc15';
-          ctx.beginPath();
-          ctx.roundRect(4, -6, 11, 12, 3);
-          ctx.fill();
-          ctx.stroke();
-          ctx.fillStyle = '#ef4444';
-          ctx.beginPath();
-          ctx.roundRect(15, -3.2, 24, 6.4, 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.fillStyle = '#fde047';
-          ctx.fillRect(17, -1.2, 18, 2.4);
-        } else {
-          // 幻影霓虹双持微冲（带外侧弹匣 + 消音管）
-          ctx.fillStyle = '#0f172a';
-          ctx.beginPath();
-          ctx.roundRect(-3, -4.5, 27, 9, 3);
-          ctx.fill();
-          ctx.stroke();
-          ctx.fillStyle = '#38bdf8';
-          ctx.fillRect(8, sideSign < 0 ? -13 : 4.5, 5.5, 8.5);
-          ctx.strokeRect(8, sideSign < 0 ? -13 : 4.5, 5.5, 8.5);
-          ctx.fillStyle = '#22d3ee';
-          ctx.fillRect(3, -1.8, 17, 3.6);
-          ctx.fillStyle = '#64748b';
-          ctx.beginPath();
-          ctx.roundRect(24, -3, 12, 6, 2);
-          ctx.fill();
-          ctx.stroke();
+        if (wepImg) {
+          if (auraSil) {
+            ctx.globalAlpha = 0.55;
+            ctx.drawImage(auraSil, -5.5, -akH / 2 - 1.2, akLen + 2.4, akH + 2.4);
+            ctx.globalAlpha = 1;
+          }
+          ctx.drawImage(wepImg, -4.5, -akH / 2, akLen, akH);
         }
         ctx.restore();
       };
 
-      drawSingleSidearm(lhX, lhY, -1);
-      drawSingleSidearm(rhX, rhY, 1);
       this.drawGlovedHand(ctx, lhX, lhY);
       this.drawGlovedHand(ctx, rhX, rhY);
+      drawSingleSidearm(lhX, lhY);
+      drawSingleSidearm(rhX, rhY);
 
       if (p.muzzleFlashTimer > 0) {
         const flashY = p.akimboAlt ? 15 : -15;
-        const flashX = wepId === 'revolver' ? 63 : wepId === 'smg' ? 60 : 52;
-        ctx.fillStyle = '#38bdf8';
+        const flashX = 24 + akLen - 5;
+        ctx.fillStyle = auraCol;
         ctx.beginPath();
         ctx.moveTo(flashX, flashY);
         ctx.lineTo(flashX + 22, flashY - 9);
@@ -2712,98 +2612,138 @@ export class CartoonRenderer {
       return;
     }
 
-    // ===== B. 单把主武器握持手部坐标（整体前探至头盔前方 x=20..104，100% 清晰无遮挡！） =====
+    // ===== B. 全部 15 把武器高精度 90° 纯正俯视实拍级贴图握持布局 =====
+    let x0 = 16;
+    let drawLen = 62;
+    let minThick = 12;
     let rightHandX = 21;
-    let rightHandY = 8;
-    let leftHandX = 39;
-    let leftHandY = -5;
-    let muzzleTipX = 68;
+    let rightHandY = 7.5;
+    let leftHandX = 42;
+    let leftHandY = -5.5;
 
     if (wepId === 'pistol') {
+      x0 = 20;
+      drawLen = 35;
+      minThick = 10;
       rightHandX = 23;
       rightHandY = 4.5;
       leftHandX = 26;
       leftHandY = -4;
-      muzzleTipX = 49;
     } else if (wepId === 'revolver') {
+      x0 = 19;
+      drawLen = 42;
+      minThick = 11.5;
       rightHandX = 22;
       rightHandY = 4.5;
       leftHandX = 26;
       leftHandY = -4;
-      muzzleTipX = 60;
     } else if (wepId === 'smg') {
+      x0 = 17;
+      drawLen = 48;
+      minThick = 10.5;
       rightHandX = 21;
-      rightHandY = 7;
-      leftHandX = 35;
+      rightHandY = 6.5;
+      leftHandX = 36;
       leftHandY = -5;
-      muzzleTipX = 62;
     } else if (wepId === 'shotgun') {
+      x0 = 15;
+      drawLen = 62;
+      minThick = 11.5;
       rightHandX = 20;
-      rightHandY = 7.5;
+      rightHandY = 7;
       leftHandX = 43 - kick * 0.55;
       leftHandY = -4.5;
-      muzzleTipX = 74;
     } else if (wepId === 'autoshotgun') {
+      x0 = 15;
+      drawLen = 62;
+      minThick = 16.5;
       rightHandX = 20;
-      rightHandY = 8;
+      rightHandY = 7.5;
       leftHandX = 46;
       leftHandY = -5.5;
-      muzzleTipX = 74;
     } else if (wepId === 'rifle') {
+      x0 = 14;
+      drawLen = 68;
+      minThick = 10.5;
       rightHandX = 20;
-      rightHandY = 7.5;
+      rightHandY = 7;
       leftHandX = 44;
-      leftHandY = -5;
-      muzzleTipX = 82;
+      leftHandY = -4.8;
     } else if (wepId === 'crossbow') {
+      x0 = 16;
+      drawLen = 56;
+      minThick = 42;
       rightHandX = 20;
-      rightHandY = 7.5;
-      leftHandX = 42;
+      rightHandY = 7;
+      leftHandX = 41;
       leftHandY = -5;
-      muzzleTipX = 78;
-    } else if (wepId === 'flamethrower' || wepId === 'cryogun') {
+    } else if (wepId === 'flamethrower') {
+      x0 = 15;
+      drawLen = 66;
+      minThick = 14.5;
       rightHandX = 20;
-      rightHandY = 9.5;
-      leftHandX = 42;
-      leftHandY = -7.5;
-      muzzleTipX = 75;
+      rightHandY = 8.5;
+      leftHandX = 43;
+      leftHandY = -6.5;
+    } else if (wepId === 'cryogun') {
+      x0 = 15;
+      drawLen = 64;
+      minThick = 17.5;
+      rightHandX = 20;
+      rightHandY = 8.5;
+      leftHandX = 43;
+      leftHandY = -6.5;
     } else if (wepId === 'sniper') {
+      x0 = 14;
+      drawLen = 88;
+      minThick = 15;
       rightHandX = 19;
-      rightHandY = 7.5;
+      rightHandY = 7;
       leftHandX = 48;
       leftHandY = -5;
-      muzzleTipX = 104;
     } else if (wepId === 'launcher') {
+      x0 = 15;
+      drawLen = 62;
+      minThick = 15;
+      rightHandX = 20;
+      rightHandY = 8.5;
+      leftHandX = 46;
+      leftHandY = -6;
+    } else if (wepId === 'sawlauncher') {
+      x0 = 15;
+      drawLen = 70;
+      minThick = 22.5;
       rightHandX = 20;
       rightHandY = 9;
-      leftHandX = 47;
-      leftHandY = -6.5;
-      muzzleTipX = 72;
-    } else if (wepId === 'sawlauncher') {
-      rightHandX = 20;
-      rightHandY = 9.5;
       leftHandX = 42;
-      leftHandY = -9;
-      muzzleTipX = 85;
+      leftHandY = -8.5;
     } else if (wepId === 'minigun') {
+      x0 = 14;
+      drawLen = 74;
+      minThick = 25;
       rightHandX = 18;
-      rightHandY = 14;
+      rightHandY = 13.5;
       leftHandX = 37;
-      leftHandY = -12;
-      muzzleTipX = 90;
+      leftHandY = -11.5;
     } else if (wepId === 'tesla') {
+      x0 = 15;
+      drawLen = 70;
+      minThick = 23;
       rightHandX = 20;
       rightHandY = 8.5;
       leftHandX = 44;
       leftHandY = -6.5;
-      muzzleTipX = 88;
     } else if (wepId === 'plasma') {
+      x0 = 15;
+      drawLen = 72;
+      minThick = 20.5;
       rightHandX = 20;
       rightHandY = 8.5;
       leftHandX = 45;
       leftHandY = -6.5;
-      muzzleTipX = 92;
     }
+
+    const muzzleTipX = x0 + drawLen;
 
     if (isReloading) {
       const slap = Math.sin(reloadPhase * Math.PI * 2);
@@ -2811,467 +2751,64 @@ export class CartoonRenderer {
       leftHandY = -12 + Math.abs(slap) * 9;
     }
 
-    // 先画双臂战术护袖
+    // 1. 双臂战术护袖与护木托举手套（位于枪身下层，贴合自然！）
     this.drawForearmToHand(ctx, 2, 16, rightHandX, rightHandY);
     this.drawForearmToHand(ctx, 2, -16, leftHandX, leftHandY);
+    this.drawGlovedHand(ctx, leftHandX, leftHandY);
+    this.drawGlovedHand(ctx, rightHandX, rightHandY);
 
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = '#090d16';
-
-    if (wepId === 'pistol') {
-      // 战术银黑双色 USP 手枪（短小精悍、亮银套筒）
-      ctx.fillStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.roundRect(22, -4.5, 26, 9, 2.5);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#e2e8f0';
-      ctx.beginPath();
-      ctx.roundRect(25, -3.2, 21, 6.4, 1.8);
-      ctx.fill();
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(44, -1.2, 2.5, 2.4);
-    } else if (wepId === 'revolver') {
-      // 蟒蛇 .357 左轮（红木握把 + 醒目宽大六连发转轮鼓 + 修长亮银枪管）
-      ctx.fillStyle = '#9a3412';
-      ctx.beginPath();
-      ctx.roundRect(20, -4, 10, 8, 3);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#cbd5e1';
-      ctx.beginPath();
-      ctx.roundRect(28, -6.2, 12, 12.4, 3);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#64748b';
-      ctx.fillRect(30, -4.2, 8, 2);
-      ctx.fillRect(30, 2.2, 8, 2);
-      ctx.fillStyle = '#f8fafc';
-      ctx.beginPath();
-      ctx.roundRect(40, -3, 20, 6, 2);
-      ctx.fill();
-      ctx.stroke();
-    } else if (wepId === 'smg') {
-      // MP5 冲锋枪（蓝灰机匣 + 左侧大幅弧形香蕉弹匣 + 前置消音筒）
-      ctx.fillStyle = '#facc15';
-      ctx.beginPath();
-      ctx.moveTo(33, -4);
-      ctx.lineTo(39, -18);
-      ctx.lineTo(44, -16);
-      ctx.lineTo(39, -4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#334155';
-      ctx.beginPath();
-      ctx.roundRect(18, -4.8, 30, 9.6, 3);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#64748b';
-      ctx.beginPath();
-      ctx.roundRect(48, -3.2, 14, 6.4, 2.5);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(25, -1.8, 12, 3.6);
-    } else if (wepId === 'shotgun') {
-      // 雷明顿泵动霰弹枪（暖棕胡桃木枪托/滑动护木 + 双管长枪管 + 侧面 3 发红壳霰弹排）
-      ctx.fillStyle = evolved ? '#991b1b' : '#92400e';
-      ctx.beginPath();
-      ctx.roundRect(16, -4.5, 13, 9, 2.5);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#475569';
-      ctx.beginPath();
-      ctx.roundRect(28, -4.2, 45, 8.4, 2);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillRect(30, -1.8, 41, 3.6);
-
-      // 侧面 3 颗鲜红霰弹壳
-      ctx.fillStyle = '#ef4444';
-      for (let i = 0; i < 3; i++) {
-        ctx.fillRect(30 + i * 4.2, 4.2, 3, 2.6);
+    // 2. 绘制高精度 90° 俯视武器主体贴图 + 超武进化霓虹能量外环
+    if (wepImg) {
+      const naturalH = drawLen * (wepImg.height / wepImg.width);
+      const drawH = Math.max(minThick, naturalH);
+      if (evolved) {
+        const evoCol =
+          wepId === 'plasma' || wepId === 'sawlauncher' || wepId === 'launcher'
+            ? '#fb7185'
+            : wepId === 'rifle' || wepId === 'minigun' || wepId === 'tesla'
+              ? '#c084fc'
+              : '#38bdf8';
+        const evoSil = Assets.getTintedSilhouette(spKey, evoCol);
+        if (evoSil) {
+          ctx.globalAlpha = 0.56;
+          ctx.drawImage(evoSil, x0 - 1.4, -drawH / 2 - 1.4, drawLen + 2.8, drawH + 2.8);
+          ctx.globalAlpha = 1;
+        }
       }
+      ctx.drawImage(wepImg, x0, -drawH / 2, drawLen, drawH);
+    }
 
-      // 随射击后坐滑动的泵动木护木
-      ctx.fillStyle = evolved ? '#f97316' : '#d97706';
-      ctx.beginPath();
-      ctx.roundRect(leftHandX - 7, -6, 16, 12, 3);
-      ctx.fill();
-      ctx.stroke();
-    } else if (wepId === 'autoshotgun') {
-      // AA-12 全自动连喷（宽厚军绿/深红方匣机身 + 右侧超大 20 发圆形大弹鼓 + 散热孔护套！）
-      ctx.fillStyle = evolved ? '#f97316' : '#eab308';
-      ctx.beginPath();
-      ctx.arc(39, 10.5, 9.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.arc(39, 10.5, 4, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = evolved ? '#b91c1c' : '#4d7c0f';
-      ctx.beginPath();
-      ctx.roundRect(17, -6.5, 40, 13, 3.5);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#334155';
-      ctx.beginPath();
-      ctx.roundRect(57, -4.8, 17, 9.6, 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillRect(24, -2.5, 26, 5);
-    } else if (wepId === 'rifle') {
-      // 经典 AK-47 突击步枪（琥珀木护木/暗物质紫机身 + 橙色弯月弹匣 + 全息红点镜 + 细长导气管与斜口制退器）
-      ctx.fillStyle = evolved ? '#a855f7' : '#ea580c';
-      ctx.beginPath();
-      ctx.moveTo(36, -4.5);
-      ctx.lineTo(44, -18.5);
-      ctx.lineTo(50, -16);
-      ctx.lineTo(43, -4.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = evolved ? '#4c1d95' : '#92400e';
-      ctx.beginPath();
-      ctx.roundRect(16, -4.5, 13, 9, 2);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = evolved ? '#6d28d9' : '#334155';
-      ctx.beginPath();
-      ctx.roundRect(28, -5, 22, 10, 2.5);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = evolved ? '#c084fc' : '#d97706';
-      ctx.beginPath();
-      ctx.roundRect(49, -4.5, 16, 9, 2.5);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(65, -2.4, 16, 4.8);
-      ctx.strokeRect(65, -2.4, 16, 4.8);
-
-      // 顶部战术导轨红点镜
-      ctx.fillStyle = evolved ? '#38bdf8' : '#facc15';
-      ctx.fillRect(32, -2.2, 10, 4.4);
-    } else if (wepId === 'crossbow') {
-      // 爆裂猎弩（极具辨识度的 56px 超宽横向反曲弓臂 + 绷紧白色弓弦 + 红色爆炸箭头！）
-      const limbColor = evolved ? '#facc15' : '#a3e635';
-
-      // 绷紧弓弦（两侧弓梢拉向弩机卡扣）
-      ctx.strokeStyle = '#f8fafc';
-      ctx.lineWidth = 2.0;
-      ctx.beginPath();
-      ctx.moveTo(41, -27);
-      ctx.lineTo(28, 0);
-      ctx.lineTo(41, 27);
-      ctx.stroke();
-
-      ctx.strokeStyle = '#090d16';
-      ctx.lineWidth = 2.5;
-      // 左右反曲大弓臂
-      for (const sgn of [-1, 1]) {
-        ctx.fillStyle = limbColor;
-        ctx.beginPath();
-        ctx.moveTo(56, sgn * 3.5);
-        ctx.quadraticCurveTo(53, sgn * 20, 40, sgn * 28);
-        ctx.lineTo(36, sgn * 25);
-        ctx.quadraticCurveTo(47, sgn * 16, 48, sgn * 3.5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-      }
-
-      // 碳纤维中轴弩身
-      ctx.fillStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.roundRect(17, -4.2, 54, 8.4, 3);
-      ctx.fill();
-      ctx.stroke();
-
-      // 待发箭杆与鲜红/鎏金爆裂三棱箭簇
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(28, -1.3, 44, 2.6);
-      ctx.fillStyle = evolved ? '#38bdf8' : '#ef4444';
-      ctx.beginPath();
-      ctx.moveTo(81, 0);
-      ctx.lineTo(69, -6.5);
-      ctx.lineTo(72, 0);
-      ctx.lineTo(69, 6.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    } else if (wepId === 'flamethrower') {
-      // 烈焰喷射器（橙红加厚储压腔 + 黄铜网状隔热罩 + 前端常亮跳动火苗！）
-      ctx.fillStyle = evolved ? '#0284c7' : '#ea580c';
-      ctx.beginPath();
-      ctx.roundRect(17, -6.5, 34, 13, 4);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#ca8a04';
-      ctx.beginPath();
-      ctx.roundRect(51, -5, 20, 10, 2.5);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#090d16';
-      for (let hx = 54; hx <= 66; hx += 5) {
-        ctx.fillRect(hx, -2.5, 2.5, 5);
-      }
-
-      // 实时跳动的常亮引火嘴火苗
-      const flicker = 4.6 + Math.sin(now * 0.028) * 1.6;
+    // 3. 特殊能量/火焰枪口实时微动态点缀（叠加于高精度贴图枪口处）
+    if (wepId === 'flamethrower') {
+      const flicker = 3.8 + Math.sin(now * 0.028) * 1.3;
       ctx.fillStyle = evolved ? 'rgba(56, 189, 248, 0.85)' : 'rgba(249, 115, 22, 0.88)';
       ctx.beginPath();
-      ctx.arc(77, 0, flicker * 1.35, 0, Math.PI * 2);
+      ctx.arc(muzzleTipX + 2, 0, flicker * 1.25, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fef08a';
       ctx.beginPath();
-      ctx.arc(75, 0, flicker * 0.7, 0, Math.PI * 2);
+      ctx.arc(muzzleTipX + 1, 0, flicker * 0.62, 0, Math.PI * 2);
       ctx.fill();
     } else if (wepId === 'cryogun') {
-      // 极寒液氮炮（纯白冰蓝机身 + 醒目喇叭状扩口冷冻喷嘴 + 缭绕冰晶寒雾！）
-      ctx.fillStyle = '#e0f2fe';
+      const frostPulse = 3.4 + Math.cos(now * 0.022) * 1.2;
+      ctx.fillStyle = 'rgba(186, 230, 253, 0.78)';
       ctx.beginPath();
-      ctx.roundRect(17, -6.5, 36, 13, 4);
+      ctx.arc(muzzleTipX + 2, 0, frostPulse * 1.2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = evolved ? '#3b82f6' : '#06b6d4';
-      ctx.fillRect(24, -3.2, 24, 6.4);
-
-      // 喇叭形扩口急冻喷口
-      ctx.fillStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.moveTo(53, -4.5);
-      ctx.lineTo(73, -10);
-      ctx.lineTo(73, 10);
-      ctx.lineTo(53, 4.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      const frostPulse = 4 + Math.cos(now * 0.022) * 1.5;
-      ctx.fillStyle = 'rgba(186, 230, 253, 0.85)';
-      ctx.beginPath();
-      ctx.arc(78, 0, frostPulse * 1.3, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (wepId === 'sniper') {
-      // 巴雷特 .50 重型反器材大狙（超长 88px 枪身 + 折叠两脚架 + 巨型瞄准镜 + 标志性箭头形大制退器！）
-      ctx.strokeStyle = '#1e293b';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(68, -4);
-      ctx.lineTo(56, -13);
-      ctx.moveTo(68, 4);
-      ctx.lineTo(56, 13);
-      ctx.stroke();
-
-      ctx.strokeStyle = '#090d16';
-      ctx.lineWidth = 2.5;
-      ctx.fillStyle = evolved ? '#0e7490' : '#4d7c0f';
-      ctx.beginPath();
-      ctx.roundRect(16, -5.2, 44, 10.4, 2.5);
-      ctx.fill();
-      ctx.stroke();
-
-      // 超长重型浮置枪管
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillRect(60, -2.6, 38, 5.2);
-      ctx.strokeRect(60, -2.6, 38, 5.2);
-
-      // 标志性巴雷特 V 型宽大箭头炮口制退器
-      ctx.fillStyle = '#334155';
-      ctx.beginPath();
-      ctx.moveTo(105, -5);
-      ctx.lineTo(95, -10);
-      ctx.lineTo(95, 10);
-      ctx.lineTo(105, 5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // 顶部大口径高倍光学狙击镜 + 红宝石/青色镀膜镜片
-      ctx.fillStyle = '#0f172a';
-      ctx.beginPath();
-      ctx.roundRect(25, -3.8, 26, 7.6, 3);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = evolved ? '#22d3ee' : '#ef4444';
-      ctx.fillRect(48, -2.8, 3.5, 5.6);
-    } else if (wepId === 'launcher') {
-      // M32 六连发转轮榴弹炮（超肥厚 20px 转轮弹巢鼓 + 粗壮 40mm 大口径炮管 + 黄黑警示环！）
-      ctx.fillStyle = '#3f6212';
-      ctx.beginPath();
-      ctx.roundRect(16, -5, 13, 10, 3);
-      ctx.fill();
-      ctx.stroke();
-
-      // 宽大六连发榴弹转轮鼓
-      ctx.fillStyle = evolved ? '#b91c1c' : '#475569';
-      ctx.beginPath();
-      ctx.roundRect(27, -10, 22, 20, 5);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#facc15';
-      ctx.fillRect(34, -9, 6, 18);
-      ctx.fillStyle = '#090d16';
-      ctx.fillRect(29, -4, 18, 2);
-      ctx.fillRect(29, 2, 18, 2);
-
-      // 粗壮大口径榴弹发射筒
-      ctx.fillStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.roundRect(49, -6.5, 22, 13, 2.5);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillRect(67, -6.5, 4, 13);
-    } else if (wepId === 'sawlauncher') {
-      // 回旋锯盘发射器（醒目工程黄黑双叉轨道架 + 前端实时高速旋转的大号带齿合金圆锯盘！）
-      ctx.fillStyle = '#eab308';
-      ctx.beginPath();
-      ctx.roundRect(17, -8.5, 34, 17, 4);
-      ctx.fill();
-      ctx.stroke();
-
-      // 工程黑斜纹警示块
-      ctx.fillStyle = '#090d16';
-      ctx.fillRect(25, -7.5, 5, 15);
-      ctx.fillRect(36, -7.5, 5, 15);
-
-      // 双侧夹持导轨叉臂
-      ctx.fillStyle = '#475569';
-      ctx.fillRect(51, -9, 20, 4.5);
-      ctx.strokeRect(51, -9, 20, 4.5);
-      ctx.fillRect(51, 4.5, 20, 4.5);
-      ctx.strokeRect(51, 4.5, 20, 4.5);
-
-      // 前端待发高速旋转圆锯盘
-      this.drawSpinningSawDisc(
-        ctx,
-        72,
-        0,
-        13.5,
-        now * 0.014 + p.barrelSpin,
-        evolved ? '#fb7185' : '#f1f5f9',
-        evolved ? '#facc15' : '#ef4444'
-      );
-    } else if (wepId === 'minigun') {
-      // M134 加特林火神炮（宽体电机座 + 顶部横向提把 + 6 根高速旋转长枪管束 + 双道金属箍环！）
-      ctx.fillStyle = '#1e293b';
-      ctx.beginPath();
-      ctx.roundRect(15, -9.5, 25, 19, 4.5);
-      ctx.fill();
-      ctx.stroke();
-
-      const spinShift = Math.sin(p.barrelSpin) * 2.6;
-      ctx.fillStyle = evolved ? '#e879f9' : '#cbd5e1';
-      ctx.fillRect(40, -8, 48, 3.6);
-      ctx.fillRect(40, -3.2 + spinShift * 0.45, 48, 3.6);
-      ctx.fillRect(40, 1.6 - spinShift * 0.45, 48, 3.6);
-      ctx.fillRect(40, 4.6, 48, 3.6);
-      ctx.strokeRect(40, -8.2, 48, 16.4);
-
-      // 两道重型旋转枪管束箍环
-      ctx.fillStyle = evolved ? '#38bdf8' : '#facc15';
-      ctx.fillRect(58, -9, 5, 18);
-      ctx.strokeRect(58, -9, 5, 18);
-      ctx.fillRect(80, -9, 6, 18);
-      ctx.strokeRect(80, -9, 6, 18);
-
-      // 顶部横向链锯式握持护杠
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 3.6;
-      ctx.beginPath();
-      ctx.moveTo(35, -12);
-      ctx.lineTo(35, 11);
-      ctx.stroke();
     } else if (wepId === 'tesla') {
-      // 特斯拉电弧炮（深灰机身 + 3 道紫铜发光电磁线圈环 + 前端双音叉电极与实时跳跃电弧！）
-      ctx.fillStyle = '#1e293b';
+      ctx.strokeStyle = evolved ? '#e879f9' : '#7dd3fc';
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
-      ctx.roundRect(17, -6.5, 56, 13, 4);
-      ctx.fill();
+      ctx.moveTo(muzzleTipX - 3, -5);
+      ctx.lineTo(muzzleTipX + 2 + Math.sin(now * 0.05) * 2.2, 0);
+      ctx.lineTo(muzzleTipX - 3, 5);
       ctx.stroke();
-
-      const glowCol = evolved ? '#c084fc' : '#22d3ee';
-      ctx.fillStyle = glowCol;
-      ctx.fillRect(24, -2.5, 48, 5);
-
-      // 3 道醒目紫铜电磁感应线圈环
-      for (const cx of [36, 50, 64]) {
-        ctx.fillStyle = '#ea580c';
-        ctx.beginPath();
-        ctx.roundRect(cx - 3.5, -9, 7, 18, 2.5);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = glowCol;
-        ctx.fillRect(cx - 1.2, -7.5, 2.4, 15);
-      }
-
-      // 前端双叉放电电极
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillRect(73, -7.5, 13, 3.8);
-      ctx.strokeRect(73, -7.5, 13, 3.8);
-      ctx.fillRect(73, 3.7, 13, 3.8);
-      ctx.strokeRect(73, 3.7, 13, 3.8);
-
-      // 电极间实时跳跃的闪电电弧
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.9;
+    } else if (wepId === 'plasma') {
+      ctx.fillStyle = evolved ? '#fb7185' : '#34d399';
       ctx.beginPath();
-      ctx.moveTo(85, -5.5);
-      ctx.lineTo(89 + Math.sin(now * 0.05) * 2.5, 0);
-      ctx.lineTo(85, 5.5);
-      ctx.stroke();
-    } else {
-      // 等离子磁轨炮（科幻分体双翼导轨 + 暴露式高亮脉冲能量核心槽 + 枪口电浆球！）
-      const railBody = evolved ? '#4c0519' : '#064e3b';
-      const coreGlow = evolved ? '#fb7185' : '#34d399';
-
-      ctx.fillStyle = railBody;
-      ctx.beginPath();
-      ctx.roundRect(16, -8.5, 32, 17, 4.5);
-      ctx.fill();
-      ctx.stroke();
-
-      // 上下分体磁轨翼片
-      ctx.fillStyle = evolved ? '#e11d48' : '#10b981';
-      ctx.beginPath();
-      ctx.roundRect(46, -8.5, 44, 5.8, 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.roundRect(46, 2.7, 44, 5.8, 2);
-      ctx.fill();
-      ctx.stroke();
-
-      // 中央高能脉冲等离子光槽
-      ctx.fillStyle = coreGlow;
-      ctx.fillRect(24, -2.5, 64, 5);
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(89, 0, 3.6 + Math.sin(now * 0.025) * 1.1, 0, Math.PI * 2);
+      ctx.arc(muzzleTipX - 2, 0, 3.2 + Math.sin(now * 0.025) * 1.0, 0, Math.PI * 2);
       ctx.fill();
     }
-
-    this.drawGlovedHand(ctx, rightHandX, rightHandY);
-    this.drawGlovedHand(ctx, leftHandX, leftHandY);
 
     if (p.muzzleFlashTimer > 0 && wepId !== 'flamethrower' && wepId !== 'cryogun' && wepId !== 'sawlauncher') {
       ctx.fillStyle =
@@ -3295,37 +2832,28 @@ export class CartoonRenderer {
     radius: number,
     spinAngle: number,
     bladeColor: string,
-    hubColor: string
+    _hubColor: string
   ): void {
+    const sawImg = Assets.getSprite('proj_sawblade');
+    const sz = radius * 2.38;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(spinAngle);
-
-    const teeth = 8;
-    ctx.fillStyle = bladeColor;
-    ctx.strokeStyle = '#090d16';
-    ctx.lineWidth = 2.0;
-    ctx.beginPath();
-    for (let i = 0; i < teeth; i++) {
-      const a0 = (i / teeth) * Math.PI * 2;
-      const aTip = a0 + (0.55 / teeth) * Math.PI * 2;
-      const a1 = ((i + 1) / teeth) * Math.PI * 2;
-      const innerR = radius * 0.72;
-      if (i === 0) {
-        ctx.moveTo(Math.cos(a0) * innerR, Math.sin(a0) * innerR);
+    if (sawImg) {
+      ctx.drawImage(sawImg, -sz / 2, -sz / 2, sz, sz);
+      if (bladeColor === '#fda4af' || bladeColor === '#fb7185') {
+        const redSil = Assets.getTintedSilhouette('proj_sawblade', '#fb7185');
+        if (redSil) {
+          ctx.globalAlpha = 0.36;
+          ctx.drawImage(redSil, -sz / 2, -sz / 2, sz, sz);
+        }
       }
-      ctx.lineTo(Math.cos(aTip) * radius, Math.sin(aTip) * radius);
-      ctx.lineTo(Math.cos(a1) * innerR, Math.sin(a1) * innerR);
+    } else {
+      ctx.fillStyle = bladeColor;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = hubColor;
-    ctx.beginPath();
-    ctx.arc(0, 0, radius * 0.36, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
     ctx.restore();
   }
 
