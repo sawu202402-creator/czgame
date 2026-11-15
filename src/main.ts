@@ -34,9 +34,7 @@ async function bootstrap() {
   let ui!: UIManager;
   const engine = new GameEngine(canvas, ctx, input, {
     onToggleArmoryShop: () => ui.toggleArmoryShop(),
-    onBattleLevelUp: (choices, onPick) => ui.showLevelUpChoices(choices, onPick),
-    onOpenTreasureChest: (choices, onPickOne, onTakeAllAd) =>
-      ui.showTreasureChestModal(choices, onPickOne, onTakeAllAd),
+    onTogglePauseMenu: () => ui.togglePauseMenu(),
     onPlayerDowned: (canRevive) => ui.showReviveModal(canRevive),
     onRunFinished: (victory, snapshot) => ui.showSettlementModal(victory, snapshot),
   });

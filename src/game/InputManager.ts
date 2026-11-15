@@ -24,6 +24,7 @@ export class InputManager {
   private onReloadCb: (() => void) | null = null;
   private onToggleArmoryCb: (() => void) | null = null;
   private onThrowGrenadeCb: (() => void) | null = null;
+  private onEscapeCb: (() => void) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
@@ -34,7 +35,10 @@ export class InputManager {
       if (e.repeat) return;
       const code = e.code;
       this.keys.add(code);
-      if (code === 'KeyQ' || code === 'Digit1' || code === 'Digit2') {
+      if (code === 'Escape') {
+        e.preventDefault();
+        this.onEscapeCb?.();
+      } else if (code === 'KeyQ' || code === 'Digit1' || code === 'Digit2') {
         this.onSwitchWeaponCb?.();
       } else if (code === 'KeyR') {
         this.onReloadCb?.();
@@ -163,12 +167,14 @@ export class InputManager {
     onSwitchWeapon: () => void,
     onReload: () => void,
     onToggleArmory: () => void,
-    onThrowGrenade: () => void
+    onThrowGrenade: () => void,
+    onEscape?: () => void
   ): void {
     this.onSwitchWeaponCb = onSwitchWeapon;
     this.onReloadCb = onReload;
     this.onToggleArmoryCb = onToggleArmory;
     this.onThrowGrenadeCb = onThrowGrenade;
+    this.onEscapeCb = onEscape || null;
   }
 
   public getMoveVector(): { x: number; y: number } {

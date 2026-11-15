@@ -3,7 +3,7 @@ import { IN_RUN_PERKS, POWERUP_META, RELICS } from '../data/perksAndRelics';
 import { WEAPONS } from '../data/weapons';
 import { SaveManager } from '../meta/SaveManager';
 import { PlatformSDK } from '../platform/PlatformSDK';
-import { GameMode, InRunPerkDef, PowerUpType, Rect, RelicDef, StageDef } from '../types';
+import { GameMode, PowerUpType, Rect, StageDef } from '../types';
 import {
   DropItem,
   RunSnapshot,
@@ -16,12 +16,7 @@ import { CartoonRenderer } from './Renderer';
 
 export interface EngineCallbacks {
   onToggleArmoryShop: () => void;
-  onBattleLevelUp: (choices: InRunPerkDef[], onPick: (perk: InRunPerkDef) => void) => void;
-  onOpenTreasureChest: (
-    choices: RelicDef[],
-    onPickOne: (relic: RelicDef) => void,
-    onTakeAllAd: () => Promise<boolean>
-  ) => void;
+  onTogglePauseMenu: () => void;
   onPlayerDowned: (canRevive: boolean) => void;
   onRunFinished: (victory: boolean, snapshot: RunSnapshot) => void;
 }
@@ -64,7 +59,12 @@ export class GameEngine {
           this.callbacks.onToggleArmoryShop();
         }
       },
-      () => this.throwGrenade()
+      () => this.throwGrenade(),
+      () => {
+        if (this.state && this.state.waveState !== 'ended') {
+          this.callbacks.onTogglePauseMenu();
+        }
+      }
     );
   }
 
@@ -183,8 +183,8 @@ export class GameEngine {
       particles: [],
       floatingTexts: [],
       lightnings: [],
-      bannerText: `🚨 第 1 波来袭！按 B 键或踩终端随时打开【军火商店】买枪！`,
-      bannerTimer: 4.0,
+      bannerText: '',
+      bannerTimer: 0,
       reviveUsed: false,
       hqSupportCooldown: 0,
       armoryAdCooldown: 0,
@@ -605,9 +605,7 @@ export class GameEngine {
 
     if (wave % 5 === 0) {
       SoundFX.alarm();
-      this.showBanner(wave % 10 === 0 ? `👑 警告！第 ${wave} 波狂暴尸王降临！` : `🛡️ 第 ${wave} 波！重装精英突袭！`, 3.6);
-    } else {
-      this.showBanner(`🧟 第 ${wave} 波尸潮来袭！`, 2.4);
+      this.showBanner(wave % 10 === 0 ? `👑 第 ${wave} 波 · 狂暴尸王降临` : `🛡️ 第 ${wave} 波 · 重装精英突袭`, 2.6);
     }
   }
 
@@ -628,7 +626,6 @@ export class GameEngine {
       progress: 0,
       bobPhase: Math.random() * Math.PI * 2,
     });
-    this.showBanner(`🎁 【${room.name}】空降了神秘宝物箱！`, 3.2);
   }
 
   public showBanner(text: string, dur = 2.8): void {
@@ -869,11 +866,10 @@ export class GameEngine {
           }
           SoundFX.fanfare();
           PlatformSDK.happyTime();
-          this.showBanner('🚁 救援直升机已降落停机坪！边打边撤，前往 H 光圈坚守登机！', 6);
+          this.showBanner('🚁 救援直升机已就位 · 前往 H 停机坪撤离', 4.5);
         } else {
           s.waveState = 'intermission';
           s.intermissionTimer = 5.0;
-          this.showBanner(`✅ 第 ${s.wave} 波肃清！按 B 打开【军火商店】换新枪！(5秒后下一波)`, 4.0);
         }
       }
       s.zombiesRemainingInWave = this.spawnQueue.length + s.zombies.length;
@@ -1020,10 +1016,6 @@ export class GameEngine {
       facingAngle: Math.atan2(wf.inY, wf.inX),
       attackAnim: 0,
     });
-
-    if (kind === 'thief') {
-      this.showBanner('💰 黄金盗宝僵尸正从地图边缘潜入！打爆它抢夺神秘宝物箱！', 3.5);
-    }
   }
 
   private updatePlayer(dt: number, viewW: number, viewH: number): void {
@@ -1448,21 +1440,21 @@ export class GameEngine {
           this.rebuildFlowField();
           SoundFX.fanfare();
           PlatformSDK.happyTime();
-          this.showBanner(`🔓 已开启【${door.label}】！军火商店已解锁更多强力枪械！`, 3.5);
+          this.showBanner(`🔓 已开启【${door.label}】`, 2.2);
         }
       } else {
         door.progress = Math.max(0, door.progress - dt * 2.5);
       }
     }
 
-    // 3. 踩房间神秘宝物箱
+    // 3. 踩房间神秘宝物箱（当场直接开箱领取奇物，零弹窗打断战斗！）
     for (let i = s.chests.length - 1; i >= 0; i--) {
       const c = s.chests[i];
       if (Math.hypot(p.x - c.x, p.y - c.y) <= 56) {
         c.progress += dt * 1.8;
         if (c.progress >= 1) {
           s.chests.splice(i, 1);
-          this.openRelicChestModal();
+          this.grantChestRelicInline(c.x, c.y);
           break;
         }
       } else {
@@ -1540,7 +1532,6 @@ export class GameEngine {
       if (granted) {
         st.used = true;
         this.giveOrRefillWeapon(st.weaponId, true, 3);
-        this.showBanner(`🪂 空投超武已装备！尽情横扫 3 波尸潮！`, 3.2);
       }
       return;
     }
@@ -1553,7 +1544,7 @@ export class GameEngine {
       wep.mag = this.getMaxMag(wep.defId, wep.evolved);
       wep.reserve = def.maxReserve * (wep.evolved ? 2 : 1);
       SoundFX.reloadDone();
-      this.spawnFloatingText(st.x, st.y - 34, '📦 弹药已补满！', '#4ade80', 1.2);
+      this.spawnFloatingText(st.x, st.y - 34, '📦 弹药已满', '#4ade80', 1.15);
     } else if (st.type === 'pack_a_punch') {
       const wep = p.weapons[p.activeSlot];
       const def = WEAPONS[wep.defId];
@@ -1562,32 +1553,32 @@ export class GameEngine {
       if (def.maxReserve > 0) wep.reserve = def.maxReserve * 2;
       SoundFX.fanfare();
       PlatformSDK.happyTime();
-      this.showBanner(`⚡ 超武觉醒：【${def.superName}】！`, 3.6);
+      this.spawnFloatingText(st.x, st.y - 36, `⚡ ${def.superName}`, def.superColor, 1.3);
     } else if (st.type === 'mech_dog_cage') {
       st.used = true;
       s.mechDog.active = true;
       s.mechDog.x = st.x;
       s.mechDog.y = st.y;
       SoundFX.fanfare();
-      this.showBanner('🐕 机械警犬已出笼！自动帮你捡全图钞票并撕咬僵尸！', 3.4);
+      this.spawnFloatingText(st.x, st.y - 34, '🐕 机械警犬出击!', '#7dd3fc', 1.2);
     } else if (st.type === 'vending_machine') {
       const roll = Math.random();
       if (roll < 0.36) {
         p.hp = p.maxHp;
         p.armor = Math.min(p.maxArmor, p.armor + 35);
-        this.spawnFloatingText(st.x, st.y - 34, '🍔 能量汉堡：满血 + 35护甲！', '#4ade80', 1.25);
+        this.spawnFloatingText(st.x, st.y - 34, '🍔 满血 + 35护甲', '#4ade80', 1.2);
       } else if (roll < 0.75) {
         s.powerUpTimers.overdrive = 7;
-        this.spawnFloatingText(st.x, st.y - 34, '🥤 狂暴汽水：7秒无限火力！', '#f97316', 1.25);
+        this.spawnFloatingText(st.x, st.y - 34, '🥤 7秒无限火力', '#f97316', 1.2);
       } else {
         s.cash += 300;
-        this.spawnFloatingText(st.x, st.y - 34, '🎰 扭蛋头奖 +$300!', '#fde047', 1.35);
+        this.spawnFloatingText(st.x, st.y - 34, '🎰 头奖 +$300', '#fde047', 1.3);
       }
       SoundFX.fanfare();
     } else if (st.type === 'laser_trap') {
       st.activeTimer = 18;
       SoundFX.alarm();
-      this.showBanner('🚨 旋转激光柱已激活！把尸群引过来绞碎！', 2.8);
+      this.spawnFloatingText(st.x, st.y - 34, '🚨 激光绞杀已激活', '#f87171', 1.15);
     }
   }
 
@@ -1638,49 +1629,18 @@ export class GameEngine {
     }
   }
 
-  private openRelicChestModal(): void {
+  private grantChestRelicInline(cx: number, cy: number): void {
     const s = this.state!;
-    this.pendingModals.push(() => {
-      if (!this.state || this.state.waveState === 'ended' || this.state.player.hp <= 0) return;
-      const pool = RELICS.filter((r) => !s.relicIds.includes(r.id));
-      if (pool.length === 0) {
-        s.cash += 350;
-        this.spawnFloatingText(s.player.x, s.player.y - 32, '🎁 奇物已集齐！奖励 +$350', '#fde047', 1.3);
-        this.flushQueuedModals();
-        return;
-      }
-      const shuffled = [...pool].sort(() => Math.random() - 0.5);
-      const choices = shuffled.slice(0, Math.min(2, shuffled.length));
-      this.modalPaused = true;
-      this.input.resetStates();
-      SoundFX.fanfare();
-
-      this.callbacks.onOpenTreasureChest(
-        choices,
-        (picked) => {
-          if (!s.relicIds.includes(picked.id)) s.relicIds.push(picked.id);
-          this.modalPaused = false;
-          this.showBanner(`✨ 获得宝物【${picked.name}】：${picked.desc}`, 3.5);
-          this.flushQueuedModals();
-        },
-        async () => {
-          const ok = await PlatformSDK.showRewardedAd('relic_take_all', '神秘宝物箱 2 件全收');
-          if (ok) {
-            choices.forEach((c) => {
-              if (!s.relicIds.includes(c.id)) s.relicIds.push(c.id);
-            });
-            this.modalPaused = false;
-            PlatformSDK.gameplayStart();
-            this.showBanner(`🎉 爽翻！2 件宝物全部收入囊中！`, 3.5);
-            this.flushQueuedModals();
-            return true;
-          }
-          // 若用户取消激励视频，保持宝物箱界面可继续免费任选 1 件，绝不出现空屏假死！
-          return false;
-        }
-      );
-    });
-    this.flushQueuedModals();
+    const pool = RELICS.filter((r) => !s.relicIds.includes(r.id));
+    SoundFX.fanfare();
+    if (pool.length === 0) {
+      s.cash += 350;
+      this.spawnFloatingText(cx, cy - 28, '🎁 奇物满阶 +$350', '#fde047', 1.25);
+      return;
+    }
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    s.relicIds.push(picked.id);
+    this.spawnFloatingText(cx, cy - 28, `🎁 ${picked.icon} ${picked.name}`, '#fde047', 1.25);
   }
 
   private damageZombiesWithLaserTrap(st: RuntimeStation, dt: number): void {
@@ -1958,13 +1918,13 @@ export class GameEngine {
       }
     }
 
-    if (isCrit || (s.floatingTexts.length < 28 && (dmg >= 12 || Math.random() < 0.2))) {
+    if (isCrit || (s.floatingTexts.length < 14 && dmg >= 85 && Math.random() < 0.22)) {
       this.spawnFloatingText(
         z.x + (Math.random() - 0.5) * 14,
         z.y - z.radius - 8,
         `${Math.round(dmg)}${isCrit ? '!' : ''}`,
-        isCrit ? '#fde047' : '#ffffff',
-        isCrit ? 1.25 : 0.92
+        isCrit ? '#fde047' : '#e2e8f0',
+        isCrit ? 1.2 : 0.9
       );
     }
 
@@ -2035,7 +1995,7 @@ export class GameEngine {
         s.feverTimer = 6.5;
         s.fever = 0;
         SoundFX.fanfare();
-        this.showBanner('🌈 FEVER 狂热时刻！射速与移速飙升！', 2.8);
+        this.spawnFloatingText(s.player.x, s.player.y - 38, '🔥 狂暴时刻!', '#fb923c', 1.25);
       }
     }
 
@@ -2078,7 +2038,7 @@ export class GameEngine {
         bobPhase: 0,
       });
       SoundFX.fanfare();
-      this.showBanner('💰 成功击毙盗宝僵尸！爆出【神秘宝物箱】！', 3.2);
+      this.spawnFloatingText(dropPt.x, dropPt.y - 26, '🎁 掉落宝物箱!', '#fde047', 1.25);
     } else if (Math.random() < (z.kind === 'miniboss' || z.kind === 'boss' ? 0.55 : 0.035)) {
       const types: PowerUpType[] = ['overdrive', 'nuke', 'carpenter', 'double_cash', 'freeze'];
       const pType = types[Math.floor(Math.random() * types.length)];
@@ -2652,7 +2612,7 @@ export class GameEngine {
     } else if (d.kind === 'powerup' && d.powerUp) {
       const meta = POWERUP_META[d.powerUp];
       SoundFX.fanfare();
-      this.showBanner(meta.banner, 3.0);
+      this.spawnFloatingText(s.player.x, s.player.y - 36, `${meta.icon} ${meta.name}!`, meta.color, 1.25);
       if (d.powerUp === 'nuke') {
         s.camera.shake = 1.2;
         SoundFX.explosion();
@@ -2679,21 +2639,16 @@ export class GameEngine {
 
   private triggerBattleLevelUp(): void {
     const s = this.state!;
-    this.pendingModals.push(() => {
-      if (!this.state || this.state.waveState === 'ended' || this.state.player.hp <= 0) return;
-      const shuffled = [...IN_RUN_PERKS].sort(() => Math.random() - 0.5);
-      const choices = shuffled.slice(0, 3);
-      this.modalPaused = true;
-      this.input.resetStates();
-      SoundFX.fanfare();
-      this.callbacks.onBattleLevelUp(choices, (picked) => {
-        picked.apply(s.modifiers);
-        this.modalPaused = false;
-        this.showBanner(`🆙 战斗升至 Lv.${s.battleLevel}！解锁【${picked.name}】！`, 2.8);
-        this.flushQueuedModals();
-      });
-    });
-    this.flushQueuedModals();
+    const picked = IN_RUN_PERKS[Math.floor(Math.random() * IN_RUN_PERKS.length)];
+    picked.apply(s.modifiers);
+    SoundFX.fanfare();
+    this.spawnFloatingText(
+      s.player.x,
+      s.player.y - 40,
+      `🆙 Lv.${s.battleLevel} · ${picked.icon}${picked.name}`,
+      '#fde047',
+      1.22
+    );
   }
 
   private updateFX(dt: number): void {

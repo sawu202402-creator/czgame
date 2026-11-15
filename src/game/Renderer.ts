@@ -1222,9 +1222,14 @@ export class CartoonRenderer {
         }
       }
 
-      this.drawCachedLabel(ctx, st.label, st.x, st.y - 41, '#ffffff', 11);
-      if (priceTag) {
-        this.drawCachedLabel(ctx, priceTag, st.x, st.y + 41, '#fde047', 11);
+      const nearStation = Math.hypot(state.player.x - st.x, state.player.y - st.y) < 145;
+      if (nearStation) {
+        this.drawCachedLabel(ctx, st.label, st.x, st.y - 40, '#f8fafc', 11);
+        if (priceTag) {
+          this.drawCachedLabel(ctx, priceTag, st.x, st.y + 40, '#fde047', 11);
+        }
+      } else if (st.type === 'laser_trap' && st.activeTimer > 0 && priceTag) {
+        this.drawCachedLabel(ctx, priceTag, st.x, st.y + 38, '#fca5a5', 10);
       }
       ctx.restore();
     }
@@ -1310,12 +1315,9 @@ export class CartoonRenderer {
       }
 
       if (win.planks === 0) {
-        const cx = win.x + win.w / 2;
-        const cy = win.y + win.h / 2;
-        const blink = 0.45 + Math.sin(performance.now() * 0.012) * 0.35;
+        const blink = 0.35 + Math.sin(performance.now() * 0.01) * 0.25;
         ctx.fillStyle = `rgba(239, 68, 68, ${blink})`;
         ctx.fillRect(win.x + 3, win.y + 3, win.w - 6, win.h - 6);
-        this.drawCachedLabel(ctx, '破窗!', cx, cy, '#fecaca', 11);
       }
       ctx.restore();
     }
@@ -1404,14 +1406,17 @@ export class CartoonRenderer {
         ctx.lineWidth = 6;
         ctx.stroke();
       }
-      this.drawCachedLabel(ctx, door.label, cx, cy - 13, '#f8fafc', 11);
+      const nearDoor = Math.hypot(state.player.x - cx, state.player.y - cy) < 175;
+      if (nearDoor) {
+        this.drawCachedLabel(ctx, door.label, cx, cy - 13, '#f8fafc', 11);
+      }
       this.drawCachedLabel(
         ctx,
         `$${door.cost}`,
         cx,
-        cy + 13,
+        nearDoor ? cy + 13 : cy,
         state.cash >= door.cost ? '#86efac' : '#fde047',
-        12
+        11
       );
       ctx.restore();
     }
@@ -1456,7 +1461,7 @@ export class CartoonRenderer {
         ctx.lineWidth = 2.5;
         ctx.strokeStyle = '#ffffff';
         ctx.stroke();
-        this.drawCachedLabel(ctx, meta.name, 0, -21, '#fef08a', 11);
+        this.drawCachedLabel(ctx, meta.icon, 0, 0, '#ffffff', 12);
       }
       ctx.restore();
     }
@@ -1466,20 +1471,19 @@ export class CartoonRenderer {
       const bounce = Math.abs(Math.sin(now * 1.25 + c.bobPhase)) * 4;
       ctx.save();
       ctx.beginPath();
-      ctx.arc(c.x, c.y, 30, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.24)';
+      ctx.arc(c.x, c.y, 28, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
       ctx.fill();
 
-      this.drawCenteredSprite(ctx, 'prop_chest', c.x, c.y - bounce, 52, 0);
+      this.drawCenteredSprite(ctx, 'prop_chest', c.x, c.y - bounce, 50, 0);
 
       if (c.progress > 0) {
         ctx.beginPath();
-        ctx.arc(c.x, c.y, 33, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * c.progress);
+        ctx.arc(c.x, c.y, 32, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * c.progress);
         ctx.strokeStyle = '#4ade80';
         ctx.lineWidth = 5;
         ctx.stroke();
       }
-      this.drawCachedLabel(ctx, '特战补给箱', c.x, c.y - 36 - bounce, '#fef08a', 11);
       ctx.restore();
     }
   }
@@ -1508,7 +1512,7 @@ export class CartoonRenderer {
       ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
       ctx.fill();
       this.drawCenteredSprite(ctx, 'prop_turret', t.x, t.y, 56, t.angle);
-      this.drawCachedLabel(ctx, `哨戒炮 ${t.life.toFixed(0)}s`, t.x, t.y - 30, '#7dd3fc', 10);
+      this.drawCachedLabel(ctx, `${t.life.toFixed(0)}s`, t.x, t.y - 28, '#7dd3fc', 10);
       ctx.restore();
     }
 
@@ -1520,7 +1524,6 @@ export class CartoonRenderer {
       ctx.fillStyle = 'rgba(2, 6, 23, 0.4)';
       ctx.fill();
       this.drawCenteredSprite(ctx, 'mech_dog', d.x, d.y, 54, d.angle);
-      this.drawCachedLabel(ctx, '机械警犬', d.x, d.y - 26, '#bae6fd', 10);
       ctx.restore();
     }
   }
