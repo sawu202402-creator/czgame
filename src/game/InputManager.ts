@@ -20,6 +20,7 @@ export class InputManager {
 
   public moveStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
   public aimStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
+  public attackBtnStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
 
   private onSwitchWeaponCb: (() => void) | null = null;
   private onReloadCb: (() => void) | null = null;
@@ -238,5 +239,8 @@ export class InputManager {
     this.aimStick.active = false;
     this.aimStick.dx = 0;
     this.aimStick.dy = 0;
+    this.attackBtnStick.active = false;
+    this.attackBtnStick.dx = 0;
+    this.attackBtnStick.dy = 0;
   }
 }

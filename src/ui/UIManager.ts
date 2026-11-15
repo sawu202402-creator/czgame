@@ -18,7 +18,6 @@ export class UIManager {
   private hubTab: 'stages' | 'upgrades' = 'stages';
   private armoryTab: 'guns' | 'supplies' = 'guns';
   private hudCache: Record<string, string> = {};
-  private wepDomRefs: { btn: HTMLButtonElement; ammoEl: HTMLElement }[] = [];
 
   constructor(
     private uiLayer: HTMLElement,
@@ -161,7 +160,7 @@ export class UIManager {
         </main>
 
         <footer class="hub-footer-tip">
-          📱 触屏：左手摇杆移动 · 右手滑动瞄准 + 右侧快捷切枪/手雷/商店 ｜ 💻 键鼠：WASD 移动 · 鼠标射击 · B 军火库 · G 手雷
+          📱 触屏：左手摇杆走位 · 右下角王者荣耀式轮盘射击/拖动瞄准 + 扇形切枪/手雷/换弹 ｜ 💻 键鼠：WASD · 鼠标射击 · B 商店 · G 手雷
         </footer>
       </div>
     `;
@@ -448,7 +447,6 @@ export class UIManager {
   private mountHUD(): void {
     this.hudRoot?.remove();
     this.hudCache = {};
-    this.wepDomRefs = [];
     const hud = document.createElement('div');
     hud.className = 'hud-overlay';
     hud.innerHTML = `
@@ -479,23 +477,42 @@ export class UIManager {
           <div class="powerup-row" id="hud-powerups"></div>
         </div>
 
-        <div class="hud-right">
-          <div class="cash-pill" id="hud-cash">$80</div>
-          <button class="hud-icon-btn" id="btn-pause" title="暂停 / 设置 (Esc)">⏸</button>
+        <div class="hud-right-stack">
+          <div class="hud-right">
+            <button class="cash-pill" id="hud-cash" type="button" title="点击打开军火商店 (B)">$80</button>
+            <button class="hud-icon-btn" id="btn-pause" type="button" title="暂停 / 设置 (Esc)">⏸</button>
+          </div>
+          <button class="moba-shop-btn" id="btn-open-armory" type="button" title="军火商店 (B / Tab)">
+            <span class="moba-shop-icon">🛒</span>
+            <span>商店</span>
+          </button>
         </div>
       </div>
 
       <div class="hud-banner" id="hud-banner"></div>
 
-      <div class="hud-bottom hud-right-cluster">
-        <button class="hud-dock-btn hud-shop-btn" id="btn-open-armory">🛒 商店</button>
-        <div class="hud-combat-row">
-          <div class="weapon-slots" id="hud-weapons"></div>
-          <button class="hud-gren-fab" id="btn-grenade" title="投掷手雷 (G / 右键)">
-            <img class="hud-gren-icon" src="./assets/prop_grenade.png" alt="" />
-            <span class="hud-gren-badge" id="hud-gren-count">2</span>
-          </button>
-        </div>
+      <div class="moba-wheel-zone">
+        <button class="moba-arc-btn arc-pos-1 empty-slot" id="btn-arc-switch" type="button" title="切换副武器 (Q / 1 / 2)">
+          <img class="moba-arc-img" id="arc-switch-icon" src="./assets/gun_smg.png" alt="" />
+          <span class="moba-arc-badge" id="arc-switch-badge">副武</span>
+        </button>
+
+        <button class="moba-arc-btn arc-pos-2 moba-gren-btn" id="btn-grenade" type="button" title="投掷手雷 (G / 右键)">
+          <img class="moba-arc-img" src="./assets/prop_grenade.png" alt="" />
+          <span class="moba-arc-badge" id="hud-gren-count">2</span>
+        </button>
+
+        <button class="moba-arc-btn arc-pos-3 moba-reload-btn" id="btn-arc-reload" type="button" title="战术换弹 (R)">
+          <span class="moba-reload-glyph" id="arc-reload-glyph">↻</span>
+          <span class="moba-arc-mini-txt">换弹</span>
+        </button>
+
+        <button class="moba-main-atk" id="btn-main-attack" type="button" title="点按索敌开火 · 按住拖动 360° 瞄准">
+          <span class="moba-atk-ring"></span>
+          <span class="moba-atk-knob" id="main-atk-knob"></span>
+          <img class="moba-atk-gun" id="main-atk-icon" src="./assets/gun_pistol.png" alt="" />
+          <span class="moba-atk-ammo" id="main-atk-ammo">15/∞</span>
+        </button>
       </div>
     `;
     this.uiLayer.appendChild(hud);
@@ -509,8 +526,170 @@ export class UIManager {
       this.toggleArmoryShop();
     });
 
+    this.bindModalTap(hud.querySelector('#hud-cash') as HTMLButtonElement, () => {
+      this.toggleArmoryShop();
+    });
+
+    const switchBtn = hud.querySelector('#btn-arc-switch') as HTMLButtonElement;
+    let lastSwitchTouch = 0;
+    switchBtn.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' && (this.engine.state?.player.weapons.length ?? 0) >= 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        lastSwitchTouch = performance.now();
+        const active = this.engine.state!.player.activeSlot;
+        this.engine.switchWeapon(active === 0 ? 1 : 0);
+      }
+    });
+    switchBtn.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch' && (this.engine.state?.player.weapons.length ?? 0) < 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        lastSwitchTouch = performance.now();
+        this.toggleArmoryShop();
+      }
+    });
+    switchBtn.onclick = () => {
+      if (performance.now() - lastSwitchTouch < 420) return;
+      const s = this.engine.state;
+      if (!s) return;
+      if (s.player.weapons.length >= 2) {
+        this.engine.switchWeapon(s.player.activeSlot === 0 ? 1 : 0);
+      } else {
+        this.toggleArmoryShop();
+      }
+    };
+
     this.bindCombatTap(hud.querySelector('#btn-grenade') as HTMLButtonElement, () => {
       this.engine.throwGrenade();
+    });
+
+    this.bindCombatTap(hud.querySelector('#btn-arc-reload') as HTMLButtonElement, () => {
+      this.engine.startReload();
+    });
+
+    this.bindMainAttackWheel(
+      hud.querySelector('#btn-main-attack') as HTMLButtonElement,
+      hud.querySelector('#main-atk-knob') as HTMLElement
+    );
+  }
+
+  private bindMainAttackWheel(atkBtn: HTMLButtonElement, knobEl: HTMLElement): void {
+    const input = this.engine.input;
+    const maxKnob = 24;
+    const deadzone = 9;
+
+    const resetVisual = () => {
+      atkBtn.classList.remove('pressing', 'aiming');
+      knobEl.style.transform = 'translate(0px, 0px)';
+    };
+
+    const updateFromPoint = (clientX: number, clientY: number) => {
+      const vx = clientX - input.attackBtnStick.startX;
+      const vy = clientY - input.attackBtnStick.startY;
+      const dist = Math.hypot(vx, vy);
+      const clamped = Math.min(dist, maxKnob);
+      const nx = dist > 0.5 ? vx / dist : 0;
+      const ny = dist > 0.5 ? vy / dist : 0;
+      knobEl.style.transform = `translate(${(nx * clamped).toFixed(1)}px, ${(ny * clamped).toFixed(1)}px)`;
+      if (dist > deadzone) {
+        input.attackBtnStick.dx = nx;
+        input.attackBtnStick.dy = ny;
+        atkBtn.classList.add('aiming');
+      } else {
+        input.attackBtnStick.dx = 0;
+        input.attackBtnStick.dy = 0;
+        atkBtn.classList.remove('aiming');
+      }
+    };
+
+    atkBtn.addEventListener(
+      'touchstart',
+      (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (input.attackBtnStick.active || e.changedTouches.length === 0) return;
+        const t = e.changedTouches[0];
+        const rect = atkBtn.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        input.usingTouch = true;
+        input.attackBtnStick = {
+          active: true,
+          id: t.identifier,
+          startX: cx,
+          startY: cy,
+          curX: t.clientX,
+          curY: t.clientY,
+          dx: 0,
+          dy: 0,
+        };
+        atkBtn.classList.add('pressing');
+        updateFromPoint(t.clientX, t.clientY);
+      },
+      { passive: false }
+    );
+
+    atkBtn.addEventListener(
+      'touchmove',
+      (e) => {
+        if (!input.attackBtnStick.active) return;
+        e.preventDefault();
+        e.stopPropagation();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const t = e.changedTouches[i];
+          if (t.identifier === input.attackBtnStick.id) {
+            input.attackBtnStick.curX = t.clientX;
+            input.attackBtnStick.curY = t.clientY;
+            updateFromPoint(t.clientX, t.clientY);
+            break;
+          }
+        }
+      },
+      { passive: false }
+    );
+
+    const endTouch = (e: TouchEvent) => {
+      if (!input.attackBtnStick.active) return;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === input.attackBtnStick.id) {
+          input.attackBtnStick.active = false;
+          input.attackBtnStick.dx = 0;
+          input.attackBtnStick.dy = 0;
+          resetVisual();
+          break;
+        }
+      }
+    };
+    atkBtn.addEventListener('touchend', endTouch);
+    atkBtn.addEventListener('touchcancel', endTouch);
+
+    atkBtn.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = atkBtn.getBoundingClientRect();
+      input.attackBtnStick = {
+        active: true,
+        id: -99,
+        startX: rect.left + rect.width / 2,
+        startY: rect.top + rect.height / 2,
+        curX: e.clientX,
+        curY: e.clientY,
+        dx: 0,
+        dy: 0,
+      };
+      atkBtn.classList.add('pressing');
+      const onUp = () => {
+        if (input.attackBtnStick.id === -99) {
+          input.attackBtnStick.active = false;
+          input.attackBtnStick.dx = 0;
+          input.attackBtnStick.dy = 0;
+          resetVisual();
+        }
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mouseup', onUp);
     });
   }
 
@@ -1009,52 +1188,68 @@ export class UIManager {
       (this.hudRoot!.querySelector('#hud-powerups') as HTMLElement).innerHTML = activePows;
     });
 
-    const wepStructSig = s.player.weapons.map((w) => `${w.defId}:${w.evolved ? 1 : 0}`).join('|');
-    setIfChanged('wepStruct', wepStructSig, () => {
-      const wContainer = this.hudRoot!.querySelector('#hud-weapons') as HTMLElement;
-      wContainer.innerHTML = s.player.weapons
-        .map((w, idx) => {
-          const def = WEAPONS[w.defId];
-          const name = w.evolved ? `⚡${def.superName}` : def.name;
-          return `
-            <button class="wep-slot ${w.evolved ? 'evolved' : ''}" data-slot="${idx}" title="${name}（点击切枪 / 再次点击换弹）">
-              <img src="./assets/gun_${w.defId}.png" alt="${name}" class="wep-icon" />
-              <span class="wep-ammo"></span>
-            </button>
-          `;
-        })
-        .join('');
+    // 王者荣耀式右下角 1+3 扇形技能轮盘状态同步（主攻轮盘 + 副武切枪 + 战术换弹）
+    const activeWep = s.player.weapons[s.player.activeSlot];
+    const maxMag = this.engine.getMaxMag(activeWep.defId, activeWep.evolved);
+    const isReloading = s.player.reloadTimer > 0;
+    const ammoStr = isReloading
+      ? '换弹中'
+      : activeWep.reserve < 0
+        ? `${activeWep.mag}/∞`
+        : `${activeWep.mag}/${activeWep.reserve}`;
+    const lowAmmo = !isReloading && activeWep.mag <= Math.max(2, Math.floor(maxMag * 0.28));
 
-      this.wepDomRefs = Array.from(wContainer.querySelectorAll<HTMLButtonElement>('[data-slot]')).map((btn) => {
-        this.bindCombatTap(btn, () => {
-          const slot = Number(btn.dataset.slot);
-          if (this.engine.state?.player.activeSlot === slot) {
-            this.engine.startReload();
-          } else {
-            this.engine.switchWeapon(slot);
-          }
-        });
-        return {
-          btn,
-          ammoEl: btn.querySelector('.wep-ammo') as HTMLElement,
-        };
-      });
+    const mainKey = `${activeWep.defId}:${activeWep.evolved ? 1 : 0}:${ammoStr}:${lowAmmo ? 1 : 0}:${isReloading ? 1 : 0}`;
+    setIfChanged('mainAtkWheel', mainKey, () => {
+      const atkBtn = this.hudRoot!.querySelector('#btn-main-attack') as HTMLButtonElement;
+      const atkIcon = this.hudRoot!.querySelector('#main-atk-icon') as HTMLImageElement;
+      const atkAmmo = this.hudRoot!.querySelector('#main-atk-ammo') as HTMLElement;
+      const targetSrc = `./assets/gun_${activeWep.defId}.png`;
+      if (atkIcon.getAttribute('src') !== targetSrc) {
+        atkIcon.setAttribute('src', targetSrc);
+      }
+      atkBtn.classList.toggle('evolved', activeWep.evolved);
+      atkBtn.classList.toggle('reloading', isReloading);
+      atkAmmo.textContent = ammoStr;
+      atkAmmo.classList.toggle('low-ammo', lowAmmo);
     });
 
-    s.player.weapons.forEach((w, idx) => {
-      const ref = this.wepDomRefs[idx];
-      if (!ref) return;
-      const active = idx === s.player.activeSlot;
-      ref.btn.classList.toggle('active', active);
-      const ammoStr =
-        s.player.reloadTimer > 0 && active
-          ? '换弹...'
-          : w.reserve < 0
-            ? `${w.mag}/∞`
-            : `${w.mag}/${w.reserve}`;
-      if (ref.ammoEl.textContent !== ammoStr) {
-        ref.ammoEl.textContent = ammoStr;
+    const atkBtnEl = this.hudRoot.querySelector('#btn-main-attack') as HTMLButtonElement;
+    if (!this.engine.input.attackBtnStick.active && atkBtnEl.classList.contains('pressing')) {
+      atkBtnEl.classList.remove('pressing', 'aiming');
+      (this.hudRoot.querySelector('#main-atk-knob') as HTMLElement).style.transform = 'translate(0px, 0px)';
+    }
+
+    const hasSecond = s.player.weapons.length >= 2;
+    const secWep = hasSecond ? s.player.weapons[s.player.activeSlot === 0 ? 1 : 0] : null;
+    const switchKey = secWep ? `${secWep.defId}:${secWep.evolved ? 1 : 0}` : 'empty';
+    setIfChanged('arcSwitch', switchKey, () => {
+      const swBtn = this.hudRoot!.querySelector('#btn-arc-switch') as HTMLButtonElement;
+      const swIcon = this.hudRoot!.querySelector('#arc-switch-icon') as HTMLImageElement;
+      const swBadge = this.hudRoot!.querySelector('#arc-switch-badge') as HTMLElement;
+      if (secWep) {
+        swBtn.classList.remove('empty-slot');
+        swBtn.classList.toggle('evolved', secWep.evolved);
+        swIcon.setAttribute('src', `./assets/gun_${secWep.defId}.png`);
+        swBadge.textContent = '⇄';
+      } else {
+        swBtn.classList.add('empty-slot');
+        swBtn.classList.remove('evolved');
+        swIcon.setAttribute('src', './assets/gun_smg.png');
+        swBadge.textContent = '副武';
       }
+    });
+
+    const canReload =
+      !isReloading &&
+      activeWep.mag < maxMag &&
+      (activeWep.reserve < 0 || activeWep.reserve > 0);
+    const reloadKey = `${canReload ? 1 : 0}:${isReloading ? 1 : 0}:${lowAmmo ? 1 : 0}`;
+    setIfChanged('arcReload', reloadKey, () => {
+      const relBtn = this.hudRoot!.querySelector('#btn-arc-reload') as HTMLButtonElement;
+      relBtn.disabled = !canReload && !isReloading;
+      relBtn.classList.toggle('reloading', isReloading);
+      relBtn.classList.toggle('need-reload', canReload && lowAmmo);
     });
   }
 

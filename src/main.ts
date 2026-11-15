@@ -11,6 +11,7 @@ async function bootstrap() {
   SaveManager.load();
   await Assets.preloadAll();
 
+  const gameRoot = document.getElementById('game-root') as HTMLElement;
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
   const uiLayer = document.getElementById('ui-layer') as HTMLElement;
   const landscapeGuard = document.getElementById('landscape-guard') as HTMLElement;
@@ -57,13 +58,23 @@ async function bootstrap() {
   });
 
   const syncViewportAndOrientation = () => {
-    const vv = window.visualViewport;
-    viewW = Math.round(vv ? vv.width : window.innerWidth);
-    viewH = Math.round(vv ? vv.height : window.innerHeight);
+    if (window.scrollX !== 0 || window.scrollY !== 0) {
+      window.scrollTo(0, 0);
+    }
+    viewW = Math.max(1, Math.round(gameRoot.clientWidth || window.innerWidth));
+    viewH = Math.max(1, Math.round(gameRoot.clientHeight || window.innerHeight));
     const dpr = Math.min(window.devicePixelRatio || 1, viewW > 1440 ? 1.25 : 1.5);
-    canvas.width = Math.max(1, Math.floor(viewW * dpr));
-    canvas.height = Math.max(1, Math.floor(viewH * dpr));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const targetW = Math.max(1, Math.floor(viewW * dpr));
+    const targetH = Math.max(1, Math.floor(viewH * dpr));
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#141d2b';
+      ctx.fillRect(0, 0, viewW, viewH);
+    } else {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
 
     // 手机端强制横屏体验：若处于竖屏握持，自动冻结战局并提示旋转手机
     const portraitOnMobile = (isMobileTouchDevice() || input.usingTouch) && viewH > viewW;

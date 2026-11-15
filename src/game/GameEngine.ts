@@ -1195,7 +1195,19 @@ export class GameEngine {
     const worldMouseY = (this.input.mouseScreenY - viewH / 2) / zoom + s.camera.y;
 
     let wantFire = false;
-    if (this.input.aimStick.active && (this.input.aimStick.dx !== 0 || this.input.aimStick.dy !== 0)) {
+    if (this.input.attackBtnStick.active) {
+      wantFire = true;
+      if (this.input.attackBtnStick.dx !== 0 || this.input.attackBtnStick.dy !== 0) {
+        p.angle = Math.atan2(this.input.attackBtnStick.dy, this.input.attackBtnStick.dx);
+      } else {
+        const target = this.findNearestTarget(p.x, p.y, 540);
+        if (target) {
+          p.angle = Math.atan2(target.y - p.y, target.x - p.x);
+        } else if (mv.x !== 0 || mv.y !== 0) {
+          p.angle = Math.atan2(mv.y, mv.x);
+        }
+      }
+    } else if (this.input.aimStick.active && (this.input.aimStick.dx !== 0 || this.input.aimStick.dy !== 0)) {
       p.angle = Math.atan2(this.input.aimStick.dy, this.input.aimStick.dx);
       wantFire = true;
     } else if (!this.input.usingTouch && this.input.mouseDown) {

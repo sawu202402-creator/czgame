@@ -94,6 +94,9 @@ export class CartoonRenderer {
     state: RunSnapshot,
     input: InputManager
   ): void {
+    ctx.fillStyle = '#1e3124';
+    ctx.fillRect(0, 0, viewW, viewH);
+
     this.ensureStaticMapCache(state);
 
     const zoom = state.camera.zoom;
@@ -3824,39 +3827,29 @@ export class CartoonRenderer {
     state: RunSnapshot,
     input: InputManager
   ): void {
-    // 触屏首波起步前轻量化手势引导圈（一移动即自动消隐，零弹窗遮挡）
+    // 触屏首波起步前左侧移动摇杆轻量化引导圈（一移动即自动消隐，右侧由王者荣耀式扇形轮盘直观呈现）
     if (
       input.usingTouch &&
       state.wave === 1 &&
       state.player.walkPhase < 1.2 &&
-      !input.moveStick.active &&
-      !input.aimStick.active
+      !input.moveStick.active
     ) {
       const pulse = 0.28 + Math.sin(performance.now() * 0.005) * 0.08;
       const leftY = Math.min(viewH - 86, Math.max(viewH * 0.66, 190));
-      const rightY = Math.min(viewH - 135, Math.max(viewH * 0.48, 150));
       const leftX = Math.min(110, viewW * 0.2);
-      const rightX = Math.min(viewW - 150, viewW * 0.7);
 
       ctx.save();
       ctx.globalAlpha = pulse;
       ctx.setLineDash([6, 5]);
       ctx.lineWidth = 2;
-
       ctx.strokeStyle = '#38bdf8';
       ctx.beginPath();
       ctx.arc(leftX, leftY, 38, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.strokeStyle = '#fbbf24';
-      ctx.beginPath();
-      ctx.arc(rightX, rightY, 38, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
 
       ctx.globalAlpha = Math.min(0.75, pulse * 2.1);
       this.drawCachedLabel(ctx, '左手移动', leftX, leftY, '#bae6fd', 11);
-      this.drawCachedLabel(ctx, '右手瞄准', rightX, rightY, '#fde68a', 11);
       ctx.restore();
     }
 
