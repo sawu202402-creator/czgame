@@ -948,7 +948,28 @@ export class GameEngine {
       const r = s.rooms.find((rm) => rm.id === w.roomId);
       return r?.unlocked;
     });
-    const win = activeWindows[Math.floor(Math.random() * activeWindows.length)] || s.windows[0];
+
+    // 动态均衡分配各朝向破窗压力，让尸潮真正从东南西北四面八方同时包抄围攻！
+    const windowLoad = new Map<string, number>();
+    for (const oz of s.zombies) {
+      if (!oz.insideBuilding && oz.targetWindowId) {
+        windowLoad.set(oz.targetWindowId, (windowLoad.get(oz.targetWindowId) || 0) + 1);
+      }
+    }
+    let win = s.windows[0];
+    if (activeWindows.length > 0) {
+      const weights = activeWindows.map((w) => 1 / (1 + (windowLoad.get(w.id) || 0) * 1.35));
+      const totalW = weights.reduce((acc, v) => acc + v, 0);
+      let pick = Math.random() * totalW;
+      win = activeWindows[activeWindows.length - 1];
+      for (let idx = 0; idx < activeWindows.length; idx++) {
+        pick -= weights[idx];
+        if (pick <= 0) {
+          win = activeWindows[idx];
+          break;
+        }
+      }
+    }
     const wf = this.getWindowFrame(win);
 
     // 紧绷硬核的尸潮血量/移速膨胀与赏金衰减曲线！
@@ -1015,18 +1036,41 @@ export class GameEngine {
       color = '#ef4444';
     }
 
-    // 统一从地图外围边缘 + 屏幕视野外生成，沿户外泥泞通道一路奔袭至防线窗户（100% 杜绝窗前凭空闪现！）
-    const laneJitter = (Math.random() - 0.5) * 64;
-    let wx = wf.wcx + win.spawnOutsideOffset.dx + wf.latX * laneJitter;
-    let wy = wf.wcy + win.spawnOutsideOffset.dy + wf.latY * laneJitter;
+    // 360° 广角环城外围散点生成：按 ~150° 大扇面分布在建筑外圈与镜头视野外，彻底告别直线排队进场！
+    const bb = s.stage.buildingBounds;
+    const baseOutAng = Math.atan2(wf.outY, wf.outX);
+    const spreadAng = baseOutAng + (Math.random() - 0.5) * 2.58;
+    const dirX = Math.cos(spreadAng);
+    const dirY = Math.sin(spreadAng);
+    const baseDist = 420 + Math.random() * 270;
+    let wx = wf.wcx + dirX * baseDist;
+    let wy = wf.wcy + dirY * baseDist;
+
+    const outPad = 115;
+    for (let step = 0; step < 12; step++) {
+      const insideOuterEnvelope =
+        wx > bb.x - outPad &&
+        wx < bb.x + bb.w + outPad &&
+        wy > bb.y - outPad &&
+        wy < bb.y + bb.h + outPad;
+      if (!insideOuterEnvelope && !this.isPointInsideAnyRoom(wx, wy, 48)) {
+        break;
+      }
+      wx += (dirX * 0.65 + wf.outX * 0.65) * 78;
+      wy += (dirY * 0.65 + wf.outY * 0.65) * 78;
+    }
 
     const zoom = Math.max(0.45, s.camera.zoom || 1);
     const camHalfW = this.lastViewW / (2 * zoom) + radius + 68;
     const camHalfH = this.lastViewH / (2 * zoom) + radius + 68;
-    if (wf.outX < 0) wx = Math.min(wx, s.camera.x - camHalfW);
-    else if (wf.outX > 0) wx = Math.max(wx, s.camera.x + camHalfW);
-    if (wf.outY < 0) wy = Math.min(wy, s.camera.y - camHalfH);
-    else if (wf.outY > 0) wy = Math.max(wy, s.camera.y + camHalfH);
+    for (let step = 0; step < 12; step++) {
+      if (Math.abs(wx - s.camera.x) >= camHalfW || Math.abs(wy - s.camera.y) >= camHalfH) {
+        break;
+      }
+      const pushAng = Math.atan2(wy - s.camera.y || wf.outY, wx - s.camera.x || wf.outX);
+      wx += Math.cos(pushAng) * 86;
+      wy += Math.sin(pushAng) * 86;
+    }
 
     s.zombies.push({
       id: this.nextEntityId++,
@@ -1053,7 +1097,7 @@ export class GameEngine {
       rangedCd,
       fleeTimer,
       wobblePhase: Math.random() * Math.PI * 2,
-      facingAngle: Math.atan2(wf.inY, wf.inX),
+      facingAngle: Math.atan2(wf.wcy - wy, wf.wcx - wx),
       attackAnim: 0,
     });
   }
@@ -2315,33 +2359,21 @@ export class GameEngine {
           const ty = wf.wcy + wf.outY * standOutDist + wf.latY * slotOffset;
           const dx = tx - z.x;
           const dy = ty - z.y;
-          const distToSlot = Math.hypot(dx, dy);
 
           if (outDist > standOutDist + 6 || Math.abs(latOff) > clearHalfSpan + 20) {
-            const d = distToSlot || 1;
-            z.vx = (dx / d) * spd * approachMult;
-            z.vy = (dy / d) * spd * approachMult;
-
-            // 户外冲锋尸群轻柔分散，避免多只僵尸完全重叠成一点
-            for (let j = 0; j < s.zombies.length; j++) {
-              const oz = s.zombies[j];
-              if (!oz || oz.id === z.id || oz.insideBuilding) continue;
-              const minD = (z.radius + oz.radius) * 0.85;
-              const sx = z.x - oz.x;
-              if (Math.abs(sx) >= minD) continue;
-              const sy = z.y - oz.y;
-              if (Math.abs(sy) >= minD) continue;
-              const sd = Math.hypot(sx, sy);
-              if (sd > 0 && sd < minD) {
-                z.vx += (sx / sd) * 58;
-                z.vy += (sy / sd) * 58;
-              }
-            }
-
-            z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 10));
-            z.x += z.vx * dt;
-            z.y += z.vy * dt;
-            this.resolveOutdoorZombieObstacles(z, win, false);
+            this.steerOutdoorZombieSwarm(
+              z,
+              win,
+              wf,
+              tx,
+              ty,
+              outDist,
+              latOff,
+              standOutDist,
+              spd * approachMult,
+              dt,
+              false
+            );
           } else {
             // 紧贴外窗台外侧挥爪拆木板（绝不把半截身体穿模戳进完好木板内！）
             z.x += dx * Math.min(1, dt * 8);
@@ -2407,20 +2439,24 @@ export class GameEngine {
         } else {
           // 木板已破：杜绝旧版瞬间瞬移 80px 的穿窗闪烁 Bug，改为平滑对齐窗心、真实翻越窗框进入室内！
           const entryCompleteDist = -(14 + z.radius + 4);
-          if (outDist > standOutDist + 8) {
-            // 仍在窗外远处：先跑向窗台外口净空区
+          if (outDist > standOutDist + 8 || Math.abs(latOff) > clearHalfSpan + 14) {
+            // 仍在窗外或侧翼斜向包抄中：沿弧形轨迹聚拢至窗台外口净空区
             const alignLat = slotOffset * 0.55;
-            const tx = wf.wcx + wf.outX * (14 + z.radius * 0.45) + wf.latX * alignLat;
-            const ty = wf.wcy + wf.outY * (14 + z.radius * 0.45) + wf.latY * alignLat;
-            const dx = tx - z.x;
-            const dy = ty - z.y;
-            const d = Math.hypot(dx, dy) || 1;
-            z.vx = (dx / d) * spd * approachMult;
-            z.vy = (dy / d) * spd * approachMult;
-            z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 10));
-            z.x += z.vx * dt;
-            z.y += z.vy * dt;
-            this.resolveOutdoorZombieObstacles(z, win, true);
+            const tx = wf.wcx + wf.outX * (14 + z.radius * 0.55) + wf.latX * alignLat;
+            const ty = wf.wcy + wf.outY * (14 + z.radius * 0.55) + wf.latY * alignLat;
+            this.steerOutdoorZombieSwarm(
+              z,
+              win,
+              wf,
+              tx,
+              ty,
+              outDist,
+              latOff,
+              standOutDist,
+              spd * approachMult,
+              dt,
+              true
+            );
           } else {
             // 正在跨越窗台：横向丝滑收束在窗框净空内（绝不刮蹭左右墙垛），纵向平滑爬入室内！
             const clampedLat = Math.max(
@@ -2867,6 +2903,108 @@ export class GameEngine {
     const latY = outX !== 0 ? 1 : 0;
     const winSpan = win.orientation === 'horizontal' ? win.w : win.h;
     return { wcx, wcy, outX, outY, inX, inY, latX, latY, winSpan };
+  }
+
+  private isPointInsideAnyRoom(x: number, y: number, pad = 28): boolean {
+    for (const rm of this.state!.rooms) {
+      for (const r of rm.rects) {
+        if (x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private isOutdoorSegmentClear(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    radius: number
+  ): boolean {
+    const samples = 6;
+    for (let i = 1; i <= samples; i++) {
+      const t = i / (samples + 1);
+      const mx = x1 + (x2 - x1) * t;
+      const my = y1 + (y2 - y1) * t;
+      if (this.findBlockingWallOrLockedDoor(mx, my, radius * 0.72)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private steerOutdoorZombieSwarm(
+    z: ZombieEntity,
+    win: RunSnapshot['windows'][number],
+    wf: ReturnType<GameEngine['getWindowFrame']>,
+    goalX: number,
+    goalY: number,
+    _outDist: number,
+    latOff: number,
+    standOutDist: number,
+    moveSpeed: number,
+    dt: number,
+    allowOpenWindowPass: boolean
+  ): void {
+    const s = this.state!;
+    const bb = s.stage.buildingBounds;
+    const distToGoal = Math.hypot(goalX - z.x, goalY - z.y);
+
+    // 侧翼大角度包抄时先汇聚到窗外弧形漏斗锚点，避免紧贴外墙横向摩擦
+    const throatOut = Math.max(standOutDist + 16, Math.min(108, 22 + Math.abs(latOff) * 0.48));
+    const throatX = wf.wcx + wf.outX * throatOut;
+    const throatY = wf.wcy + wf.outY * throatOut;
+
+    let aimX = distToGoal > 105 && Math.abs(latOff) > 42 ? throatX : goalX;
+    let aimY = distToGoal > 105 && Math.abs(latOff) > 42 ? throatY : goalY;
+
+    // 若侧翼与窗户之间隔着凸出的建筑翼楼，先自动绕向外围空旷拐角再包抄破窗
+    if (!this.isOutdoorSegmentClear(z.x, z.y, throatX, throatY, z.radius)) {
+      aimX = wf.outX !== 0 ? (wf.outX < 0 ? bb.x - 105 : bb.x + bb.w + 105) : wf.wcx;
+      aimY = wf.outY !== 0 ? (wf.outY < 0 ? bb.y - 105 : bb.y + bb.h + 105) : wf.wcy;
+    }
+
+    const baseAng = Math.atan2(aimY - z.y, aimX - z.x);
+    // 远距离赋予每只僵尸独立的弧形包抄曲率 + 蹒跚摇摆偏移，呈现四面八方散点涌入感
+    const curveWeight = Math.min(1, Math.max(0, (distToGoal - 68) / 240));
+    const flankBias = (((z.id * 53) % 15) / 7 - 1) * 0.44 * curveWeight;
+    const shamblingSway = Math.sin(z.wobblePhase * 0.38 + z.id * 1.9) * 0.24 * curveWeight;
+
+    let steerAng = baseAng + flankBias + shamblingSway;
+    const probeX = z.x + Math.cos(steerAng) * 26;
+    const probeY = z.y + Math.sin(steerAng) * 26;
+    if (this.findBlockingWallOrLockedDoor(probeX, probeY, z.radius * 0.85)) {
+      steerAng = baseAng;
+    }
+
+    z.vx = Math.cos(steerAng) * moveSpeed;
+    z.vy = Math.sin(steerAng) * moveSpeed;
+
+    // 户外尸潮拉开宽松散兵间距，拒绝排成一条单列直线
+    const sepScale = distToGoal > 76 ? 1.42 : 0.88;
+    const sepForce = distToGoal > 76 ? 86 : 56;
+    for (let j = 0; j < s.zombies.length; j++) {
+      const oz = s.zombies[j];
+      if (!oz || oz.id === z.id || oz.insideBuilding) continue;
+      const minD = (z.radius + oz.radius) * sepScale;
+      const sx = z.x - oz.x;
+      if (Math.abs(sx) >= minD) continue;
+      const sy = z.y - oz.y;
+      if (Math.abs(sy) >= minD) continue;
+      const sd = Math.hypot(sx, sy);
+      if (sd > 0 && sd < minD) {
+        z.vx += (sx / sd) * sepForce;
+        z.vy += (sy / sd) * sepForce;
+      }
+    }
+
+    const moveAng = Math.atan2(z.vy, z.vx);
+    z.facingAngle = this.lerpAngle(z.facingAngle, moveAng, Math.min(1, dt * 9.5));
+    z.x += z.vx * dt;
+    z.y += z.vy * dt;
+    this.resolveOutdoorZombieObstacles(z, win, allowOpenWindowPass);
   }
 
   private hasZombieVaultingWindow(win: RunSnapshot['windows'][number]): boolean {

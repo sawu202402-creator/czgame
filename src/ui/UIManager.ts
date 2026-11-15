@@ -90,6 +90,22 @@ export class UIManager {
     };
   }
 
+  private bindModalTap(btn: HTMLButtonElement, action: () => void): void {
+    let lastTouchFire = 0;
+    btn.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') {
+        e.preventDefault();
+        e.stopPropagation();
+        lastTouchFire = performance.now();
+        if (!btn.disabled) action();
+      }
+    });
+    btn.onclick = () => {
+      if (performance.now() - lastTouchFire < 420) return;
+      if (!btn.disabled) action();
+    };
+  }
+
   public showHomeHub(): void {
     cancelAnimationFrame(this.needleAnimId);
     this.armoryOpen = false;
@@ -145,7 +161,7 @@ export class UIManager {
         </main>
 
         <footer class="hub-footer-tip">
-          📱 触屏：左半屏摇杆移动 · 右半屏滑动瞄准（默认自动索敌开火） ｜ 💻 键鼠：WASD 移动 · 鼠标射击 · B 军火库 · G 手雷
+          📱 触屏：左手摇杆移动 · 右手滑动瞄准 + 右侧快捷切枪/手雷/商店 ｜ 💻 键鼠：WASD 移动 · 鼠标射击 · B 军火库 · G 手雷
         </footer>
       </div>
     `;
@@ -471,25 +487,27 @@ export class UIManager {
 
       <div class="hud-banner" id="hud-banner"></div>
 
-      <div class="hud-bottom">
+      <div class="hud-bottom hud-right-cluster">
         <button class="hud-dock-btn hud-shop-btn" id="btn-open-armory">🛒 商店</button>
-        <div class="weapon-slots" id="hud-weapons"></div>
-        <button class="hud-dock-btn hud-gren-btn" id="btn-grenade">
-          <img class="hud-gren-icon" src="./assets/prop_grenade.png" alt="" />
-          <span id="hud-gren-count">2</span>
-        </button>
+        <div class="hud-combat-row">
+          <div class="weapon-slots" id="hud-weapons"></div>
+          <button class="hud-gren-fab" id="btn-grenade" title="投掷手雷 (G / 右键)">
+            <img class="hud-gren-icon" src="./assets/prop_grenade.png" alt="" />
+            <span class="hud-gren-badge" id="hud-gren-count">2</span>
+          </button>
+        </div>
       </div>
     `;
     this.uiLayer.appendChild(hud);
     this.hudRoot = hud;
 
-    (hud.querySelector('#btn-pause') as HTMLButtonElement).onclick = () => {
+    this.bindModalTap(hud.querySelector('#btn-pause') as HTMLButtonElement, () => {
       this.togglePauseMenu();
-    };
+    });
 
-    (hud.querySelector('#btn-open-armory') as HTMLButtonElement).onclick = () => {
+    this.bindModalTap(hud.querySelector('#btn-open-armory') as HTMLButtonElement, () => {
       this.toggleArmoryShop();
-    };
+    });
 
     this.bindCombatTap(hud.querySelector('#btn-grenade') as HTMLButtonElement, () => {
       this.engine.throwGrenade();

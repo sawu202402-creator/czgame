@@ -35,7 +35,7 @@ const PROP_SPRITE_MAP: Record<PropKind, SpriteKey> = {
   arcade: 'prop_arcade',
 };
 
-const MAP_PAD = 560;
+const MAP_PAD = 640;
 
 function hash2D(x: number, y: number, seed = 1337): number {
   let h = (Math.imul(Math.floor(x), 374761393) + Math.imul(Math.floor(y), 668265263) + seed) | 0;
@@ -524,44 +524,46 @@ export class CartoonRenderer {
     }
     mctx.restore();
 
-    // 1. 每扇破窗外侧：丧尸冲锋泥泞血痕路径、散落碎玻璃与两侧战术沙袋堆
+    // 1. 每扇破窗外侧：扇形散乱踩踏泥印、反光碎玻璃碴与两侧战术沙袋残骸（去除生硬直线土路，呈现四面八方围攻感！）
     for (const win of state.windows) {
       const wcx = win.x + win.w / 2;
       const wcy = win.y + win.h / 2;
-      const ox = wcx + win.spawnOutsideOffset.dx;
-      const oy = wcy + win.spawnOutsideOffset.dy;
-
-      // 从地图外围边缘一路延伸至破窗的泥泞尸潮踩踏土路（直观提示户外来袭方向！）
-      const mudGrad = mctx.createLinearGradient(ox, oy, wcx, wcy);
-      mudGrad.addColorStop(0, 'rgba(15, 12, 10, 0.05)');
-      mudGrad.addColorStop(0.25, 'rgba(24, 18, 14, 0.3)');
-      mudGrad.addColorStop(0.75, 'rgba(28, 18, 14, 0.42)');
-      mudGrad.addColorStop(1, 'rgba(38, 16, 16, 0.52)');
-      mctx.strokeStyle = mudGrad;
-      mctx.lineWidth = 64;
-      mctx.lineCap = 'round';
-      mctx.beginPath();
-      mctx.moveTo(ox, oy);
-      mctx.lineTo(wcx, wcy);
-      mctx.stroke();
-
-      // 土路两侧车辙/踩踏暗痕
-      const rutPerpX = win.spawnOutsideOffset.dy !== 0 ? 1 : 0;
-      const rutPerpY = win.spawnOutsideOffset.dx !== 0 ? 1 : 0;
-      mctx.strokeStyle = 'rgba(12, 10, 8, 0.24)';
-      mctx.lineWidth = 6;
-      mctx.setLineDash([18, 14]);
-      for (const rSide of [-18, 18]) {
-        mctx.beginPath();
-        mctx.moveTo(ox + rutPerpX * rSide, oy + rutPerpY * rSide);
-        mctx.lineTo(wcx + rutPerpX * rSide, wcy + rutPerpY * rSide);
-        mctx.stroke();
-      }
-      mctx.setLineDash([]);
-
-      // 窗台内外散落的反光碎玻璃碴
       const nx = Math.sign(win.spawnOutsideOffset.dx);
       const ny = Math.sign(win.spawnOutsideOffset.dy);
+      const baseOutAng = Math.atan2(ny, nx);
+
+      // 窗外扇形不规则泥泞踩踏斑块（无固定直线路径）
+      const fanCenterDist = 38;
+      const fcx = wcx + nx * fanCenterDist;
+      const fcy = wcy + ny * fanCenterDist;
+      const breachGrad = mctx.createRadialGradient(fcx, fcy, 8, fcx, fcy, 96);
+      breachGrad.addColorStop(0, 'rgba(32, 18, 16, 0.42)');
+      breachGrad.addColorStop(0.55, 'rgba(22, 18, 14, 0.22)');
+      breachGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      mctx.fillStyle = breachGrad;
+      mctx.beginPath();
+      mctx.arc(fcx, fcy, 96, 0, Math.PI * 2);
+      mctx.fill();
+
+      for (let k = 0; k < 7; k++) {
+        const h1 = hash2D(wcx + k * 29, wcy, stageSeed + 41);
+        const h2 = hash2D(wcy + k * 37, wcx, stageSeed + 59);
+        const patchAng = baseOutAng + (h1 - 0.5) * 2.1;
+        const patchDist = 36 + h2 * 105;
+        const px = wcx + Math.cos(patchAng) * patchDist;
+        const py = wcy + Math.sin(patchAng) * patchDist;
+        if (pointInAnyRect(px, py, allRoomRects, 8)) continue;
+        const pr = 14 + h1 * 18;
+        const pg = mctx.createRadialGradient(px, py, 2, px, py, pr);
+        pg.addColorStop(0, 'rgba(24, 16, 12, 0.28)');
+        pg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        mctx.fillStyle = pg;
+        mctx.beginPath();
+        mctx.arc(px, py, pr, 0, Math.PI * 2);
+        mctx.fill();
+      }
+
+      // 窗台内外散落的反光碎玻璃碴
       for (let i = 0; i < 9; i++) {
         const s1 = hash2D(wcx + i * 13, wcy, stageSeed);
         const s2 = hash2D(wcy + i * 17, wcx, stageSeed + 5);
@@ -3831,9 +3833,10 @@ export class CartoonRenderer {
       !input.aimStick.active
     ) {
       const pulse = 0.28 + Math.sin(performance.now() * 0.005) * 0.08;
-      const guideY = Math.min(viewH - 112, Math.max(viewH * 0.68, 220));
-      const leftX = Math.min(96, viewW * 0.23);
-      const rightX = Math.max(viewW - 96, viewW * 0.77);
+      const leftY = Math.min(viewH - 86, Math.max(viewH * 0.66, 190));
+      const rightY = Math.min(viewH - 135, Math.max(viewH * 0.48, 150));
+      const leftX = Math.min(110, viewW * 0.2);
+      const rightX = Math.min(viewW - 150, viewW * 0.7);
 
       ctx.save();
       ctx.globalAlpha = pulse;
@@ -3842,18 +3845,18 @@ export class CartoonRenderer {
 
       ctx.strokeStyle = '#38bdf8';
       ctx.beginPath();
-      ctx.arc(leftX, guideY, 38, 0, Math.PI * 2);
+      ctx.arc(leftX, leftY, 38, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.strokeStyle = '#fbbf24';
       ctx.beginPath();
-      ctx.arc(rightX, guideY, 38, 0, Math.PI * 2);
+      ctx.arc(rightX, rightY, 38, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
 
       ctx.globalAlpha = Math.min(0.75, pulse * 2.1);
-      this.drawCachedLabel(ctx, '左屏移动', leftX, guideY, '#bae6fd', 11);
-      this.drawCachedLabel(ctx, '右屏瞄准', rightX, guideY, '#fde68a', 11);
+      this.drawCachedLabel(ctx, '左手移动', leftX, leftY, '#bae6fd', 11);
+      this.drawCachedLabel(ctx, '右手瞄准', rightX, rightY, '#fde68a', 11);
       ctx.restore();
     }
 
