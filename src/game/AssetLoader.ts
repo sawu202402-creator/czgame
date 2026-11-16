@@ -1,3 +1,6 @@
+declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'web';
+const ASSET_VER_SUFFIX = __BUILD_PLATFORM__ === 'web' ? '?v=bright2' : '';
+
 export type SpriteKey =
   | 'player_hero'
   | 'player_torso'
@@ -259,7 +262,7 @@ class GameAssetManager {
       const img = new Image();
       img.onload = () => resolve(img);
       img.onerror = () => resolve(null);
-      img.src = src;
+      img.src = `${src}${ASSET_VER_SUFFIX}`;
     });
   }
 
