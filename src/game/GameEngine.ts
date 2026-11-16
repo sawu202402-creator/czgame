@@ -53,7 +53,7 @@ export class GameEngine {
     private callbacks: EngineCallbacks
   ) {
     this.input.bindActions(
-      () => this.switchWeapon(),
+      (slot?: number) => this.switchWeapon(slot),
       () => this.startReload(),
       () => {
         if (this.state && this.state.waveState !== 'ended') {
@@ -416,12 +416,11 @@ export class GameEngine {
     return Math.max(0, this.state.rooms.filter((r) => r.unlocked).length - 1);
   }
 
-  public buyOrRefillWeaponFromShop(weaponId: string): { ok: boolean; msg: string } {
+  public buyOrRefillWeaponFromShop(weaponId: string, forceRefill = false): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
     const def = WEAPONS[weaponId];
     const unlockedRooms = this.getUnlockedExtraRoomsCount();
-    // 严格按照 SAS2 规则：必须真实花钱开门拓展新防区，才能授权解锁对应高阶重火器！
     if (unlockedRooms < def.unlockRoomsRequired) {
       return { ok: false, msg: `🔒 需先在地图中开门解锁 ${def.unlockRoomsRequired} 个新区域！` };
     }
@@ -429,11 +428,34 @@ export class GameEngine {
     const ownedIdx = s.player.weapons.findIndex((w) => w.defId === weaponId);
     if (ownedIdx >= 0) {
       const w = s.player.weapons[ownedIdx];
+      // 若曾是空投临时试用枪，点击购买永久版直接转为永久持有！
+      if (w.tempWavesLeft !== undefined && !forceRefill) {
+        if (s.cash < def.shopCost) return { ok: false, msg: `钞票不足 ($${def.shopCost})！` };
+        s.cash -= def.shopCost;
+        delete w.tempWavesLeft;
+        w.mag = this.getMaxMag(weaponId, w.evolved);
+        if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+        s.player.activeSlot = ownedIdx;
+        s.player.reloadTimer = 0;
+        s.player.weaponSwapTimer = 0.32;
+        SoundFX.fanfare();
+        return { ok: true, msg: `已永久买断并装备【${def.name}】！` };
+      }
+
+      // 已拥有的武器：未装备时点击直接免费切换上阵，绝不强制扣弹药费！
+      if (!forceRefill && s.player.activeSlot !== ownedIdx) {
+        s.player.activeSlot = ownedIdx;
+        s.player.reloadTimer = 0;
+        s.player.weaponSwapTimer = 0.32;
+        SoundFX.reloadDone();
+        return { ok: true, msg: `已切换装备【${w.evolved ? def.superName : def.name}】！` };
+      }
+
       if (def.maxReserve < 0) {
         s.player.activeSlot = ownedIdx;
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
-        return { ok: true, msg: '已切换至该武器！' };
+        return { ok: true, msg: '该武器无限备弹，已装备上阵！' };
       }
       const maxRes = def.maxReserve * (w.evolved ? 2 : 1);
       if (w.reserve >= maxRes && w.mag >= this.getMaxMag(weaponId, w.evolved)) {
@@ -450,14 +472,14 @@ export class GameEngine {
       s.player.reloadTimer = 0;
       s.player.weaponSwapTimer = 0.32;
       SoundFX.reloadDone();
-      return { ok: true, msg: `已补满【${def.name}】弹药！` };
+      return { ok: true, msg: `已补满【${w.evolved ? def.superName : def.name}】弹药！` };
     }
 
     if (s.cash < def.shopCost) return { ok: false, msg: `钞票不足 ($${def.shopCost})！迎战尸潮攒军费` };
     s.cash -= def.shopCost;
     this.giveOrRefillWeapon(weaponId, false);
     SoundFX.fanfare();
-    return { ok: true, msg: `成功购入并装备【${def.name}】！` };
+    return { ok: true, msg: `成功购入【${def.name}】（原有武器已保留，可随时按 Q 或轮盘切换）！` };
   }
 
   public evolveActiveWeaponInShop(cost = 1850): { ok: boolean; msg: string } {
@@ -1108,6 +1130,11 @@ export class GameEngine {
       wobblePhase: Math.random() * Math.PI * 2,
       facingAngle: Math.atan2(wf.wcy - wy, wf.wcx - wx),
       attackAnim: 0,
+      attackState: 'none',
+      attackStateTimer: 0,
+      slashAngle: Math.atan2(wf.wcy - wy, wf.wcx - wx),
+      recoilVx: 0,
+      recoilVy: 0,
     });
   }
 
@@ -1714,6 +1741,7 @@ export class GameEngine {
     if (existingIdx >= 0) {
       const w = p.weapons[existingIdx];
       if (evolved) w.evolved = true;
+      if (tempWaves === undefined) delete w.tempWavesLeft;
       w.mag = this.getMaxMag(weaponId, w.evolved);
       if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
       p.activeSlot = existingIdx;
@@ -1725,20 +1753,16 @@ export class GameEngine {
         reserve: def.maxReserve > 0 ? def.maxReserve * (evolved ? 2 : 1) : -1,
         tempWavesLeft: tempWaves,
       };
-      if (p.weapons.length < 2) {
-        p.weapons.push(inst);
-        p.activeSlot = p.weapons.length - 1;
-      } else {
-        p.weapons[1] = inst;
-        p.activeSlot = 1;
-      }
+      // 新购入武器全部永久追加进背包武器栏，绝不顶掉或销毁任何已购旧武器！
+      p.weapons.push(inst);
+      p.activeSlot = p.weapons.length - 1;
     }
     p.reloadTimer = 0;
     p.weaponSwapTimer = 0.32;
     this.spawnFloatingText(
       p.x,
       p.y - 36,
-      `🔫 装备：${evolved ? def.superName : def.name}`,
+      `装备：${evolved ? def.superName : def.name}`,
       evolved ? def.superColor : def.color,
       1.2
     );
@@ -2429,6 +2453,7 @@ export class GameEngine {
                     : Math.max(0.44, 0.94 - s.wave * 0.04);
               z.attackCd = baseTearCd;
               z.attackAnim = 1.0;
+              z.slashAngle = Math.atan2(wf.inY, wf.inX);
 
               const prevPlanks = win.planks;
               win.planks = Math.max(0, win.planks - (z.kind === 'boss' ? 2 : 1));
@@ -2524,13 +2549,18 @@ export class GameEngine {
             z.x = wf.wcx + wf.outX * newOutDist + wf.latX * newLat;
             z.y = wf.wcy + wf.outY * newOutDist + wf.latY * newLat;
 
-            // 若玩家贴脸堵在破开的空窗台前，翻窗中的僵尸同样可挥爪攻击
+            // 若玩家贴脸堵在破开的空窗台前，翻窗中的僵尸触发挥爪击退并保持不穿模身位
             if (z.damage > 0) {
               const pDist = Math.hypot(p.x - z.x, p.y - z.y);
-              if (pDist <= p.radius + z.radius + 6 && z.attackCd <= 0) {
-                z.attackCd = bossEnraged ? 0.65 : 0.82;
+              if (pDist <= p.radius + z.radius + 14 && z.attackCd <= 0) {
+                z.attackCd = bossEnraged ? 0.72 : 0.92;
                 z.attackAnim = 1.0;
+                z.slashAngle = Math.atan2(p.y - z.y, p.x - z.x);
                 this.damagePlayer(z.damage);
+                const pushA = z.slashAngle;
+                p.x += Math.cos(pushA) * 20;
+                p.y += Math.sin(pushA) * 20;
+                this.resolveEntityInsideWalls(p);
               }
             }
 
@@ -2605,13 +2635,121 @@ export class GameEngine {
           }
         }
 
+        const toPlayerX = p.x - z.x;
+        const toPlayerY = p.y - z.y;
+        const pDist = Math.hypot(toPlayerX, toPlayerY) || 1;
+
+        // ===== 三段式真实僵尸近战（蓄力后仰 -> 扑击挥爪 -> 攻击后主动弹退拉开身位，绝不死贴玩家！） =====
+        if (z.damage > 0 && z.attackState !== 'none') {
+          z.attackStateTimer -= dt;
+          if (z.attackState === 'windup') {
+            // 1. 起手蓄力：顿步后撤蓄势，锁定挥爪方向（给玩家留出走位闪避窗口！）
+            z.facingAngle = this.lerpAngle(z.facingAngle, z.slashAngle, Math.min(1, dt * 14));
+            z.vx = -Math.cos(z.slashAngle) * 44;
+            z.vy = -Math.sin(z.slashAngle) * 44;
+            z.x += z.vx * dt;
+            z.y += z.vy * dt;
+            this.resolveEntityInsideWalls(z);
+
+            if (z.attackStateTimer <= 0) {
+              z.attackState = 'slash';
+              z.attackStateTimer = 0.16;
+              z.attackAnim = 1.0;
+              const strikeDist = Math.hypot(p.x - z.x, p.y - z.y);
+              const strikeReach = p.radius + z.radius + 34;
+              if (strikeDist <= strikeReach) {
+                const hitAng = Math.atan2(p.y - z.y, p.x - z.x);
+                let angDiff = hitAng - z.slashAngle;
+                while (angDiff > Math.PI) angDiff -= Math.PI * 2;
+                while (angDiff < -Math.PI) angDiff += Math.PI * 2;
+                if (Math.abs(angDiff) <= 1.25 || strikeDist <= p.radius + z.radius + 14) {
+                  this.damagePlayer(z.damage);
+                  this.spawnHitSparks(
+                    p.x - Math.cos(hitAng) * p.radius * 0.5,
+                    p.y - Math.sin(hitAng) * p.radius * 0.5,
+                    '#ef4444',
+                    6
+                  );
+                  // 命中瞬间将玩家微推开，增强打击受击反馈
+                  p.x += Math.cos(hitAng) * 18;
+                  p.y += Math.sin(hitAng) * 18;
+                  this.resolveEntityInsideWalls(p);
+                }
+              }
+            }
+          } else if (z.attackState === 'slash') {
+            // 2. 挥爪突刺瞬间：向前短促扑抓，但严格止步于安全身位外，绝不穿进玩家身体
+            z.vx = Math.cos(z.slashAngle) * 145;
+            z.vy = Math.sin(z.slashAngle) * 145;
+            z.x += z.vx * dt;
+            z.y += z.vy * dt;
+            this.maintainZombiePlayerSeparation(z, p, p.radius + z.radius + 10);
+            this.resolveEntityInsideWalls(z);
+
+            if (z.attackStateTimer <= 0) {
+              // 3. 挥爪结束立刻进入后撤收招硬直：僵尸主动向后弹退拉开 ~48px 距离，绝不贴脸粘人！
+              z.attackState = 'recover';
+              z.attackStateTimer = bossEnraged ? 0.44 : z.kind === 'runner' ? 0.48 : 0.58;
+              z.attackCd = bossEnraged ? 0.52 : z.kind === 'runner' ? 0.62 : 0.78;
+              const awayAng = Math.atan2(z.y - p.y, z.x - p.x);
+              const backSpd = z.kind === 'boss' ? 155 : z.kind === 'miniboss' ? 175 : 225;
+              z.recoilVx = Math.cos(awayAng) * backSpd;
+              z.recoilVy = Math.sin(awayAng) * backSpd;
+            }
+          } else if (z.attackState === 'recover') {
+            // 收招喘息与后退拉开距离阶段：停止追击，平滑后撤并维持安全对峙身位
+            const damp = Math.pow(0.04, dt);
+            z.recoilVx *= damp;
+            z.recoilVy *= damp;
+            z.vx = z.recoilVx;
+            z.vy = z.recoilVy;
+            z.x += z.vx * dt;
+            z.y += z.vy * dt;
+            z.facingAngle = this.lerpAngle(
+              z.facingAngle,
+              Math.atan2(p.y - z.y, p.x - z.x),
+              Math.min(1, dt * 8)
+            );
+            this.maintainZombiePlayerSeparation(z, p, p.radius + z.radius + 26);
+            this.resolveEntityInsideWalls(z);
+
+            if (z.attackStateTimer <= 0) {
+              z.attackState = 'none';
+            }
+          }
+          continue;
+        }
+
+        // 冷却未好但已靠近玩家近身圈时：环绕对峙保持距离，绝不无脑硬往玩家身上贴！
+        const standoffDist = p.radius + z.radius + 20;
+        if (z.damage > 0 && pDist <= p.radius + z.radius + 26 && z.attackCd <= 0) {
+          z.attackState = 'windup';
+          z.attackStateTimer =
+            z.kind === 'runner' ? 0.16 : z.kind === 'boss' || z.kind === 'miniboss' ? 0.23 : 0.2;
+          z.slashAngle = Math.atan2(toPlayerY, toPlayerX);
+          z.vx = 0;
+          z.vy = 0;
+          continue;
+        }
+
         const goal = this.getFlowVelocityTarget(z.x, z.y);
         const dx = goal.x - z.x;
         const dy = goal.y - z.y;
         const dist = Math.hypot(dx, dy) || 1;
-        z.vx = (dx / dist) * spd;
-        z.vy = (dy / dist) * spd;
-        z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 9));
+
+        if (pDist < standoffDist && z.attackCd > 0) {
+          // 攻击冷却期间在近身外圈轻微横向游走对峙，不往玩家怀里挤
+          const awayAng = Math.atan2(z.y - p.y, z.x - p.x);
+          const strafeSign = z.id % 2 === 0 ? 1 : -1;
+          const orbitAng = awayAng + strafeSign * 1.15;
+          z.vx = Math.cos(orbitAng) * spd * 0.45 + Math.cos(awayAng) * 48;
+          z.vy = Math.sin(orbitAng) * spd * 0.45 + Math.sin(awayAng) * 48;
+          z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(toPlayerY, toPlayerX), Math.min(1, dt * 10));
+        } else {
+          z.vx = (dx / dist) * spd;
+          z.vy = (dy / dist) * spd;
+          z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(dy, dx), Math.min(1, dt * 9));
+        }
 
         for (let j = 0; j < s.zombies.length; j++) {
           const oz = s.zombies[j];
@@ -2630,14 +2768,16 @@ export class GameEngine {
 
         z.x += z.vx * dt;
         z.y += z.vy * dt;
+        this.maintainZombiePlayerSeparation(z, p, p.radius + z.radius + 9);
         this.resolveEntityInsideWalls(z);
 
         if (z.kind === 'spitter') {
           z.rangedCd -= dt;
-          const pDist = Math.hypot(p.x - z.x, p.y - z.y);
           if (z.rangedCd <= 0 && pDist < 420 && this.hasBulletLineOfSight(z.x, z.y, p.x, p.y)) {
             z.rangedCd = Math.max(1.85, 2.65 - s.wave * 0.05);
             const ang = Math.atan2(p.y - z.y, p.x - z.x);
+            z.attackAnim = 0.85;
+            z.slashAngle = ang;
             s.spits.push({
               x: z.x,
               y: z.y,
@@ -2649,14 +2789,23 @@ export class GameEngine {
             });
           }
         }
-
-        const pDist = Math.hypot(p.x - z.x, p.y - z.y);
-        if (pDist <= p.radius + z.radius + 4 && z.attackCd <= 0) {
-          z.attackCd = bossEnraged ? 0.65 : 0.82;
-          z.attackAnim = 1.0;
-          this.damagePlayer(z.damage);
-        }
       }
+    }
+  }
+
+  private maintainZombiePlayerSeparation(
+    z: ZombieEntity,
+    p: RunSnapshot['player'],
+    minSep: number
+  ): void {
+    const dx = z.x - p.x;
+    const dy = z.y - p.y;
+    const d = Math.hypot(dx, dy);
+    if (d < minSep) {
+      const nx = d > 0.001 ? dx / d : Math.cos(z.facingAngle + Math.PI);
+      const ny = d > 0.001 ? dy / d : Math.sin(z.facingAngle + Math.PI);
+      z.x = p.x + nx * minSep;
+      z.y = p.y + ny * minSep;
     }
   }
 

@@ -955,15 +955,15 @@ export class CartoonRenderer {
     r: Rect,
     seed: number
   ): void {
-    // 1. 建筑板块接缝网格线（消除大面积地面空旷单调感，赋予真实石材/钢板/无菌舱拼接尺度！）
-    const step = theme === 'asphalt' ? 168 : theme === 'lobby' || theme === 'mall' ? 112 : 84;
+    // 1. 建筑板块微弱接缝网格线（低对比度柔和质感，避免视觉眩目）
+    const step = theme === 'asphalt' ? 168 : theme === 'lobby' || theme === 'mall' ? 112 : 96;
     mctx.strokeStyle =
       theme === 'lab'
-        ? 'rgba(56, 189, 248, 0.08)'
+        ? 'rgba(56, 189, 248, 0.045)'
         : theme === 'lobby' || theme === 'mall'
-          ? 'rgba(15, 23, 42, 0.13)'
-          : 'rgba(9, 14, 23, 0.22)';
-    mctx.lineWidth = 1.2;
+          ? 'rgba(15, 23, 42, 0.075)'
+          : 'rgba(9, 14, 23, 0.11)';
+    mctx.lineWidth = 1;
     mctx.beginPath();
     for (let gx = Math.ceil(r.x / step) * step; gx < r.x + r.w; gx += step) {
       mctx.moveTo(gx, r.y);
@@ -976,46 +976,46 @@ export class CartoonRenderer {
     mctx.stroke();
 
     // 2. 室内外周内嵌暗色金属收边条
-    mctx.strokeStyle = 'rgba(15, 23, 42, 0.34)';
-    mctx.lineWidth = 2;
+    mctx.strokeStyle = 'rgba(15, 23, 42, 0.22)';
+    mctx.lineWidth = 1.8;
     mctx.strokeRect(r.x + 18, r.y + 18, Math.max(0, r.w - 36), Math.max(0, r.h - 36));
 
     if (theme === 'lobby' && r.w >= 300 && r.h >= 240) {
-      // 接待大厅中央深蓝战术防尘地毯 + 金色双线徽章圆环
+      // 接待大厅中央深蓝战术防尘地毯 + 暗金徽章内环
       const rw = Math.min(280, r.w * 0.44);
       const rh = Math.min(170, r.h * 0.38);
       const rx = r.x + (r.w - rw) / 2;
       const ry = r.y + (r.h - rh) / 2;
-      mctx.fillStyle = 'rgba(15, 28, 52, 0.38)';
+      mctx.fillStyle = 'rgba(15, 25, 44, 0.28)';
       mctx.beginPath();
       mctx.roundRect(rx, ry, rw, rh, 6);
       mctx.fill();
-      mctx.strokeStyle = 'rgba(234, 179, 8, 0.42)';
-      mctx.lineWidth = 2;
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.22)';
+      mctx.lineWidth = 1.6;
       mctx.strokeRect(rx + 6, ry + 6, rw - 12, rh - 12);
       mctx.beginPath();
       mctx.arc(rx + rw / 2, ry + rh / 2, Math.min(rw, rh) * 0.28, 0, Math.PI * 2);
       mctx.stroke();
     } else if (theme === 'mall' && r.w >= 320 && r.h >= 260) {
-      // 商场中庭星芒八角拼花水磨石纹饰
+      // 商场中庭柔和同心暗纹（低饱和不抢眼）
       const cx = r.x + r.w / 2;
       const cy = r.y + r.h / 2;
       const rad = Math.min(r.w, r.h) * 0.26;
-      mctx.strokeStyle = 'rgba(244, 114, 182, 0.22)';
-      mctx.lineWidth = 2.5;
+      mctx.strokeStyle = 'rgba(148, 163, 184, 0.11)';
+      mctx.lineWidth = 2;
       mctx.beginPath();
       mctx.arc(cx, cy, rad, 0, Math.PI * 2);
       mctx.stroke();
-      mctx.strokeStyle = 'rgba(56, 189, 248, 0.2)';
+      mctx.strokeStyle = 'rgba(56, 189, 248, 0.09)';
       mctx.beginPath();
       mctx.arc(cx, cy, rad * 0.72, 0, Math.PI * 2);
       mctx.stroke();
     } else if (theme === 'armory' || theme === 'asphalt') {
-      // 工业区与停机坪黄黑安全警戒虚线与双金属排水地漏
+      // 工业区与停机坪低对比安全收边线与排水地漏
       mctx.save();
-      mctx.strokeStyle = 'rgba(234, 179, 8, 0.25)';
-      mctx.lineWidth = 3;
-      mctx.setLineDash([16, 12]);
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.13)';
+      mctx.lineWidth = 2.2;
+      mctx.setLineDash([18, 14]);
       mctx.strokeRect(r.x + 28, r.y + 28, Math.max(0, r.w - 56), Math.max(0, r.h - 56));
       mctx.restore();
 
@@ -1026,9 +1026,9 @@ export class CartoonRenderer {
         }
       }
     } else if (theme === 'lab') {
-      // 实验室高能蓝光导流槽节点与检修舱盖
-      mctx.strokeStyle = 'rgba(56, 189, 248, 0.19)';
-      mctx.lineWidth = 2;
+      // 实验室导流槽暗线与检修舱盖
+      mctx.strokeStyle = 'rgba(56, 189, 248, 0.1)';
+      mctx.lineWidth = 1.6;
       mctx.strokeRect(r.x + 26, r.y + 26, Math.max(0, r.w - 52), Math.max(0, r.h - 52));
       if (r.w >= 260 && r.h >= 220) {
         this.bakeFloorGrate(mctx, r.x + 42, r.y + r.h - 60, 46, 16);
@@ -1082,38 +1082,35 @@ export class CartoonRenderer {
       }
     }
 
-    // 2. 各关卡专属房间叙事装饰层（纯视觉零阻挡，彻底告别“空房间”！）
+    // 2. 各关卡专属房间叙事暗纹层（克制低对比度，护眼且突出敌人与弹道）
     if (room.id === 'diner') {
-      // 快餐长廊：经典美式复古黑白棋盘格过道地砖 + 粉色霓虹灯带投影
-      const stripeX = r0.x + 34;
-      const tileSz = 24;
-      for (let y = r0.y + 36; y < r0.y + r0.h - 42; y += tileSz) {
-        for (let col = 0; col < 3; col++) {
-          const isWhite = ((Math.floor(y / tileSz) + col) & 1) === 0;
-          mctx.fillStyle = isWhite ? 'rgba(248, 250, 252, 0.22)' : 'rgba(15, 23, 42, 0.36)';
-          mctx.fillRect(stripeX + col * tileSz, y, tileSz, tileSz);
-        }
-      }
+      // 快餐长廊：沉稳深灰防滑走道地垫与柔粉暗边（告别刺眼黑白棋盘格）
+      const runnerX = r0.x + 34;
+      const runnerY = r0.y + 38;
+      const runnerH = Math.max(40, r0.h - 76);
+      mctx.fillStyle = 'rgba(15, 23, 42, 0.32)';
+      mctx.strokeStyle = 'rgba(244, 114, 182, 0.16)';
+      mctx.lineWidth = 1.6;
+      mctx.beginPath();
+      mctx.roundRect(runnerX, runnerY, 68, runnerH, 8);
+      mctx.fill();
+      mctx.stroke();
     } else if (room.id === 'arcade') {
-      // 星际电玩城：深紫赛博霓虹地毯跑道与像素星芒图案
+      // 星际电玩城：深紫暗绒地毯收边
       const pad = 42;
-      mctx.fillStyle = 'rgba(46, 16, 101, 0.34)';
-      mctx.strokeStyle = 'rgba(232, 121, 249, 0.32)';
-      mctx.lineWidth = 2.2;
+      mctx.fillStyle = 'rgba(30, 14, 68, 0.24)';
+      mctx.strokeStyle = 'rgba(192, 132, 252, 0.18)';
+      mctx.lineWidth = 1.8;
       mctx.beginPath();
       mctx.roundRect(r0.x + pad, r0.y + pad, Math.max(40, r0.w - pad * 2), Math.max(40, r0.h - pad * 2), 12);
       mctx.fill();
       mctx.stroke();
-      for (let px = r0.x + 95; px < r0.x + r0.w - 80; px += 120) {
-        mctx.strokeStyle = 'rgba(34, 211, 238, 0.25)';
-        mctx.strokeRect(px - 14, r0.y + r0.h * 0.52 - 14, 28, 28);
-      }
     } else if (room.id === 'cells') {
-      // 拘留羁押室：地面黄色警戒牢房隔间线与编号水印 (CELL-01 / CELL-02)
+      // 拘留羁押室：柔和暗金隔间线与编号水印 (CELL-01 / CELL-02)
       mctx.save();
-      mctx.strokeStyle = 'rgba(250, 204, 21, 0.28)';
-      mctx.lineWidth = 2.5;
-      mctx.setLineDash([10, 8]);
+      mctx.strokeStyle = 'rgba(250, 204, 21, 0.16)';
+      mctx.lineWidth = 2;
+      mctx.setLineDash([12, 10]);
       const cellY = r0.y + 150;
       mctx.beginPath();
       mctx.moveTo(r0.x + 30, cellY);
@@ -1123,75 +1120,74 @@ export class CartoonRenderer {
       mctx.stroke();
       mctx.setLineDash([]);
       mctx.font = '800 13px monospace';
-      mctx.fillStyle = 'rgba(250, 204, 21, 0.26)';
+      mctx.fillStyle = 'rgba(250, 204, 21, 0.16)';
       mctx.fillText('CELL-01', r0.x + r0.w * 0.25, r0.y + 62);
       mctx.fillText('CELL-02', r0.x + r0.w * 0.75, r0.y + 62);
       mctx.restore();
     } else if (room.id === 'corridor') {
-      // 审讯狭长走廊：中央红白紧急疏散导向带
-      mctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
-      mctx.fillRect(r0.x + 36, r0.y + r0.h / 2 - 5, Math.max(20, r0.w - 72), 10);
-      mctx.fillStyle = 'rgba(254, 240, 138, 0.26)';
-      for (let ax = r0.x + 65; ax < r0.x + r0.w - 65; ax += 95) {
+      // 审讯狭长走廊：中央低饱和暗红疏散导向带
+      mctx.fillStyle = 'rgba(185, 28, 28, 0.16)';
+      mctx.fillRect(r0.x + 36, r0.y + r0.h / 2 - 4, Math.max(20, r0.w - 72), 8);
+      mctx.fillStyle = 'rgba(254, 240, 138, 0.16)';
+      for (let ax = r0.x + 65; ax < r0.x + r0.w - 65; ax += 110) {
         mctx.beginPath();
-        mctx.moveTo(ax + 12, r0.y + r0.h / 2);
-        mctx.lineTo(ax - 4, r0.y + r0.h / 2 - 5);
-        mctx.lineTo(ax - 4, r0.y + r0.h / 2 + 5);
+        mctx.moveTo(ax + 11, r0.y + r0.h / 2);
+        mctx.lineTo(ax - 4, r0.y + r0.h / 2 - 4.5);
+        mctx.lineTo(ax - 4, r0.y + r0.h / 2 + 4.5);
         mctx.closePath();
         mctx.fill();
       }
     } else if (room.id === 'west_wing' || room.id === 'east_wing') {
-      // 73号研究所双翼：地面嵌入式液氮/高能冷却金属管道槽
-      mctx.strokeStyle = '#0f172a';
-      mctx.lineWidth = 10;
+      // 73号研究所双翼：地面嵌入式冷却金属管道槽
+      mctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+      mctx.lineWidth = 9;
       mctx.lineCap = 'round';
       mctx.beginPath();
       mctx.moveTo(r0.x + r0.w * 0.5, r0.y + 45);
       mctx.lineTo(r0.x + r0.w * 0.5, r0.y + r0.h - 45);
       mctx.stroke();
-      mctx.strokeStyle = room.id === 'west_wing' ? 'rgba(34, 211, 238, 0.36)' : 'rgba(248, 113, 113, 0.34)';
-      mctx.lineWidth = 3.5;
+      mctx.strokeStyle = room.id === 'west_wing' ? 'rgba(34, 211, 238, 0.22)' : 'rgba(248, 113, 113, 0.22)';
+      mctx.lineWidth = 2.8;
       mctx.stroke();
     } else if (room.id === 'icu' || room.id === 'surgery') {
-      // 隔离医院病房与手术区：地面医疗红十字检疫标识与生物隔离警戒框
+      // 隔离医院病房与手术区：柔和医疗十字暗标
       const mcx = r0.x + r0.w * 0.5;
       const mcy = r0.y + r0.h * 0.5;
       mctx.save();
-      mctx.strokeStyle = 'rgba(20, 184, 166, 0.24)';
-      mctx.lineWidth = 2;
-      mctx.setLineDash([12, 8]);
+      mctx.strokeStyle = 'rgba(20, 184, 166, 0.13)';
+      mctx.lineWidth = 1.6;
+      mctx.setLineDash([14, 10]);
       mctx.strokeRect(r0.x + 32, r0.y + 32, Math.max(40, r0.w - 64), Math.max(40, r0.h - 64));
       mctx.setLineDash([]);
-      mctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
-      mctx.fillRect(mcx - 24, mcy - 8, 48, 16);
-      mctx.fillRect(mcx - 8, mcy - 24, 16, 48);
+      mctx.fillStyle = 'rgba(220, 38, 38, 0.14)';
+      mctx.fillRect(mcx - 22, mcy - 7, 44, 14);
+      mctx.fillRect(mcx - 7, mcy - 22, 14, 44);
       mctx.restore();
     } else if (room.id === 'platform') {
-      // 地铁枢纽双轨列车月台：贯穿东西的枕木钢轨与月台黄黑安全候车线
+      // 地铁枢纽双轨列车月台：枕木钢轨与柔和安全候车线
       mctx.save();
       const trackY = r0.y + r0.h * 0.5;
-      mctx.fillStyle = 'rgba(9, 13, 22, 0.45)';
-      mctx.fillRect(r0.x + 24, trackY - 30, Math.max(40, r0.w - 48), 60);
-      mctx.strokeStyle = 'rgba(71, 85, 105, 0.52)';
-      mctx.lineWidth = 3;
-      for (let tx = r0.x + 32; tx < r0.x + r0.w - 32; tx += 18) {
+      mctx.fillStyle = 'rgba(9, 13, 22, 0.36)';
+      mctx.fillRect(r0.x + 24, trackY - 28, Math.max(40, r0.w - 48), 56);
+      mctx.strokeStyle = 'rgba(71, 85, 105, 0.36)';
+      mctx.lineWidth = 2.5;
+      for (let tx = r0.x + 32; tx < r0.x + r0.w - 32; tx += 22) {
         mctx.beginPath();
-        mctx.moveTo(tx, trackY - 24);
-        mctx.lineTo(tx, trackY + 24);
+        mctx.moveTo(tx, trackY - 22);
+        mctx.lineTo(tx, trackY + 22);
         mctx.stroke();
       }
-      mctx.strokeStyle = 'rgba(203, 213, 225, 0.62)';
-      mctx.lineWidth = 3.2;
+      mctx.strokeStyle = 'rgba(148, 163, 184, 0.42)';
+      mctx.lineWidth = 2.8;
       mctx.beginPath();
-      mctx.moveTo(r0.x + 24, trackY - 16);
-      mctx.lineTo(r0.x + r0.w - 24, trackY - 16);
-      mctx.moveTo(r0.x + 24, trackY + 16);
-      mctx.lineTo(r0.x + r0.w - 24, trackY + 16);
+      mctx.moveTo(r0.x + 24, trackY - 15);
+      mctx.lineTo(r0.x + r0.w - 24, trackY - 15);
+      mctx.moveTo(r0.x + 24, trackY + 15);
+      mctx.lineTo(r0.x + r0.w - 24, trackY + 15);
       mctx.stroke();
-      // 上下月台边缘黄色安全盲道线
-      mctx.strokeStyle = 'rgba(250, 204, 21, 0.45)';
-      mctx.lineWidth = 3;
-      mctx.setLineDash([16, 8]);
+      mctx.strokeStyle = 'rgba(250, 204, 21, 0.24)';
+      mctx.lineWidth = 2.2;
+      mctx.setLineDash([18, 10]);
       mctx.beginPath();
       mctx.moveTo(r0.x + 28, trackY - 46);
       mctx.lineTo(r0.x + r0.w - 28, trackY - 46);
@@ -1200,41 +1196,31 @@ export class CartoonRenderer {
       mctx.stroke();
       mctx.restore();
     } else if (room.id === 'containers' || room.id === 'hangar_w') {
-      // 港口集装箱堆场与空军重装机库：重型导引黄线与机位泊位框
+      // 港口集装箱堆场与空军重装机库：低对比机位泊位框
       mctx.save();
-      mctx.strokeStyle = 'rgba(234, 179, 8, 0.3)';
-      mctx.lineWidth = 3;
-      mctx.setLineDash([18, 12]);
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.16)';
+      mctx.lineWidth = 2.2;
+      mctx.setLineDash([20, 14]);
       mctx.strokeRect(r0.x + 42, r0.y + 42, Math.max(40, r0.w - 84), Math.max(40, r0.h - 84));
-      mctx.beginPath();
-      mctx.moveTo(r0.x + 36, r0.y + r0.h * 0.5);
-      mctx.lineTo(r0.x + r0.w - 36, r0.y + r0.h * 0.5);
-      mctx.stroke();
       mctx.restore();
     } else if (room.id === 'silo_w' || room.id === 'silo_e') {
-      // 核地堡导弹发射井：地面圆形防爆辐射警戒环
+      // 核地堡导弹发射井：地面暗金防爆警戒环
       const scx = r0.x + r0.w * 0.5;
       const scy = r0.y + r0.h * 0.5;
       mctx.save();
-      mctx.strokeStyle = 'rgba(245, 158, 11, 0.34)';
-      mctx.lineWidth = 3.5;
-      mctx.setLineDash([14, 10]);
+      mctx.strokeStyle = 'rgba(245, 158, 11, 0.19)';
+      mctx.lineWidth = 2.6;
+      mctx.setLineDash([16, 12]);
       mctx.beginPath();
       mctx.arc(scx, scy, Math.min(r0.w, r0.h) * 0.32, 0, Math.PI * 2);
       mctx.stroke();
       mctx.restore();
     } else if (room.id === 'courtyard' || room.id === 'cargo') {
-      // 停机坪与卸货区：地面车位标线与叉车/装甲车轮胎印
+      // 停机坪与卸货区：柔和车位标线
       mctx.save();
-      mctx.strokeStyle = 'rgba(250, 204, 21, 0.24)';
-      mctx.lineWidth = 2.5;
+      mctx.strokeStyle = 'rgba(250, 204, 21, 0.15)';
+      mctx.lineWidth = 2;
       mctx.strokeRect(r0.x + 48, r0.y + 44, 145, 78);
-      mctx.strokeStyle = 'rgba(9, 14, 23, 0.28)';
-      mctx.lineWidth = 5;
-      mctx.beginPath();
-      mctx.moveTo(r0.x + 70, r0.y + r0.h - 60);
-      mctx.quadraticCurveTo(r0.x + r0.w * 0.45, r0.y + r0.h * 0.65, r0.x + r0.w * 0.72, r0.y + r0.h * 0.52);
-      mctx.stroke();
       mctx.restore();
     }
 
@@ -2324,9 +2310,30 @@ export class CartoonRenderer {
       if (z.hp <= 0 || !this.inView(z.x, z.y, 115)) continue;
       const spKey = ZOMBIE_SPRITE_MAP[z.kind];
       const sway = Math.sin(z.wobblePhase) * 0.12;
-      const squash = 1 + Math.sin(z.wobblePhase * 2) * 0.05;
-      const lunge = z.attackAnim * 11;
-      const angle = z.facingAngle + sway;
+      let scaleX = 1 + Math.sin(z.wobblePhase * 2) * 0.05;
+      let scaleY = 2 - scaleX;
+      let lunge = z.attackAnim * 12;
+      let poseTwist = 0;
+
+      // 三段式近战动作姿态（蓄力后仰 -> 扑击挥爪 -> 卸力后撤）
+      if (z.attackState === 'windup') {
+        lunge = -8.5;
+        poseTwist = -0.32;
+        scaleX = 0.88;
+        scaleY = 1.14;
+      } else if (z.attackState === 'slash') {
+        lunge = 8 + z.attackAnim * 11;
+        poseTwist = Math.sin((1 - z.attackAnim) * Math.PI) * 0.42;
+        scaleX = 1.16;
+        scaleY = 0.88;
+      } else if (z.attackState === 'recover') {
+        lunge = -3.5;
+        poseTwist = 0.14;
+        scaleX = 0.95;
+        scaleY = 1.05;
+      }
+
+      const angle = (z.attackState !== 'none' ? z.slashAngle : z.facingAngle) + sway + poseTwist;
       const drawSize = z.radius * 3.55;
 
       ctx.save();
@@ -2350,6 +2357,18 @@ export class CartoonRenderer {
         ctx.fill();
       }
 
+      // 僵尸蓄力前摇警示红芒
+      if (z.attackState === 'windup') {
+        ctx.save();
+        ctx.rotate(z.slashAngle);
+        ctx.beginPath();
+        ctx.arc(z.radius * 0.55, 0, z.radius * 0.72, -0.85, 0.85);
+        ctx.strokeStyle = 'rgba(248, 113, 113, 0.68)';
+        ctx.lineWidth = 2.6;
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // 僵尸脚底交替迈步步伐
       ctx.save();
       ctx.rotate(z.facingAngle);
@@ -2368,8 +2387,24 @@ export class CartoonRenderer {
       ctx.save();
       ctx.rotate(angle);
       ctx.translate(lunge, 0);
-      this.drawEntitySpriteWithFlash(ctx, spKey, drawSize, 0, squash, 2 - squash, z.hitFlash > 0);
+      this.drawEntitySpriteWithFlash(ctx, spKey, drawSize, 0, scaleX, scaleY, z.hitFlash > 0);
       ctx.restore();
+
+      // 扑击挥爪血色撕裂弧光贴图（fx_claw_slash）
+      if (z.attackState === 'slash' || z.attackAnim > 0.38) {
+        const slashImg = Assets.getSprite('fx_claw_slash');
+        const slashAlpha = Math.min(0.95, Math.max(0, (z.attackAnim - 0.25) * 1.45));
+        if (slashImg && slashAlpha > 0.04) {
+          const slashDist = z.radius * 1.08 + z.attackAnim * 8;
+          const slashSize = z.radius * 2.65;
+          ctx.save();
+          ctx.rotate(z.slashAngle);
+          ctx.translate(slashDist, 0);
+          ctx.globalAlpha = slashAlpha;
+          ctx.drawImage(slashImg, -slashSize / 2, -slashSize / 2, slashSize, slashSize);
+          ctx.restore();
+        }
+      }
 
       ctx.restore();
 

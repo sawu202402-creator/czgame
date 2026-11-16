@@ -22,7 +22,7 @@ export class InputManager {
   public aimStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
   public attackBtnStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
 
-  private onSwitchWeaponCb: (() => void) | null = null;
+  private onSwitchWeaponCb: ((slotIndex?: number) => void) | null = null;
   private onReloadCb: (() => void) | null = null;
   private onToggleArmoryCb: (() => void) | null = null;
   private onThrowGrenadeCb: (() => void) | null = null;
@@ -54,8 +54,11 @@ export class InputManager {
       if (code === 'Escape') {
         e.preventDefault();
         this.onEscapeCb?.();
-      } else if (code === 'KeyQ' || code === 'Digit1' || code === 'Digit2') {
+      } else if (code === 'KeyQ') {
         this.onSwitchWeaponCb?.();
+      } else if (/^Digit[1-9]$/.test(code)) {
+        const slot = parseInt(code.slice(5), 10) - 1;
+        this.onSwitchWeaponCb?.(slot);
       } else if (code === 'KeyR') {
         this.onReloadCb?.();
       } else if (code === 'KeyB' || code === 'Tab') {
@@ -85,6 +88,16 @@ export class InputManager {
       e.preventDefault();
       this.onThrowGrenadeCb?.();
     });
+
+    this.canvas.addEventListener(
+      'wheel',
+      (e) => {
+        if (Math.abs(e.deltaY) > 4) {
+          this.onSwitchWeaponCb?.();
+        }
+      },
+      { passive: true }
+    );
 
     this.canvas.addEventListener('mousemove', (e) => {
       const rect = this.canvas.getBoundingClientRect();
@@ -199,7 +212,7 @@ export class InputManager {
   }
 
   public bindActions(
-    onSwitchWeapon: () => void,
+    onSwitchWeapon: (slotIndex?: number) => void,
     onReload: () => void,
     onToggleArmory: () => void,
     onThrowGrenade: () => void,

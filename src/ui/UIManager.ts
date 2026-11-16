@@ -547,7 +547,7 @@ export class UIManager {
       </div>
 
       <div class="moba-wheel-zone">
-        <button class="moba-arc-btn arc-pos-1 empty-slot" id="btn-arc-switch" type="button" title="切换副武器 (Q / 1 / 2)">
+        <button class="moba-arc-btn arc-pos-1 empty-slot" id="btn-arc-switch" type="button" title="轮换已拥有枪械 (Q / 滚轮 / 数字键)">
           <img class="moba-arc-img" id="arc-switch-icon" src="./assets/gun_smg.png" alt="" />
           <span class="moba-arc-badge" id="arc-switch-badge">副武</span>
         </button>
@@ -592,8 +592,7 @@ export class UIManager {
         e.preventDefault();
         e.stopPropagation();
         lastSwitchTouch = performance.now();
-        const active = this.engine.state!.player.activeSlot;
-        this.engine.switchWeapon(active === 0 ? 1 : 0);
+        this.engine.switchWeapon();
       }
     });
     switchBtn.addEventListener('pointerup', (e) => {
@@ -609,7 +608,7 @@ export class UIManager {
       const s = this.engine.state;
       if (!s) return;
       if (s.player.weapons.length >= 2) {
-        this.engine.switchWeapon(s.player.activeSlot === 0 ? 1 : 0);
+        this.engine.switchWeapon();
       } else {
         this.toggleArmoryShop();
       }
@@ -893,48 +892,79 @@ export class UIManager {
 
       const gunCards = WEAPON_LIST.map((w) => {
         const owned = s.player.weapons.find((inst) => inst.defId === w.id);
+        const isPermanent = !!owned && owned.tempWavesLeft === undefined;
         const isEquipped = activeWep.defId === w.id;
-        const locked = unlockedRooms < w.unlockRoomsRequired;
+        const locked = unlockedRooms < w.unlockRoomsRequired && !owned;
 
         let btnLabel = `$${w.shopCost} 购买`;
         let btnClass = s.cash >= w.shopCost ? 'btn-green' : 'btn-disabled';
+        let refillBtnHtml = '';
+
         if (locked) {
           btnLabel = `🔒 需开 ${w.unlockRoomsRequired} 扇门`;
           btnClass = 'btn-disabled';
-        } else if (owned) {
-          if (w.maxReserve < 0) {
-            btnLabel = isEquipped ? '装备中' : '切换';
-            btnClass = isEquipped ? 'btn-gray' : 'btn-blue';
+        } else if (owned && !isPermanent) {
+          // 战场宝箱临时试用武器：可免费切换装备，也可花钱买断永久保留
+          if (!isEquipped) {
+            btnLabel = '免费切换';
+            btnClass = 'btn-blue';
           } else {
-            const maxRes = w.maxReserve * (owned.evolved ? 2 : 1);
-            const full = owned.reserve >= maxRes && owned.mag >= this.engine.getMaxMag(w.id, owned.evolved);
-            if (full) {
-              btnLabel = isEquipped ? '弹药已满' : '切换';
-              btnClass = isEquipped ? 'btn-gray' : 'btn-blue';
-            } else {
-              btnLabel = `补弹 $${w.ammoCost}`;
-              btnClass = s.cash >= w.ammoCost ? 'btn-yellow' : 'btn-disabled';
+            btnLabel = `$${w.shopCost} 转永久`;
+            btnClass = s.cash >= w.shopCost ? 'btn-green' : 'btn-disabled';
+          }
+        } else if (owned) {
+          const maxRes = w.maxReserve * (owned.evolved ? 2 : 1);
+          const full =
+            w.maxReserve < 0 ||
+            (owned.reserve >= maxRes && owned.mag >= this.engine.getMaxMag(w.id, owned.evolved));
+          if (!isEquipped) {
+            btnLabel = '切换上阵';
+            btnClass = 'btn-blue';
+            if (!full) {
+              const canRefill = s.cash >= w.ammoCost;
+              refillBtnHtml = `<button class="btn-cartoon btn-mini ${canRefill ? 'btn-yellow' : 'btn-disabled'}" data-refill-gun="${w.id}">+$${w.ammoCost} 补弹</button>`;
             }
+          } else if (full) {
+            btnLabel = w.maxReserve < 0 ? '装备中' : '装备中·满弹';
+            btnClass = 'btn-gray';
+          } else {
+            btnLabel = `补弹 $${w.ammoCost}`;
+            btnClass = s.cash >= w.ammoCost ? 'btn-yellow' : 'btn-disabled';
           }
         }
 
+        const ownedBadge = isEquipped
+          ? '<span class="gun-owned-pill active">当前装备</span>'
+          : isPermanent
+            ? '<span class="gun-owned-pill">已拥有</span>'
+            : owned
+              ? `<span class="gun-owned-pill trial">试用${owned.tempWavesLeft}波</span>`
+              : '';
+
         return `
-          <div class="armory-gun-card ${isEquipped ? 'equipped' : ''} ${locked ? 'locked' : ''}">
+          <div class="armory-gun-card ${isEquipped ? 'equipped' : isPermanent ? 'owned' : ''} ${locked ? 'locked' : ''}">
             <div class="gun-card-head">
               <img src="./assets/gun_${w.id}.png" alt="${w.name}" class="armory-gun-img" />
               <div class="gun-head-info">
-                <div class="gun-title">${owned?.evolved ? `⚡${w.superName}` : w.name}</div>
+                <div class="gun-title-row">
+                  <span class="gun-title">${owned?.evolved ? `⚡${w.superName}` : w.name}</span>
+                  ${ownedBadge}
+                </div>
                 <div class="gun-tag">威力 ${w.damage * w.pellets} · 射速 ${w.fireRate}/s</div>
               </div>
             </div>
-            <button class="btn-cartoon btn-mini ${btnClass}" data-buy-gun="${w.id}" ${locked ? 'disabled' : ''}>
-              ${btnLabel}
-            </button>
+            <div class="gun-card-actions">
+              <button class="btn-cartoon btn-mini ${btnClass}" data-buy-gun="${w.id}" ${locked ? 'disabled' : ''}>
+                ${btnLabel}
+              </button>
+              ${refillBtnHtml}
+            </div>
           </div>
         `;
       }).join('');
 
-      contentHtml = `${evolveStrip}<div class="armory-gun-grid">${gunCards}</div>`;
+      const arsenalHint = `<div class="arsenal-keep-bar">🎒 本局已购枪械全部保留（当前持有 <strong>${s.player.weapons.length}</strong> 把 · 已拥有枪械可随时免费切换，或按 Q / 滚轮 / 右下切枪键轮换）</div>`;
+      contentHtml = `${evolveStrip}${arsenalHint}<div class="armory-gun-grid">${gunCards}</div>`;
     } else {
       const turretSupportText =
         s.hqSupportCooldown > 0
@@ -1038,6 +1068,13 @@ export class UIManager {
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-buy-gun]').forEach((btn) => {
       btn.onclick = () => {
         const res = this.engine.buyOrRefillWeaponFromShop(btn.dataset.buyGun!);
+        this.renderArmoryShop(res.msg);
+      };
+    });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-refill-gun]').forEach((btn) => {
+      btn.onclick = () => {
+        const res = this.engine.buyOrRefillWeaponFromShop(btn.dataset.refillGun!, true);
         this.renderArmoryShop(res.msg);
       };
     });
@@ -1306,9 +1343,13 @@ export class UIManager {
       (this.hudRoot.querySelector('#main-atk-knob') as HTMLElement).style.transform = 'translate(0px, 0px)';
     }
 
-    const hasSecond = s.player.weapons.length >= 2;
-    const secWep = hasSecond ? s.player.weapons[s.player.activeSlot === 0 ? 1 : 0] : null;
-    const switchKey = secWep ? `${secWep.defId}:${secWep.evolved ? 1 : 0}` : 'empty';
+    const weaponCount = s.player.weapons.length;
+    const hasSecond = weaponCount >= 2;
+    const nextIdx = hasSecond ? (s.player.activeSlot + 1) % weaponCount : 0;
+    const secWep = hasSecond ? s.player.weapons[nextIdx] : null;
+    const switchKey = secWep
+      ? `${secWep.defId}:${secWep.evolved ? 1 : 0}:${s.player.activeSlot}/${weaponCount}`
+      : 'empty';
     setIfChanged('arcSwitch', switchKey, () => {
       const swBtn = this.hudRoot!.querySelector('#btn-arc-switch') as HTMLButtonElement;
       const swIcon = this.hudRoot!.querySelector('#arc-switch-icon') as HTMLImageElement;
@@ -1317,7 +1358,7 @@ export class UIManager {
         swBtn.classList.remove('empty-slot');
         swBtn.classList.toggle('evolved', secWep.evolved);
         swIcon.setAttribute('src', `./assets/gun_${secWep.defId}.png`);
-        swBadge.textContent = '⇄';
+        swBadge.textContent = weaponCount > 2 ? `${s.player.activeSlot + 1}/${weaponCount}` : '⇄';
       } else {
         swBtn.classList.add('empty-slot');
         swBtn.classList.remove('evolved');

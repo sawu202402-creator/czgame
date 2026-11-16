@@ -1745,6 +1745,16 @@ button {
   color: #6b21a8;
 }
 
+.arsenal-keep-bar {
+  background: #eff6ff;
+  border: 1.5px solid #93c5fd;
+  color: #1e3a8a;
+  border-radius: 9px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .armory-gun-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
@@ -1761,6 +1771,10 @@ button {
   justify-content: space-between;
   gap: 7px;
 }
+.armory-gun-card.owned {
+  background: #f0f9ff;
+  border-color: #38bdf8;
+}
 .armory-gun-card.equipped {
   background: #fefce8;
   border-color: #16a34a;
@@ -1774,6 +1788,38 @@ button {
   display: flex;
   align-items: center;
   gap: 9px;
+}
+.gun-head-info {
+  flex: 1;
+  min-width: 0;
+}
+.gun-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.gun-owned-pill {
+  font-size: 10px;
+  font-weight: 900;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #0284c7;
+  color: #ffffff;
+  white-space: nowrap;
+}
+.gun-owned-pill.active {
+  background: #16a34a;
+}
+.gun-owned-pill.trial {
+  background: #d97706;
+}
+.gun-card-actions {
+  display: flex;
+  gap: 6px;
+}
+.gun-card-actions .btn-cartoon {
+  flex: 1;
 }
 .armory-gun-img {
   width: 52px;

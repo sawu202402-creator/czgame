@@ -62,6 +62,11 @@ export interface ZombieEntity {
   wobblePhase: number;
   facingAngle: number;
   attackAnim: number;
+  attackState: 'none' | 'windup' | 'slash' | 'recover';
+  attackStateTimer: number;
+  slashAngle: number;
+  recoilVx: number;
+  recoilVy: number;
 }
 
 export interface BulletEntity {
