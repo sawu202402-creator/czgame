@@ -154,7 +154,8 @@ export class CartoonRenderer {
     this.drawZombies(ctx, state);
     this.drawSpits(ctx, state);
 
-    // 9. 特种部队主角（夜视仪头盔躯干 + 战术护肘双臂 + 9把枪械俯视建模 + 枪口地面火光）
+    // 9. 联机小队队友与特种部队主角（夜视仪头盔躯干 + 战术护肘双臂 + 15把枪械俯视建模 + 倒地救援光圈）
+    this.drawRemotePlayers(ctx, state);
     this.drawPlayer(ctx, state);
 
     // 10. 抛物线手雷、流光曳光弹、闪电链、粒子、跳字与高空悬停救援黑鹰直升机
@@ -2170,10 +2171,12 @@ export class CartoonRenderer {
         ctx.fillRect(door.x, door.y, door.w, door.h);
       }
 
-      // 门禁红/绿状态指示灯
+      // 门禁红/绿状态指示灯与合资开门进度
+      const remainingCost = Math.max(0, door.cost - (door.paidAmount || 0));
+      const canAffordFull = state.cash >= remainingCost;
       ctx.beginPath();
       ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
-      ctx.fillStyle = state.cash >= door.cost ? '#4ade80' : '#ef4444';
+      ctx.fillStyle = canAffordFull ? '#4ade80' : door.paidAmount > 0 ? '#facc15' : '#ef4444';
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = '#090d16';
@@ -2186,18 +2189,30 @@ export class CartoonRenderer {
         ctx.lineWidth = 6;
         ctx.stroke();
       }
-      const nearDoor = Math.hypot(state.player.x - cx, state.player.y - cy) < 175;
-      if (nearDoor) {
-        this.drawCachedLabel(ctx, door.label, cx, cy - 13, '#f8fafc', 11);
+      const nearDoor =
+        Math.hypot(state.player.x - cx, state.player.y - cy) < 175 ||
+        state.remotePlayers.some((rp) => Math.hypot(rp.x - cx, rp.y - cy) < 175);
+      if (nearDoor || door.paidAmount > 0) {
+        this.drawCachedLabel(ctx, door.label, cx, cy - 15, '#f8fafc', 11);
       }
+      const priceText =
+        door.paidAmount > 0 ? `还差 $${remainingCost}` : `$${door.cost}`;
       this.drawCachedLabel(
         ctx,
-        `$${door.cost}`,
+        priceText,
         cx,
-        nearDoor ? cy + 13 : cy,
-        state.cash >= door.cost ? '#86efac' : '#fde047',
+        nearDoor || door.paidAmount > 0 ? cy + 12 : cy,
+        canAffordFull ? '#86efac' : '#fde047',
         11
       );
+      if (door.paidAmount > 0 && door.cost > 0) {
+        const bw = 54;
+        const pct = Math.min(1, door.paidAmount / door.cost);
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(cx - bw / 2 - 1, cy + 21, bw + 2, 6);
+        ctx.fillStyle = '#4ade80';
+        ctx.fillRect(cx - bw / 2, cy + 22, bw * pct, 4);
+      }
       ctx.restore();
     }
   }
@@ -2467,14 +2482,137 @@ export class CartoonRenderer {
     }
   }
 
-  // ==================== 全身骨骼特种兵主角（夜视仪头盔躯干 + 战术护袖 + 枪口地面火光） ====================
+  // ==================== 联机队友渲染与全身骨骼特种兵主角 ====================
+
+  private drawRemotePlayers(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    if (!state.isCoop || state.remotePlayers.length === 0) return;
+    const now = performance.now();
+    const rigScale = 0.68;
+
+    for (const rp of state.remotePlayers) {
+      if (rp.spectating || !this.inView(rp.x, rp.y, 120)) continue;
+      ctx.save();
+      ctx.translate(rp.x, rp.y);
+
+      if (rp.muzzleFlashTimer > 0 && !rp.downed) {
+        const fx = Math.cos(rp.angle) * 32;
+        const fy = Math.sin(rp.angle) * 32;
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.16)';
+        ctx.beginPath();
+        ctx.arc(fx, fy, 68, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 脚底接地投影 + 小队专属色彩识别战术光圈
+      ctx.beginPath();
+      ctx.ellipse(2, 9, 17, 10, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.46)';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 19, 0, Math.PI * 2);
+      ctx.strokeStyle = rp.downed ? '#ef4444' : rp.color;
+      ctx.lineWidth = 2.4;
+      ctx.stroke();
+
+      if (rp.downed) {
+        const pulse = 26 + Math.sin(now * 0.01) * 5;
+        ctx.beginPath();
+        ctx.arc(0, 0, pulse, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(248, 113, 113, 0.85)';
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([6, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      ctx.save();
+      if (rp.downed) {
+        ctx.scale(rigScale * 0.88, rigScale * 0.88);
+        ctx.globalAlpha = 0.82;
+      } else {
+        ctx.scale(rigScale, rigScale);
+      }
+
+      ctx.save();
+      ctx.rotate(rp.legAngle);
+      const stride = rp.isMoving ? Math.sin(rp.walkPhase) * 10 : 0;
+      this.drawTacticalBoot(ctx, stride + 2, -10.5);
+      this.drawTacticalBoot(ctx, -stride + 2, 10.5);
+      ctx.restore();
+
+      ctx.save();
+      ctx.rotate(rp.angle);
+      const torsoKick = rp.recoilOffset * 0.4;
+      if (!rp.downed) {
+        this.drawWeaponBackpackGear(ctx, rp.activeWepId, rp.evolved, torsoKick);
+      }
+      const torsoImg = Assets.getSprite('player_torso');
+      if (torsoImg) {
+        ctx.drawImage(torsoImg, -torsoKick - 39, -30, 60, 60);
+      }
+      if (!rp.downed) {
+        const fakeP = {
+          ...state.player,
+          recoilOffset: rp.recoilOffset,
+          reloadTimer: 0,
+          reloadDuration: 0,
+          weaponSwapTimer: 0,
+          akimboAlt: false,
+          muzzleFlashTimer: rp.muzzleFlashTimer,
+          barrelSpin: now * 0.018,
+        };
+        this.drawEquippedTopDownWeaponAndArms(ctx, rp.activeWepId, rp.evolved, fakeP, now);
+      }
+      ctx.restore();
+      ctx.restore();
+
+      if (rp.repairProgress > 0 && !rp.downed) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 25, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rp.repairProgress);
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
+
+      if (rp.downed) {
+        if (rp.reviveProgress > 0) {
+          ctx.beginPath();
+          ctx.arc(0, 0, 29, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rp.reviveProgress);
+          ctx.strokeStyle = '#4ade80';
+          ctx.lineWidth = 5.5;
+          ctx.stroke();
+        }
+        this.drawCachedLabel(
+          ctx,
+          `🆘 ${rp.callsign} 求救 ${Math.ceil(rp.bleedoutTimer)}s`,
+          0,
+          -32,
+          '#fca5a5',
+          11
+        );
+      } else {
+        this.drawCachedLabel(ctx, rp.callsign, 0, -33, rp.color, 10.5);
+        const bw = 36;
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(-bw / 2 - 1, -25, bw + 2, 5.5);
+        ctx.fillStyle = rp.color;
+        ctx.fillRect(-bw / 2, -24, bw * Math.max(0, Math.min(1, rp.hp / Math.max(1, rp.maxHp))), 3.5);
+      }
+
+      ctx.restore();
+    }
+  }
 
   private drawPlayer(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const p = state.player;
+    if (p.spectating) return;
     const activeWep = p.weapons[p.activeSlot];
     const isFever = state.feverTimer > 0;
     const now = performance.now();
-    const rigScale = 0.68;
+    const rigScale = p.downed ? 0.6 : 0.68;
 
     const idleBreath = 1 + Math.sin(now * 0.0042) * 0.024;
     const walkTwist = p.isMoving ? Math.sin(p.walkPhase) * 0.095 : 0;
@@ -2583,12 +2721,40 @@ export class CartoonRenderer {
       }
     }
 
-    if (p.repairProgress > 0) {
+    if (p.repairProgress > 0 && !p.downed) {
       ctx.beginPath();
       ctx.arc(0, 0, p.radius + 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.repairProgress);
       ctx.strokeStyle = '#fbbf24';
       ctx.lineWidth = 4.5;
       ctx.stroke();
+    }
+
+    if (p.downed) {
+      const pulse = 26 + Math.sin(now * 0.01) * 5;
+      ctx.beginPath();
+      ctx.arc(0, 0, pulse, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(248, 113, 113, 0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (p.reviveProgress > 0) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 30, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.reviveProgress);
+        ctx.strokeStyle = '#4ade80';
+        ctx.lineWidth = 5.5;
+        ctx.stroke();
+      }
+      this.drawCachedLabel(
+        ctx,
+        `🆘 倒地待救 ${Math.ceil(p.bleedoutTimer)}s`,
+        0,
+        -p.radius - 22,
+        '#fca5a5',
+        11
+      );
+    } else if (state.isCoop) {
+      this.drawCachedLabel(ctx, `${state.localCallsign} (我)`, 0, -p.radius - 28, '#bae6fd', 10);
     }
 
     ctx.restore();
@@ -3479,13 +3645,29 @@ export class CartoonRenderer {
       ctx.fillRect(ox + z.x * scale - sz / 2, oy + z.y * scale - sz / 2, sz, sz);
     }
 
-    ctx.fillStyle = '#4ade80';
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(ox + state.player.x * scale, oy + state.player.y * scale, 3.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    // 小地图联机队友点位
+    if (state.isCoop) {
+      for (const rp of state.remotePlayers) {
+        if (rp.spectating) continue;
+        ctx.fillStyle = rp.downed ? '#ef4444' : rp.color;
+        ctx.strokeStyle = '#090d16';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(ox + rp.x * scale, oy + rp.y * scale, rp.downed ? 4.2 : 3.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    if (!state.player.spectating) {
+      ctx.fillStyle = state.player.downed ? '#f87171' : '#4ade80';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(ox + state.player.x * scale, oy + state.player.y * scale, 3.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
 
     ctx.restore();
   }
@@ -3498,6 +3680,13 @@ export class CartoonRenderer {
   ): void {
     const zoom = state.camera.zoom;
     const targets: { x: number; y: number; sp: SpriteKey; color: string }[] = [];
+    if (state.isCoop) {
+      for (const rp of state.remotePlayers) {
+        if (rp.downed && !rp.spectating) {
+          targets.push({ x: rp.x, y: rp.y, sp: 'item_medkit', color: '#ef4444' });
+        }
+      }
+    }
     for (const c of state.chests) {
       targets.push({ x: c.x, y: c.y, sp: 'prop_chest', color: '#f59e0b' });
     }

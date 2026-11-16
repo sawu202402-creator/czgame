@@ -5,6 +5,8 @@ import { WEAPON_LIST, WEAPONS } from '../data/weapons';
 import { RunSnapshot } from '../game/Entities';
 import { GameEngine } from '../game/GameEngine';
 import { SaveManager, UPGRADE_TRACKS } from '../meta/SaveManager';
+import { CoopManager } from '../net/CoopManager';
+import { SQUAD_SLOTS, getCoopScaling } from '../net/CoopProtocol';
 import { PlatformSDK } from '../platform/PlatformSDK';
 import { GameMode, PowerUpType, StageDef } from '../types';
 
@@ -15,9 +17,10 @@ export class UIManager {
   private armoryOpen = false;
   private pauseOpen = false;
   private selectedMode: GameMode = 'standard';
-  private hubTab: 'stages' | 'upgrades' = 'stages';
+  private hubTab: 'stages' | 'upgrades' | 'coop' = 'stages';
   private armoryTab: 'guns' | 'supplies' = 'guns';
   private hudCache: Record<string, string> = {};
+  private coopToast = '';
 
   constructor(
     private uiLayer: HTMLElement,
@@ -26,6 +29,24 @@ export class UIManager {
     this.modalRoot = document.createElement('div');
     this.modalRoot.className = 'modal-host';
     this.uiLayer.appendChild(this.modalRoot);
+
+    CoopManager.bindUI(
+      () => {
+        if (!this.engine.state && this.hubTab === 'coop') {
+          this.showHomeHub();
+        }
+      },
+      (stageId, mode) => {
+        const st = STAGES.find((item) => item.id === stageId) || STAGES[0];
+        this.startStageRun(st, mode);
+      }
+    );
+
+    const urlRoom = CoopManager.consumeUrlRoomParam();
+    if (urlRoom) {
+      this.hubTab = 'coop';
+      setTimeout(() => CoopManager.joinRoomByCode(urlRoom), 60);
+    }
   }
 
   // ==================== 特工战术指挥大厅 ====================
@@ -124,7 +145,16 @@ export class UIManager {
     const fsActive = this.isFullscreenActive();
 
     const bodyHtml =
-      this.hubTab === 'stages' ? this.buildStagesHubView(save) : this.buildUpgradesHubView(save);
+      this.hubTab === 'stages'
+        ? this.buildStagesHubView(save)
+        : this.hubTab === 'coop'
+          ? this.buildCoopHubView()
+          : this.buildUpgradesHubView(save);
+
+    const coopCountBadge =
+      CoopManager.lobby && CoopManager.role !== 'offline'
+        ? ` (${CoopManager.lobby.members.length}/4)`
+        : '';
 
     this.modalRoot.innerHTML = `
       <div class="hub-screen">
@@ -137,12 +167,13 @@ export class UIManager {
             <img class="brand-avatar" src="./assets/player_hero.png" alt="" />
             <div class="brand-titles">
               <h1>僵尸防线大作战</h1>
-              <span class="brand-sub">SAS ZOMBIE FRONTLINE · 战术防区突围</span>
+              <span class="brand-sub">SAS ZOMBIE FRONTLINE · 1~4人联机突围</span>
             </div>
           </div>
 
           <div class="hub-nav-tabs">
-            <button class="seg-btn ${this.hubTab === 'stages' ? 'active' : ''}" data-hub-tab="stages">🗺️ 战区出击</button>
+            <button class="seg-btn ${this.hubTab === 'stages' ? 'active' : ''}" data-hub-tab="stages">🗺️ 单人战区</button>
+            <button class="seg-btn ${this.hubTab === 'coop' ? 'active' : ''}" data-hub-tab="coop">🤝 多人联机${coopCountBadge}</button>
             <button class="seg-btn ${this.hubTab === 'upgrades' ? 'active' : ''}" data-hub-tab="upgrades">
               ⚡ 特工强化${hasAffordableUpgrade ? '<span class="nav-dot"></span>' : ''}
             </button>
@@ -183,7 +214,8 @@ export class UIManager {
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-hub-tab]').forEach((btn) => {
       btn.onclick = () => {
-        this.hubTab = btn.dataset.hubTab as 'stages' | 'upgrades';
+        this.hubTab = btn.dataset.hubTab as 'stages' | 'upgrades' | 'coop';
+        this.coopToast = '';
         this.showHomeHub();
       };
     });
@@ -197,6 +229,9 @@ export class UIManager {
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-stage-go]').forEach((btn) => {
       btn.onclick = () => {
+        if (CoopManager.role !== 'offline') {
+          CoopManager.disconnect();
+        }
         const st = STAGES.find((item) => item.id === btn.dataset.stageGo)!;
         this.startStageRun(st, this.selectedMode);
       };
@@ -211,6 +246,8 @@ export class UIManager {
         }
       };
     });
+
+    this.bindCoopHubEvents();
   }
 
   private buildStagesHubView(save: ReturnType<typeof SaveManager.get>): string {
@@ -470,6 +507,265 @@ export class UIManager {
     `;
   }
 
+  private buildCoopHubView(): string {
+    const callsign = CoopManager.getCallsign();
+    const lobby = CoopManager.lobby;
+    const status = CoopManager.status;
+    const err = CoopManager.errorMsg;
+
+    const rulesStrip = `
+      <div class="coop-rules-strip">
+        <span>🧟 <strong>动态尸潮强化</strong>：2~4 人尸潮规模最高 ×3.04 · 尸王血量 ×2.65 · 双暴君突袭</span>
+        <span>💰 <strong>独立钱包+合资开门</strong>：掉落赏金全队协防分成，防爆门可多人凑钱解锁</span>
+        <span>💉 <strong>倒地救援</strong>：重伤可爬行求援，队友靠近 2.2s 拉起，波次清空全员自动起身</span>
+      </div>
+    `;
+
+    const callsignBar = `
+      <div class="coop-callsign-bar">
+        <div class="coop-callsign-left">
+          <span>🪖 特工代号：</span>
+          <input id="coop-callsign-inp" class="coop-inp callsign-inp" type="text" maxlength="10" value="${callsign}" placeholder="输入昵称" />
+          <button class="btn-cartoon btn-mini btn-blue" id="btn-save-callsign" type="button">保存代号</button>
+        </div>
+        <span class="coop-p2p-tag">🌐 WebRTC P2P 直连 · 零服务器延迟 · 支持电脑/手机跨平台组队</span>
+      </div>
+    `;
+
+    const statusBanner =
+      status === 'connecting'
+        ? `<div class="coop-alert info">⏳ 正在建立加密战术通信频道，请稍候...</div>`
+        : err
+          ? `<div class="coop-alert error">⚠️ ${err}</div>`
+          : this.coopToast
+            ? `<div class="coop-alert ok">✅ ${this.coopToast}</div>`
+            : '';
+
+    if (!lobby || CoopManager.role === 'offline') {
+      return `
+        <div class="coop-wrap">
+          ${callsignBar}
+          ${rulesStrip}
+          ${statusBanner}
+          <div class="coop-entry-grid">
+            <div class="coop-panel-card">
+              <h3>📡 创建战术小队（房主）</h3>
+              <p>生成 5 位房间码或一键复制直连邀请链接，发给微信/QQ好友点开即进（最多 4 人）。</p>
+              <button class="btn-cartoon btn-green" id="btn-coop-create" ${status === 'connecting' ? 'disabled' : ''}>
+                ➕ 创建 1~4 人联机房间
+              </button>
+            </div>
+
+            <div class="coop-panel-card">
+              <h3>🔑 输入房间码加入小队</h3>
+              <p>输入房主分享的 5 位房间码，立即加入防守编队协同作战。</p>
+              <div class="coop-join-row">
+                <input id="coop-code-inp" class="coop-inp code-inp" type="text" maxlength="6" placeholder="输入5位房间码" />
+                <button class="btn-cartoon btn-yellow" id="btn-coop-join" ${status === 'connecting' ? 'disabled' : ''}>
+                  🚀 加入房间
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const memberCount = lobby.members.length;
+    const previewScale = getCoopScaling(Math.max(2, memberCount));
+    const activeScale = getCoopScaling(memberCount);
+    const isHost = CoopManager.role === 'host';
+    const selectedStage = STAGES.find((s) => s.id === lobby.stageId) || STAGES[0];
+    const me = lobby.members.find((m) => m.peerId === CoopManager.myPeerId);
+
+    const slotsHtml = SQUAD_SLOTS.map((sl) => {
+      const mem = lobby.members.find((m) => m.slot === sl.slot);
+      if (!mem) {
+        return `
+          <div class="coop-slot-card empty">
+            <span class="slot-badge" style="background:#334155">${sl.label}</span>
+            <div class="slot-empty-txt">等待好友加入...</div>
+            <small>分享房间码 ${lobby.roomCode}</small>
+          </div>
+        `;
+      }
+      return `
+        <div class="coop-slot-card filled" style="border-color:${sl.color}">
+          <div class="slot-head">
+            <span class="slot-badge" style="background:${sl.badgeBg}">${sl.label}</span>
+            <span class="slot-ready ${mem.ready ? 'ok' : ''}">${mem.isHost ? '👑 房主' : mem.ready ? '✅ 已准备' : '⏳ 准备中'}</span>
+          </div>
+          <div class="slot-player">
+            <img src="./assets/player_hero.png" alt="" />
+            <strong>${mem.callsign}${mem.peerId === CoopManager.myPeerId ? ' (我)' : ''}</strong>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const stageOptionsHtml = STAGES.map(
+      (st) => `<option value="${st.id}" ${st.id === lobby.stageId ? 'selected' : ''}>${st.name}</option>`
+    ).join('');
+
+    const hostControls = isHost
+      ? `
+        <div class="coop-stage-Controls">
+          <div class="coop-sel-group">
+            <label>作战地图：</label>
+            <select id="coop-stage-sel" class="coop-select">${stageOptionsHtml}</select>
+          </div>
+          <div class="seg-group dark">
+            <button class="seg-btn ${lobby.mode === 'standard' ? 'active' : ''}" data-coop-mode="standard">🚁 10波撤离</button>
+            <button class="seg-btn ${lobby.mode === 'endless' ? 'active' : ''}" data-coop-mode="endless">♾️ 无尽尸潮</button>
+          </div>
+          <button class="btn-cartoon btn-green coop-launch-btn" id="btn-coop-launch" ${memberCount < 2 ? 'title="建议等待至少1名好友加入以体验多人联机"' : ''}>
+            🚀 ${memberCount >= 2 ? `全队空降出击 (${memberCount}/4人)` : '单人试跑此房间 (1/4人)'}
+          </button>
+        </div>
+      `
+      : `
+        <div class="coop-stage-Controls">
+          <div class="coop-client-stage-info">
+            🗺️ 房主已选：<strong>${selectedStage.name}</strong> · <span>${lobby.mode === 'standard' ? '🚁 10波撤离' : '♾️ 无尽尸潮'}</span>
+          </div>
+          <button class="btn-cartoon ${me?.ready ? 'btn-gray' : 'btn-green'}" id="btn-coop-ready">
+            ${me?.ready ? '✅ 已就绪（等待房主发车）' : '🙋 点击准备就绪'}
+          </button>
+        </div>
+      `;
+
+    const scaleInfo =
+      memberCount >= 2
+        ? `当前 <strong>${memberCount}人小队</strong> 生效难度：尸潮数量 <strong>×${activeScale.countMult}</strong> · 僵尸/尸王血量 <strong>×${activeScale.hpMult}</strong> · 伤害 <strong>×${activeScale.dmgMult}</strong> · 合资门费 <strong>×${activeScale.doorCostMult}</strong>`
+        : `待好友加入（2人时预计难度：尸潮数量 <strong>×${previewScale.countMult}</strong> · 血量 <strong>×${previewScale.hpMult}</strong>；4人满编尸潮 <strong>×3.04</strong> · 血量 <strong>×2.65</strong>）`;
+
+    return `
+      <div class="coop-wrap">
+        ${callsignBar}
+        ${statusBanner}
+
+        <div class="coop-lobby-box">
+          <div class="coop-lobby-head">
+            <div class="room-code-block">
+              <span class="rc-label">小队房间码</span>
+              <strong class="rc-val">${lobby.roomCode}</strong>
+              <button class="btn-cartoon btn-mini btn-yellow" id="btn-copy-code" type="button">📋 复制房间码</button>
+              <button class="btn-cartoon btn-mini btn-blue" id="btn-copy-link" type="button">🔗 复制直连邀请链接</button>
+            </div>
+            <button class="btn-cartoon btn-mini btn-gray" id="btn-coop-leave" type="button">🚪 离开房间</button>
+          </div>
+
+          <div class="coop-slots-grid">${slotsHtml}</div>
+
+          <div class="coop-scale-banner">⚖️ ${scaleInfo}</div>
+
+          ${hostControls}
+        </div>
+      </div>
+    `;
+  }
+
+  private bindCoopHubEvents(): void {
+    const saveCallBtn = this.modalRoot.querySelector('#btn-save-callsign') as HTMLButtonElement | null;
+    const callInp = this.modalRoot.querySelector('#coop-callsign-inp') as HTMLInputElement | null;
+    if (saveCallBtn && callInp) {
+      saveCallBtn.onclick = () => {
+        CoopManager.setCallsign(callInp.value);
+        this.coopToast = `特工代号已更新为【${CoopManager.getCallsign()}】`;
+        this.showHomeHub();
+      };
+    }
+
+    const createBtn = this.modalRoot.querySelector('#btn-coop-create') as HTMLButtonElement | null;
+    if (createBtn) {
+      createBtn.onclick = () => {
+        if (callInp) CoopManager.setCallsign(callInp.value);
+        this.coopToast = '';
+        CoopManager.createHostRoom(STAGES[0].id, this.selectedMode);
+      };
+    }
+
+    const joinBtn = this.modalRoot.querySelector('#btn-coop-join') as HTMLButtonElement | null;
+    const codeInp = this.modalRoot.querySelector('#coop-code-inp') as HTMLInputElement | null;
+    if (joinBtn && codeInp) {
+      const doJoin = () => {
+        if (callInp) CoopManager.setCallsign(callInp.value);
+        this.coopToast = '';
+        CoopManager.joinRoomByCode(codeInp.value);
+      };
+      joinBtn.onclick = doJoin;
+      codeInp.onkeydown = (e) => {
+        if (e.key === 'Enter') doJoin();
+      };
+    }
+
+    const copyCodeBtn = this.modalRoot.querySelector('#btn-copy-code') as HTMLButtonElement | null;
+    if (copyCodeBtn && CoopManager.lobby) {
+      copyCodeBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(CoopManager.lobby!.roomCode);
+          this.coopToast = `房间码 ${CoopManager.lobby!.roomCode} 已复制，快发给好友吧！`;
+        } catch {
+          this.coopToast = `房间码：${CoopManager.lobby!.roomCode}`;
+        }
+        this.showHomeHub();
+      };
+    }
+
+    const copyLinkBtn = this.modalRoot.querySelector('#btn-copy-link') as HTMLButtonElement | null;
+    if (copyLinkBtn && CoopManager.lobby) {
+      copyLinkBtn.onclick = async () => {
+        const url = CoopManager.getInviteUrl();
+        try {
+          await navigator.clipboard.writeText(url);
+          this.coopToast = '直连邀请链接已复制！好友点开链接即可秒进房间';
+        } catch {
+          this.coopToast = url;
+        }
+        this.showHomeHub();
+      };
+    }
+
+    const leaveBtn = this.modalRoot.querySelector('#btn-coop-leave') as HTMLButtonElement | null;
+    if (leaveBtn) {
+      leaveBtn.onclick = () => {
+        this.coopToast = '';
+        CoopManager.disconnect();
+      };
+    }
+
+    const stageSel = this.modalRoot.querySelector('#coop-stage-sel') as HTMLSelectElement | null;
+    if (stageSel && CoopManager.lobby) {
+      stageSel.onchange = () => {
+        CoopManager.setHostStageAndMode(stageSel.value, CoopManager.lobby!.mode);
+      };
+    }
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-coop-mode]').forEach((btn) => {
+      btn.onclick = () => {
+        if (!CoopManager.lobby) return;
+        CoopManager.setHostStageAndMode(
+          CoopManager.lobby.stageId,
+          btn.dataset.coopMode as GameMode
+        );
+      };
+    });
+
+    const readyBtn = this.modalRoot.querySelector('#btn-coop-ready') as HTMLButtonElement | null;
+    if (readyBtn) {
+      readyBtn.onclick = () => {
+        CoopManager.toggleClientReady();
+      };
+    }
+
+    const launchBtn = this.modalRoot.querySelector('#btn-coop-launch') as HTMLButtonElement | null;
+    if (launchBtn) {
+      launchBtn.onclick = () => {
+        CoopManager.launchHostMatch();
+      };
+    }
+  }
+
   public startStageRun(stage: StageDef, mode: GameMode): void {
     this.armoryOpen = false;
     this.pauseOpen = false;
@@ -507,6 +803,7 @@ export class UIManager {
             <span class="armor-chip" id="hud-armor-chip" style="display:none"><img class="hud-mini-ico" src="./assets/item_armor.png" alt="" /><em id="hud-armor-val">0</em></span>
           </div>
           <div class="relic-row" id="hud-relics"></div>
+          <div class="hud-squad-list" id="hud-squad-list"></div>
         </div>
 
         <div class="hud-center">
@@ -766,10 +1063,12 @@ export class UIManager {
       return;
     }
 
-    if (this.engine.modalPaused) return;
+    if (this.engine.modalPaused && !s.isCoop) return;
 
     this.pauseOpen = true;
-    this.engine.modalPaused = true;
+    if (!s.isCoop) {
+      this.engine.modalPaused = true;
+    }
     this.engine.input.resetStates();
     this.renderPauseMenu();
   }
@@ -837,6 +1136,9 @@ export class UIManager {
     (this.modalRoot.querySelector('#btn-quit-hub') as HTMLButtonElement).onclick = () => {
       this.pauseOpen = false;
       PlatformSDK.gameplayStop();
+      if (CoopManager.role !== 'offline') {
+        CoopManager.disconnect();
+      }
       this.showHomeHub();
     };
   }
@@ -861,10 +1163,12 @@ export class UIManager {
       return;
     }
 
-    if (this.engine.modalPaused) return;
+    if (this.engine.modalPaused && !s.isCoop) return;
 
     this.armoryOpen = true;
-    this.engine.modalPaused = true;
+    if (!s.isCoop) {
+      this.engine.modalPaused = true;
+    }
     this.engine.input.resetStates();
     this.renderArmoryShop('');
   }
@@ -1189,17 +1493,52 @@ export class UIManager {
       }
     });
 
+    const coopSuffix = s.isCoop ? ` · 👥${s.squadCount}人` : '';
     let waveStr = '';
     if (s.waveState === 'extraction') {
-      waveStr = `直升机登机撤离 ${Math.round(s.extractionProgress * 100)}%`;
+      waveStr = `直升机登机撤离 ${Math.round(s.extractionProgress * 100)}%${coopSuffix}`;
     } else if (s.waveState === 'intermission') {
-      waveStr = `战备休整 ${Math.ceil(s.intermissionTimer)}s`;
+      waveStr = `战备休整 ${Math.ceil(s.intermissionTimer)}s${coopSuffix}`;
     } else {
       const waveLabel = s.mode === 'standard' ? `第 ${s.wave}/${s.maxWaves} 波` : `无尽 第 ${s.wave} 波`;
-      waveStr = `${waveLabel} · 剩余 ${s.zombiesRemainingInWave}`;
+      waveStr = `${waveLabel} · 剩余 ${s.zombiesRemainingInWave}${coopSuffix}`;
     }
     setIfChanged('wave', waveStr, () => {
       (this.hudRoot!.querySelector('#hud-wave') as HTMLElement).textContent = waveStr;
+    });
+
+    const squadSig = s.isCoop
+      ? s.remotePlayers
+          .map(
+            (rp) =>
+              `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}`
+          )
+          .join('|')
+      : '';
+    setIfChanged('squadHud', squadSig, () => {
+      const sqEl = this.hudRoot!.querySelector('#hud-squad-list') as HTMLElement;
+      if (!s.isCoop || s.remotePlayers.length === 0) {
+        sqEl.innerHTML = '';
+        return;
+      }
+      sqEl.innerHTML = s.remotePlayers
+        .map((rp) => {
+          const hpPct = Math.max(0, Math.min(100, Math.round((rp.hp / Math.max(1, rp.maxHp)) * 100)));
+          const stText = rp.spectating
+            ? '⏳ 待下波起身'
+            : rp.downed
+              ? `🆘 求救 ${Math.ceil(rp.bleedoutTimer)}s`
+              : `$${rp.cash}`;
+          return `
+            <div class="squad-hud-chip ${rp.downed ? 'is-downed' : ''}">
+              <span class="sq-dot" style="background:${rp.color}"></span>
+              <span class="sq-name">${rp.callsign}</span>
+              <div class="sq-hp-track"><div class="sq-hp-fill" style="width:${hpPct}%;background:${rp.downed ? '#ef4444' : rp.color}"></div></div>
+              <span class="sq-meta">${stText}</span>
+            </div>
+          `;
+        })
+        .join('');
     });
 
     const bossTarget =
@@ -1506,6 +1845,10 @@ export class UIManager {
         goldEl.textContent = `+${baseGold * lockedMult}`;
         xpEl.textContent = `+${baseXp * lockedMult} XP`;
         SaveManager.addRewards(baseGold * lockedMult, baseXp * lockedMult);
+        if (CoopManager.role !== 'offline' && CoopManager.lobby) {
+          CoopManager.returnSquadToLobby();
+          this.hubTab = 'coop';
+        }
         this.showHomeHub();
       } else {
         stopped = false;
@@ -1517,6 +1860,10 @@ export class UIManager {
       stopped = true;
       cancelAnimationFrame(this.needleAnimId);
       SaveManager.addRewards(baseGold, baseXp);
+      if (CoopManager.role !== 'offline' && CoopManager.lobby) {
+        CoopManager.returnSquadToLobby();
+        this.hubTab = 'coop';
+      }
       this.showHomeHub();
     };
   }

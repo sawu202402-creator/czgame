@@ -11,6 +11,7 @@ import {
   WeaponInstance,
   WindowConfig,
 } from '../types';
+import { RemotePlayerState } from '../net/CoopProtocol';
 
 export type ZombieKind = 'walker' | 'runner' | 'spitter' | 'thief' | 'miniboss' | 'boss';
 
@@ -27,6 +28,7 @@ export interface RuntimeWindow extends WindowConfig {
 export interface RuntimeDoor extends DoorConfig {
   unlocked: boolean;
   progress: number;
+  paidAmount: number;
 }
 
 export interface RuntimeStation extends StationConfig {
@@ -67,6 +69,8 @@ export interface ZombieEntity {
   slashAngle: number;
   recoilVx: number;
   recoilVy: number;
+  netTx?: number;
+  netTy?: number;
 }
 
 export interface BulletEntity {
@@ -89,6 +93,7 @@ export interface BulletEntity {
   sawblade: boolean;
   hitIds: Set<number>;
   life: number;
+  localVisualOnly?: boolean;
 }
 
 export interface GrenadeEntity {
@@ -248,6 +253,11 @@ export interface RunSnapshot {
   electricFortifyWaves: number;
   repairsPaidThisWave: number;
   powerUpTimers: Record<PowerUpType, number>;
+  isCoop: boolean;
+  localSlot: number;
+  localCallsign: string;
+  squadCount: number;
+  remotePlayers: RemotePlayerState[];
   player: {
     x: number;
     y: number;
@@ -257,6 +267,10 @@ export interface RunSnapshot {
     maxHp: number;
     armor: number;
     maxArmor: number;
+    downed: boolean;
+    spectating: boolean;
+    bleedoutTimer: number;
+    reviveProgress: number;
     hitFlashTimer: number;
     invulnTimer: number;
     weapons: WeaponInstance[];
