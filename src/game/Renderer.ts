@@ -1,5 +1,6 @@
 import { POWERUP_META } from '../data/perksAndRelics';
 import { WEAPONS } from '../data/weapons';
+import { I18n } from '../i18n/I18n';
 import { SaveManager } from '../meta/SaveManager';
 import { FloorTheme, PropKind, Rect } from '../types';
 import { Assets, SpriteKey, TileKey } from './AssetLoader';
@@ -174,15 +175,16 @@ export class CartoonRenderer {
   // ==================== 离屏高精度建筑地图烘焙（仅在开局与开门瞬间执行 1 次） ====================
 
   private ensureStaticMapCache(state: RunSnapshot): void {
+    const stageLangKey = `${state.stage.id}:${I18n.lang}`;
     if (
       this.mapCanvas &&
-      this.cachedStageId === state.stage.id &&
+      this.cachedStageId === stageLangKey &&
       this.cachedMapRevision === state.mapRevision
     ) {
       return;
     }
 
-    this.cachedStageId = state.stage.id;
+    this.cachedStageId = stageLangKey;
     this.cachedMapRevision = state.mapRevision;
 
     const bb = state.stage.buildingBounds;
@@ -344,7 +346,14 @@ export class CartoonRenderer {
         mctx.stroke();
 
         this.bakeWallAmbientOcclusion(mctx, state.walls);
-        this.drawCachedLabel(mctx, `🔒 未开启 · ${room.name}`, room.labelPos.x, room.labelPos.y, '#94a3b8', 15);
+        this.drawCachedLabel(
+          mctx,
+          I18n.t('roomLocked', { name: I18n.roomOrDoorName(room.id, room.name) }),
+          room.labelPos.x,
+          room.labelPos.y,
+          '#94a3b8',
+          15
+        );
       }
       mctx.restore();
     }
@@ -1776,7 +1785,7 @@ export class CartoonRenderer {
       ctx.lineWidth = 8;
       ctx.stroke();
 
-      this.drawCachedLabel(ctx, '踩入停机坪登机撤离!', x, y - 102, '#fef08a', 15);
+      this.drawCachedLabel(ctx, I18n.t('boardChopper'), x, y - 102, '#fef08a', 15);
     }
     ctx.restore();
   }
@@ -1902,10 +1911,10 @@ export class CartoonRenderer {
       if (st.type === 'armory_kiosk') {
         ringColor = '#10b981';
         const near = Math.hypot(state.player.x - st.x, state.player.y - st.y) < 120;
-        priceTag = near ? '踩入或按 B' : '';
+        priceTag = near ? I18n.t('stepOrB') : '';
       } else if (st.type === 'starter_airdrop') {
         ringColor = '#f59e0b';
-        priceTag = save.freeStarterUsedCount < 2 ? '免费试用' : '看广告领';
+        priceTag = save.freeStarterUsedCount < 2 ? I18n.t('freeTrialTag') : I18n.t('watchAdTag');
       } else if (st.type === 'ammo_box') {
         ringColor = '#22c55e';
       } else if (st.type === 'pack_a_punch') {
@@ -1983,7 +1992,7 @@ export class CartoonRenderer {
 
       const nearStation = Math.hypot(state.player.x - st.x, state.player.y - st.y) < 145;
       if (nearStation) {
-        this.drawCachedLabel(ctx, st.label, st.x, st.y - 40, '#f8fafc', 11);
+        this.drawCachedLabel(ctx, I18n.stationLabel(st.type, st.label), st.x, st.y - 40, '#f8fafc', 11);
         if (priceTag) {
           this.drawCachedLabel(ctx, priceTag, st.x, st.y + 40, '#fde047', 11);
         }
@@ -2193,10 +2202,10 @@ export class CartoonRenderer {
         Math.hypot(state.player.x - cx, state.player.y - cy) < 175 ||
         state.remotePlayers.some((rp) => Math.hypot(rp.x - cx, rp.y - cy) < 175);
       if (nearDoor || door.paidAmount > 0) {
-        this.drawCachedLabel(ctx, door.label, cx, cy - 15, '#f8fafc', 11);
+        this.drawCachedLabel(ctx, I18n.roomOrDoorName(door.unlockRoomId, door.label), cx, cy - 15, '#f8fafc', 11);
       }
       const priceText =
-        door.paidAmount > 0 ? `还差 $${remainingCost}` : `$${door.cost}`;
+        door.paidAmount > 0 ? I18n.t('doorNeedMore', { n: remainingCost }) : `$${door.cost}`;
       this.drawCachedLabel(
         ctx,
         priceText,
@@ -2250,7 +2259,7 @@ export class CartoonRenderer {
         ctx.stroke();
 
         this.drawCenteredSprite(ctx, 'drop_powerup', 0, 0, 38, now * 0.22);
-        this.drawCachedLabel(ctx, meta.name, 0, -24, meta.color, 10);
+        this.drawCachedLabel(ctx, I18n.powerupName(d.powerUp, meta.name), 0, -24, meta.color, 10);
       }
       ctx.restore();
     }
@@ -2424,11 +2433,18 @@ export class CartoonRenderer {
       ctx.restore();
 
       if (z.kind === 'thief') {
-        this.drawCachedLabel(ctx, `盗宝怪 ${z.fleeTimer.toFixed(0)}s`, z.x, z.y - z.radius - 22, '#fde047', 11);
+        this.drawCachedLabel(
+          ctx,
+          I18n.t('thiefLabel', { s: z.fleeTimer.toFixed(0) }),
+          z.x,
+          z.y - z.radius - 22,
+          '#fde047',
+          11
+        );
       } else if (z.kind === 'boss' || z.kind === 'miniboss') {
         this.drawCachedLabel(
           ctx,
-          z.kind === 'boss' ? '深渊尸王' : '重装暴君',
+          z.kind === 'boss' ? I18n.t('bossKing') : I18n.t('bossTyrant'),
           z.x,
           z.y - z.radius - 24,
           '#fca5a5',
@@ -2587,7 +2603,7 @@ export class CartoonRenderer {
         }
         this.drawCachedLabel(
           ctx,
-          `🆘 ${rp.callsign} 求救 ${Math.ceil(rp.bleedoutTimer)}s`,
+          I18n.t('sosAlly', { name: rp.callsign, s: Math.ceil(rp.bleedoutTimer) }),
           0,
           -32,
           '#fca5a5',
@@ -2717,7 +2733,7 @@ export class CartoonRenderer {
       const def = WEAPONS[activeWep.defId];
       const maxMag = Math.max(2, Math.round(def.magSize * state.modifiers.magMult * (activeWep.evolved ? 1.5 : 1)));
       if (activeWep.mag > 0 && activeWep.mag <= Math.max(2, Math.floor(maxMag * 0.2))) {
-        this.drawCachedLabel(ctx, '弹药偏低!', 0, -p.radius - 18, '#fde047', 10);
+        this.drawCachedLabel(ctx, I18n.t('lowAmmoWarn'), 0, -p.radius - 18, '#fde047', 10);
       }
     }
 
@@ -2747,14 +2763,14 @@ export class CartoonRenderer {
       }
       this.drawCachedLabel(
         ctx,
-        `🆘 倒地待救 ${Math.ceil(p.bleedoutTimer)}s`,
+        I18n.t('sosSelf', { s: Math.ceil(p.bleedoutTimer) }),
         0,
         -p.radius - 22,
         '#fca5a5',
         11
       );
     } else if (state.isCoop) {
-      this.drawCachedLabel(ctx, `${state.localCallsign} (我)`, 0, -p.radius - 28, '#bae6fd', 10);
+      this.drawCachedLabel(ctx, `${state.localCallsign}${I18n.t('meSuffix')}`, 0, -p.radius - 28, '#bae6fd', 10);
     }
 
     ctx.restore();
@@ -3775,7 +3791,7 @@ export class CartoonRenderer {
       ctx.setLineDash([]);
 
       ctx.globalAlpha = Math.min(0.75, pulse * 2.1);
-      this.drawCachedLabel(ctx, '左手移动', leftX, leftY, '#bae6fd', 11);
+      this.drawCachedLabel(ctx, I18n.t('leftMoveHint'), leftX, leftY, '#bae6fd', 11);
       ctx.restore();
     }
 

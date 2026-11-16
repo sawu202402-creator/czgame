@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc && vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "pack:crazygames": "npm run build && python3 scripts/pack_crazygames.py"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

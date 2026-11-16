@@ -1,6 +1,7 @@
 import { SoundFX } from '../audio/SoundFX';
 import { IN_RUN_PERKS, POWERUP_META, RELICS } from '../data/perksAndRelics';
 import { WEAPONS } from '../data/weapons';
+import { I18n } from '../i18n/I18n';
 import { SaveManager } from '../meta/SaveManager';
 import { CoopManager } from '../net/CoopManager';
 import {
@@ -299,7 +300,7 @@ export class GameEngine {
       this.prepareWave(1);
     }
     if (isCoop) {
-      this.showBanner(`🤝 ${squadCount}人战术小队集结 · 尸潮强度 ×${scaling.countMult}`, 3.0);
+      this.showBanner(I18n.t('bannerCoopStart', { n: squadCount, m: scaling.countMult }), 3.0);
     }
     PlatformSDK.gameplayStart();
   }
@@ -598,15 +599,16 @@ export class GameEngine {
     const def = WEAPONS[weaponId];
     const unlockedRooms = this.getUnlockedExtraRoomsCount();
     if (unlockedRooms < def.unlockRoomsRequired) {
-      return { ok: false, msg: `🔒 需先在地图中开门解锁 ${def.unlockRoomsRequired} 个新区域！` };
+      return { ok: false, msg: I18n.t('msgNeedRooms', { n: def.unlockRoomsRequired }) };
     }
+
+    const wTitle = (evo: boolean) => (evo ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name));
 
     const ownedIdx = s.player.weapons.findIndex((w) => w.defId === weaponId);
     if (ownedIdx >= 0) {
       const w = s.player.weapons[ownedIdx];
-      // 若曾是空投临时试用枪，点击购买永久版直接转为永久持有！
       if (w.tempWavesLeft !== undefined && !forceRefill) {
-        if (s.cash < def.shopCost) return { ok: false, msg: `钞票不足 ($${def.shopCost})！` };
+        if (s.cash < def.shopCost) return { ok: false, msg: I18n.t('msgNoCash', { c: def.shopCost }) };
         s.cash -= def.shopCost;
         delete w.tempWavesLeft;
         w.mag = this.getMaxMag(weaponId, w.evolved);
@@ -615,32 +617,31 @@ export class GameEngine {
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
         SoundFX.fanfare();
-        return { ok: true, msg: `已永久买断并装备【${def.name}】！` };
+        return { ok: true, msg: I18n.t('msgBoughtPerm', { name: wTitle(w.evolved) }) };
       }
 
-      // 已拥有的武器：未装备时点击直接免费切换上阵，绝不强制扣弹药费！
       if (!forceRefill && s.player.activeSlot !== ownedIdx) {
         s.player.activeSlot = ownedIdx;
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
         SoundFX.reloadDone();
-        return { ok: true, msg: `已切换装备【${w.evolved ? def.superName : def.name}】！` };
+        return { ok: true, msg: I18n.t('msgSwitched', { name: wTitle(w.evolved) }) };
       }
 
       if (def.maxReserve < 0) {
         s.player.activeSlot = ownedIdx;
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
-        return { ok: true, msg: '该武器无限备弹，已装备上阵！' };
+        return { ok: true, msg: I18n.t('msgInfAmmo') };
       }
       const maxRes = def.maxReserve * (w.evolved ? 2 : 1);
       if (w.reserve >= maxRes && w.mag >= this.getMaxMag(weaponId, w.evolved)) {
         s.player.activeSlot = ownedIdx;
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
-        return { ok: true, msg: '弹药已满，已装备上阵！' };
+        return { ok: true, msg: I18n.t('msgAmmoFull') };
       }
-      if (s.cash < def.ammoCost) return { ok: false, msg: `钞票不足 ($${def.ammoCost})！` };
+      if (s.cash < def.ammoCost) return { ok: false, msg: I18n.t('msgNoCash', { c: def.ammoCost }) };
       s.cash -= def.ammoCost;
       w.mag = this.getMaxMag(weaponId, w.evolved);
       w.reserve = maxRes;
@@ -648,14 +649,14 @@ export class GameEngine {
       s.player.reloadTimer = 0;
       s.player.weaponSwapTimer = 0.32;
       SoundFX.reloadDone();
-      return { ok: true, msg: `已补满【${w.evolved ? def.superName : def.name}】弹药！` };
+      return { ok: true, msg: I18n.t('msgRefilled', { name: wTitle(w.evolved) }) };
     }
 
-    if (s.cash < def.shopCost) return { ok: false, msg: `钞票不足 ($${def.shopCost})！迎战尸潮攒军费` };
+    if (s.cash < def.shopCost) return { ok: false, msg: I18n.t('msgNoCash', { c: def.shopCost }) };
     s.cash -= def.shopCost;
     this.giveOrRefillWeapon(weaponId, false);
     SoundFX.fanfare();
-    return { ok: true, msg: `成功购入【${def.name}】（原有武器已保留，可随时按 Q 或轮盘切换）！` };
+    return { ok: true, msg: I18n.t('msgBoughtGun', { name: wTitle(false) }) };
   }
 
   public evolveActiveWeaponInShop(cost = 1850): { ok: boolean; msg: string } {
@@ -663,18 +664,19 @@ export class GameEngine {
     if (!s) return { ok: false, msg: '' };
     const wep = s.player.weapons[s.player.activeSlot];
     const def = WEAPONS[wep.defId];
-    if (wep.evolved) return { ok: false, msg: '当前武器已经是超武形态！' };
-    if (s.cash < cost) return { ok: false, msg: `钞票不足 ($${cost})！` };
+    if (wep.evolved) return { ok: false, msg: I18n.t('msgAlreadyEvo') };
+    if (s.cash < cost) return { ok: false, msg: I18n.t('msgNoCash', { c: cost }) };
 
+    const sName = I18n.wSuperName(def.id, def.superName);
     s.cash -= cost;
     wep.evolved = true;
     wep.mag = this.getMaxMag(wep.defId, true);
     if (def.maxReserve > 0) wep.reserve = def.maxReserve * 2;
     s.player.weaponSwapTimer = 0.35;
-    this.spawnFloatingText(s.player.x, s.player.y - 36, `⚡ ${def.superName}`, def.superColor, 1.3);
+    this.spawnFloatingText(s.player.x, s.player.y - 36, `⚡ ${sName}`, def.superColor, 1.3);
     SoundFX.fanfare();
     PlatformSDK.happyTime();
-    return { ok: true, msg: `⚡ 超武觉醒：【${def.superName}】！` };
+    return { ok: true, msg: I18n.t('msgEvolved', { name: sName }) };
   }
 
   public buyShopTacticalItem(
@@ -683,30 +685,30 @@ export class GameEngine {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
     if (item === 'armor') {
-      if (s.player.armor >= s.player.maxArmor) return { ok: false, msg: '当前防弹护甲已满 (100/100)！' };
-      if (s.cash < 380) return { ok: false, msg: '钞票不足 ($380)' };
+      if (s.player.armor >= s.player.maxArmor) return { ok: false, msg: I18n.t('msgArmorFull') };
+      if (s.cash < 380) return { ok: false, msg: I18n.t('msgNoCash', { c: 380 }) };
       s.cash -= 380;
       s.player.armor = Math.min(s.player.maxArmor, s.player.armor + 65);
       SoundFX.fanfare();
-      return { ok: true, msg: '🦺 已穿戴凯夫拉防弹插板 (+65 护甲，抵消 70% 受击伤害)！' };
+      return { ok: true, msg: I18n.t('msgArmorBought') };
     }
     if (item === 'grenades') {
-      if (s.cash < 220) return { ok: false, msg: '钞票不足 ($220)' };
+      if (s.cash < 220) return { ok: false, msg: I18n.t('msgNoCash', { c: 220 }) };
       s.cash -= 220;
       s.player.grenades += 3;
       SoundFX.reloadDone();
-      return { ok: true, msg: '💣 已购入 3 颗高爆破片手雷！' };
+      return { ok: true, msg: I18n.t('msgGrenBought') };
     }
     if (item === 'medkit') {
-      if (s.player.hp >= s.player.maxHp) return { ok: false, msg: '当前生命值已满！' };
-      if (s.cash < 300) return { ok: false, msg: '钞票不足 ($300)' };
+      if (s.player.hp >= s.player.maxHp) return { ok: false, msg: I18n.t('msgHpFull') };
+      if (s.cash < 300) return { ok: false, msg: I18n.t('msgNoCash', { c: 300 }) };
       s.cash -= 300;
       s.player.hp = s.player.maxHp;
       SoundFX.fanfare();
-      return { ok: true, msg: '❤️ 战地急救完成，生命值已回满！' };
+      return { ok: true, msg: I18n.t('msgHealed') };
     }
     if (item === 'turret') {
-      if (s.cash < 650) return { ok: false, msg: '钞票不足 ($650)' };
+      if (s.cash < 650) return { ok: false, msg: I18n.t('msgNoCash', { c: 650 }) };
       s.cash -= 650;
       const tx = s.player.x + 25;
       const ty = s.player.y;
@@ -716,9 +718,9 @@ export class GameEngine {
         s.turrets.push({ x: tx, y: ty, angle: s.player.angle, fireCd: 0, life: 38 });
       }
       SoundFX.fanfare();
-      return { ok: true, msg: '🛰️ 自动哨戒机枪塔已部署 (38秒)！' };
+      return { ok: true, msg: I18n.t('msgTurretDeployed') };
     }
-    if (s.cash < 320) return { ok: false, msg: '钞票不足 ($320)' };
+    if (s.cash < 320) return { ok: false, msg: I18n.t('msgNoCash', { c: 320 }) };
     s.cash -= 320;
     for (const w of s.player.weapons) {
       const def = WEAPONS[w.defId];
@@ -726,7 +728,7 @@ export class GameEngine {
       if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
     }
     SoundFX.reloadDone();
-    return { ok: true, msg: '📦 全身所有枪械弹药已补满！' };
+    return { ok: true, msg: I18n.t('msgAllAmmoFull') };
   }
 
   public throwGrenade(): void {
@@ -785,7 +787,7 @@ export class GameEngine {
     this.spawnFloatingText(
       p.x,
       p.y - 38,
-      reviverName ? `💉 ${reviverName} 战地救援!` : '💉 波次集结自动起身!',
+      reviverName ? I18n.t('ftRevivedBy', { name: reviverName }) : I18n.t('ftWaveRevive'),
       '#4ade80',
       1.25
     );
@@ -798,7 +800,6 @@ export class GameEngine {
     s.waveState = 'fighting';
     s.repairsPaidThisWave = 0;
 
-    // 波次切换时全队重伤/倒地队员自动扶起！
     if (s.isCoop) {
       this.reviveLocalPlayerFromWaveOrTeammate();
       if (CoopManager.role === 'host') {
@@ -821,7 +822,7 @@ export class GameEngine {
       if (w.tempWavesLeft !== undefined) {
         w.tempWavesLeft -= 1;
         if (w.tempWavesLeft <= 0 && p.weapons.length > 1) {
-          this.spawnFloatingText(p.x, p.y - 38, '空投试用超武已到期', '#cbd5e1', 1.1);
+          this.spawnFloatingText(p.x, p.y - 38, I18n.t('ftTrialExpired'), '#cbd5e1', 1.1);
           p.weapons.splice(i, 1);
           p.activeSlot = Math.min(p.activeSlot, p.weapons.length - 1);
         }
@@ -888,7 +889,8 @@ export class GameEngine {
 
     if (wave % 5 === 0) {
       SoundFX.alarm();
-      const bText = wave % 10 === 0 ? `👑 第 ${wave} 波 · 狂暴尸王降临` : `🛡️ 第 ${wave} 波 · 重装精英突袭`;
+      const bText =
+        wave % 10 === 0 ? I18n.t('bannerBossWave', { w: wave }) : I18n.t('bannerEliteWave', { w: wave });
       this.showBanner(bText, 2.6);
       if (s.isCoop && CoopManager.role === 'host') {
         CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bText, dur: 2.6 });
@@ -932,11 +934,12 @@ export class GameEngine {
       s.player.weaponSwapTimer = 0.28;
       const wep = s.player.weapons[next];
       const def = WEAPONS[wep.defId];
+      const wLabel = wep.evolved ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name);
       SoundFX.reloadDone();
       this.spawnFloatingText(
         s.player.x,
         s.player.y - 34,
-        `🔫 ${wep.evolved ? def.superName : def.name}`,
+        `🔫 ${wLabel}`,
         wep.evolved ? def.superColor : def.color,
         1.15
       );
@@ -1011,7 +1014,7 @@ export class GameEngine {
     }
     s.camera.shake = 1.2;
     SoundFX.explosion();
-    this.showBanner('⚡ 震爆空投支援抵达 · 满血复活', 2.6);
+    this.showBanner(I18n.t('bannerReviveDrop'), 2.6);
     PlatformSDK.gameplayStart();
   }
 
@@ -1036,13 +1039,14 @@ export class GameEngine {
     } else {
       s.turrets.push({ x: s.player.x, y: s.player.y, angle: 0, fireCd: 0, life: 45 });
     }
-    this.showBanner('🛰️ 弹药&手雷已补给！自动哨戒机枪塔已部署 (45秒)！', 3.2);
+    this.showBanner(I18n.t('bannerHqSupport'), 3.2);
     PlatformSDK.gameplayStart();
   }
 
   public applyElectricFortify(): void {
     const s = this.state;
     if (!s) return;
+    const gridMsg = I18n.t('bannerElecGrid');
     if (s.isCoop && CoopManager.role === 'client') {
       CoopManager.sendToHost({ type: 'cmd_electric_fortify', ownerId: CoopManager.myPeerId });
     } else {
@@ -1055,12 +1059,12 @@ export class GameEngine {
         CoopManager.broadcastToClients({
           type: 'evt_fx',
           kind: 'banner',
-          text: '⚡ 全图窗户已升级为【高压电击钢网】(持续2波)！',
+          text: gridMsg,
           dur: 3.2,
         });
       }
     }
-    this.showBanner('⚡ 全图窗户已升级为【高压电击钢网】(持续2波)！', 3.2);
+    this.showBanner(gridMsg, 3.2);
     PlatformSDK.gameplayStart();
   }
 
@@ -1241,7 +1245,7 @@ export class GameEngine {
         if (s.relicIds.includes('piggy_bank') && s.cash > 0) {
           const interest = Math.min(180, Math.round(s.cash * 0.1));
           s.cash += interest;
-          this.spawnFloatingText(s.player.x, s.player.y - 42, `战备利息 +$${interest}!`, '#fde047', 1.3);
+          this.spawnFloatingText(s.player.x, s.player.y - 42, I18n.t('ftInterest', { n: interest }), '#fde047', 1.3);
           SoundFX.coin();
         }
 
@@ -1259,7 +1263,7 @@ export class GameEngine {
           }
           SoundFX.fanfare();
           PlatformSDK.happyTime();
-          const bMsg = '🚁 救援直升机已就位 · 全队前往 H 停机坪集结撤离';
+          const bMsg = I18n.t('bannerEvacReady');
           this.showBanner(bMsg, 4.5);
           if (s.isCoop) {
             CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bMsg, dur: 4.5 });
@@ -1508,7 +1512,7 @@ export class GameEngine {
       if (p.bleedoutTimer <= 0) {
         p.spectating = true;
         p.isMoving = false;
-        this.showBanner('⏳ 重伤失血昏迷 · 本波清场后将自动起身参战', 3.4);
+        this.showBanner(I18n.t('bannerBledOut'), 3.4);
         return;
       }
       // 倒地状态可缓慢向队友方向爬行求援
@@ -1713,7 +1717,7 @@ export class GameEngine {
       if (wep.reserve === 0) {
         if (p.activeSlot !== 0) {
           p.activeSlot = 0;
-          this.spawnFloatingText(p.x, p.y - 34, '弹药耗尽！切回手枪', '#fca5a5', 1);
+          this.spawnFloatingText(p.x, p.y - 34, I18n.t('ftOutOfAmmo'), '#fca5a5', 1);
         }
       } else {
         this.startReload();
@@ -1965,7 +1969,7 @@ export class GameEngine {
       this.rebuildFlowField();
       SoundFX.fanfare();
       PlatformSDK.happyTime();
-      const bText = `🔓 已开启【${door.label}】`;
+      const bText = I18n.t('bannerDoorOpen', { name: I18n.roomOrDoorName(door.unlockRoomId, door.label) });
       this.showBanner(bText, 2.2);
       if (s.isCoop && CoopManager.role === 'host') {
         CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bText, dur: 2.2 });
@@ -1973,7 +1977,7 @@ export class GameEngine {
     } else {
       const left = door.cost - door.paidAmount;
       SoundFX.coin();
-      const ftText = `💰 合资开门 +$${accepted} (还差 $${left})`;
+      const ftText = I18n.t('ftDoorPool', { paid: accepted, left });
       this.spawnFloatingText(cx, cy - 22, ftText, '#fde047', 1.05);
       if (s.isCoop && CoopManager.role === 'host') {
         CoopManager.broadcastToClients({
@@ -2021,9 +2025,9 @@ export class GameEngine {
             s.repairsPaidThisWave += 1;
             const cashBonus = 8;
             s.cash += cashBonus;
-            this.spawnFloatingText(cx, cy - 16, `🔨 修窗 +$${cashBonus}`, '#fde047', 1);
+            this.spawnFloatingText(cx, cy - 16, I18n.t('ftRepairCash', { n: cashBonus }), '#fde047', 1);
           } else {
-            this.spawnFloatingText(cx, cy - 16, '🔨 已加固', '#cbd5e1', 0.9);
+            this.spawnFloatingText(cx, cy - 16, I18n.t('ftRepaired'), '#cbd5e1', 0.9);
           }
           if (s.modifiers.repairHealRatio > 0 && s.repairsPaidThisWave <= maxPaidRepairs) {
             const heal = Math.round(p.maxHp * s.modifiers.repairHealRatio);
@@ -2156,41 +2160,42 @@ export class GameEngine {
       wep.mag = this.getMaxMag(wep.defId, wep.evolved);
       wep.reserve = def.maxReserve * (wep.evolved ? 2 : 1);
       SoundFX.reloadDone();
-      this.spawnFloatingText(st.x, st.y - 34, '📦 弹药已满', '#4ade80', 1.15);
+      this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftAmmoFull'), '#4ade80', 1.15);
     } else if (st.type === 'pack_a_punch') {
       const wep = p.weapons[p.activeSlot];
       const def = WEAPONS[wep.defId];
+      const sName = I18n.wSuperName(def.id, def.superName);
       wep.evolved = true;
       wep.mag = this.getMaxMag(wep.defId, true);
       if (def.maxReserve > 0) wep.reserve = def.maxReserve * 2;
       SoundFX.fanfare();
       PlatformSDK.happyTime();
-      this.spawnFloatingText(st.x, st.y - 36, `⚡ ${def.superName}`, def.superColor, 1.3);
+      this.spawnFloatingText(st.x, st.y - 36, `⚡ ${sName}`, def.superColor, 1.3);
     } else if (st.type === 'mech_dog_cage') {
       st.used = true;
       s.mechDog.active = true;
       s.mechDog.x = st.x;
       s.mechDog.y = st.y;
       SoundFX.fanfare();
-      this.spawnFloatingText(st.x, st.y - 34, '🐕 机械警犬出击!', '#7dd3fc', 1.2);
+      this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftMechDog'), '#7dd3fc', 1.2);
     } else if (st.type === 'vending_machine') {
       const roll = Math.random();
       if (roll < 0.36) {
         p.hp = p.maxHp;
         p.armor = Math.min(p.maxArmor, p.armor + 35);
-        this.spawnFloatingText(st.x, st.y - 34, '🍔 满血 + 35护甲', '#4ade80', 1.2);
+        this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftVendHeal'), '#4ade80', 1.2);
       } else if (roll < 0.75) {
         s.powerUpTimers.overdrive = 7;
-        this.spawnFloatingText(st.x, st.y - 34, '🥤 7秒无限火力', '#f97316', 1.2);
+        this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftVendOverdrive'), '#f97316', 1.2);
       } else {
         s.cash += 300;
-        this.spawnFloatingText(st.x, st.y - 34, '🎰 头奖 +$300', '#fde047', 1.3);
+        this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftVendJackpot'), '#fde047', 1.3);
       }
       SoundFX.fanfare();
     } else if (st.type === 'laser_trap') {
       st.activeTimer = 18;
       SoundFX.alarm();
-      this.spawnFloatingText(st.x, st.y - 34, '🚨 激光绞杀已激活', '#f87171', 1.15);
+      this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftLaserOn'), '#f87171', 1.15);
     }
   }
 
@@ -2214,16 +2219,16 @@ export class GameEngine {
         reserve: def.maxReserve > 0 ? def.maxReserve * (evolved ? 2 : 1) : -1,
         tempWavesLeft: tempWaves,
       };
-      // 新购入武器全部永久追加进背包武器栏，绝不顶掉或销毁任何已购旧武器！
       p.weapons.push(inst);
       p.activeSlot = p.weapons.length - 1;
     }
     p.reloadTimer = 0;
     p.weaponSwapTimer = 0.32;
+    const dispName = evolved ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name);
     this.spawnFloatingText(
       p.x,
       p.y - 36,
-      `装备：${evolved ? def.superName : def.name}`,
+      I18n.t('ftEquipped', { name: dispName }),
       evolved ? def.superColor : def.color,
       1.2
     );
@@ -2244,24 +2249,29 @@ export class GameEngine {
     SoundFX.fanfare();
     if (pool.length === 0) {
       s.cash += 350;
-      this.spawnFloatingText(cx, cy - 28, '战术模组满阶 +$350', '#fde047', 1.25);
+      this.spawnFloatingText(cx, cy - 28, I18n.t('ftRelicMax'), '#fde047', 1.25);
       return;
     }
     const picked = pool[Math.floor(Math.random() * pool.length)];
     s.relicIds.push(picked.id);
+    const rMeta = I18n.relicMeta(picked.id, picked.name, picked.desc);
     const rarityColor =
       picked.rarity === 'legendary' ? '#f59e0b' : picked.rarity === 'epic' ? '#c084fc' : '#38bdf8';
     const rarityLabel =
-      picked.rarity === 'legendary' ? '传奇战术遗物' : picked.rarity === 'epic' ? '史诗战术装置' : '精良战术模组';
+      picked.rarity === 'legendary'
+        ? I18n.t('rarityLeg')
+        : picked.rarity === 'epic'
+          ? I18n.t('rarityEpic')
+          : I18n.t('rarityRare');
     s.lootToast = {
       sprite: picked.sprite,
       badge: rarityLabel,
-      title: picked.name,
-      desc: picked.desc,
+      title: rMeta.name,
+      desc: rMeta.desc,
       color: rarityColor,
       timer: 3.4,
     };
-    this.spawnFloatingText(cx, cy - 28, `获得 ${picked.name}`, rarityColor, 1.25);
+    this.spawnFloatingText(cx, cy - 28, I18n.t('ftGotRelic', { name: rMeta.name }), rarityColor, 1.25);
   }
 
   private damageZombiesWithLaserTrap(st: RuntimeStation, dt: number): void {
@@ -2616,7 +2626,7 @@ export class GameEngine {
         s.feverTimer = 6.5;
         s.fever = 0;
         SoundFX.fanfare();
-        this.spawnFloatingText(s.player.x, s.player.y - 38, '🔥 狂暴时刻!', '#fb923c', 1.25);
+        this.spawnFloatingText(s.player.x, s.player.y - 38, I18n.t('ftFever'), '#fb923c', 1.25);
       }
     }
 
@@ -2626,7 +2636,7 @@ export class GameEngine {
         s.player.vampCounter = 0;
         const heal = Math.round(s.player.maxHp * 0.08);
         s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
-        this.spawnFloatingText(s.player.x, s.player.y - 30, `纳米修复 +${heal}`, '#4ade80', 1.15);
+        this.spawnFloatingText(s.player.x, s.player.y - 30, I18n.t('ftNanoHeal', { n: heal }), '#4ade80', 1.15);
       }
     }
 
@@ -2659,7 +2669,7 @@ export class GameEngine {
         bobPhase: 0,
       });
       SoundFX.fanfare();
-      this.spawnFloatingText(dropPt.x, dropPt.y - 26, '掉落战术空投箱!', '#fde047', 1.25);
+      this.spawnFloatingText(dropPt.x, dropPt.y - 26, I18n.t('ftDropChest'), '#fde047', 1.25);
     } else if (Math.random() < (z.kind === 'miniboss' ? 0.55 : 0.035)) {
       const types: PowerUpType[] = ['overdrive', 'nuke', 'carpenter', 'double_cash', 'freeze'];
       const pType = types[Math.floor(Math.random() * types.length)];
@@ -2748,7 +2758,7 @@ export class GameEngine {
     this.spawnExplosionVisuals(x, y, radius);
 
     if (this.explosionDepth === 0) {
-      this.spawnFloatingText(x, y - 18, '💥 高爆轰击!', '#fde047', 1.38);
+      this.spawnFloatingText(x, y - 18, I18n.t('ftBlast'), '#fde047', 1.38);
       if (s.isCoop && CoopManager.role === 'host') {
         CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'explode', x, y, radius });
       }
@@ -2951,7 +2961,7 @@ export class GameEngine {
               // 震荡铆钉板：仅在最后一块木板被彻底拆破时触发非致命气浪击退与眩晕！
               if (prevPlanks > 0 && win.planks === 0 && s.relicIds.includes('explosive_planks')) {
                 this.spawnHitSparks(wf.wcx, wf.wcy, '#38bdf8', 14);
-                this.spawnFloatingText(wf.wcx, wf.wcy - 18, '🛡️ 震荡弹开!', '#38bdf8', 1.2);
+                this.spawnFloatingText(wf.wcx, wf.wcy - 18, I18n.t('ftShockPlank'), '#38bdf8', 1.2);
                 for (const oz of s.zombies) {
                   if (!oz.insideBuilding && Math.hypot(oz.x - wf.wcx, oz.y - wf.wcy) <= 130) {
                     oz.x += wf.outX * 78;
@@ -3053,7 +3063,7 @@ export class GameEngine {
       if (z.kind === 'thief') {
         z.fleeTimer -= dt;
         if (z.fleeTimer <= 0) {
-          this.spawnFloatingText(z.x, z.y - 20, '💨 盗宝怪溜走了!', '#cbd5e1', 1.15);
+          this.spawnFloatingText(z.x, z.y - 20, I18n.t('ftThiefEscaped'), '#cbd5e1', 1.15);
           s.zombies.splice(i, 1);
           continue;
         }
@@ -3076,15 +3086,14 @@ export class GameEngine {
             z.rangedCd = 4.2;
             z.fleeTimer = 0.65;
             z.attackAnim = 1.0;
-            this.spawnFloatingText(z.x, z.y - z.radius - 16, '💢 暴君冲锋!', '#c084fc', 1.15);
+            this.spawnFloatingText(z.x, z.y - z.radius - 16, I18n.t('ftTyrantCharge'), '#c084fc', 1.15);
           }
         } else if (z.kind === 'boss') {
-          // 尸王半血狂暴召唤疾行猎犬护卫！
           if (bossEnraged && z.fleeTimer === 0) {
             z.fleeTimer = 1;
             SoundFX.alarm();
             s.camera.shake = Math.max(s.camera.shake, 0.9);
-            const bText = '👑 尸王进入狂暴二阶段！移速飙升并召唤嗜血猎犬！';
+            const bText = I18n.t('bannerBossRage');
             this.showBanner(bText, 3.2);
             if (s.isCoop && CoopManager.role === 'host') {
               CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bText, dur: 3.2 });
@@ -3323,7 +3332,7 @@ export class GameEngine {
         p.reloadTimer = 0;
         this.input.resetStates();
         SoundFX.alarm();
-        this.showBanner('🆘 你已重伤倒地！向队友爬行等待救援', 3.4);
+        this.showBanner(I18n.t('bannerSelfDown'), 3.4);
         if (CoopManager.role === 'client') {
           CoopManager.sendToHost({ type: 'player_sync', p: this.buildLocalPlayerSync() });
         }
@@ -3492,8 +3501,9 @@ export class GameEngine {
       }
     } else if (d.kind === 'powerup' && d.powerUp) {
       const meta = POWERUP_META[d.powerUp];
+      const pName = I18n.powerupName(d.powerUp, meta.name);
       SoundFX.fanfare();
-      this.spawnFloatingText(s.player.x, s.player.y - 36, `${meta.icon} ${meta.name}!`, meta.color, 1.25);
+      this.spawnFloatingText(s.player.x, s.player.y - 36, `${meta.icon} ${pName}!`, meta.color, 1.25);
       if (s.isCoop && CoopManager.role === 'host') {
         CoopManager.broadcastToClients({ type: 'evt_team_reward', powerUp: d.powerUp });
       }
@@ -3533,19 +3543,20 @@ export class GameEngine {
     const s = this.state!;
     const picked = IN_RUN_PERKS[Math.floor(Math.random() * IN_RUN_PERKS.length)];
     picked.apply(s.modifiers);
+    const pMeta = I18n.perkMeta(picked.id, picked.name, picked.desc);
     SoundFX.fanfare();
     s.lootToast = {
       sprite: picked.sprite,
-      badge: `战地晋升 Lv.${s.battleLevel}`,
-      title: picked.name,
-      desc: picked.desc,
+      badge: I18n.t('badgeBattleLv', { lv: s.battleLevel }),
+      title: pMeta.name,
+      desc: pMeta.desc,
       color: picked.color,
       timer: 2.8,
     };
     this.spawnFloatingText(
       s.player.x,
       s.player.y - 40,
-      `Lv.${s.battleLevel} · ${picked.name}`,
+      `Lv.${s.battleLevel} · ${pMeta.name}`,
       '#fde047',
       1.22
     );
@@ -3963,7 +3974,7 @@ export class GameEngine {
       rp.bleedoutTimer = 0;
       rp.hp = Math.round(rp.maxHp * 0.55);
       SoundFX.fanfare();
-      this.spawnFloatingText(rp.x, rp.y - 36, `💉 已救起 ${rp.callsign}!`, '#4ade80', 1.2);
+      this.spawnFloatingText(rp.x, rp.y - 36, I18n.t('ftRescuedAlly', { name: rp.callsign }), '#4ade80', 1.2);
       CoopManager.broadcastToClients({
         type: 'evt_player_revived',
         targetId: rp.peerId,
@@ -3972,7 +3983,7 @@ export class GameEngine {
       });
       if (reviverId === CoopManager.myPeerId) {
         s.cash += 65;
-        this.spawnFloatingText(s.player.x, s.player.y - 24, '战地救援 +$65', '#fde047', 1.1);
+        this.spawnFloatingText(s.player.x, s.player.y - 24, I18n.t('ftRescueBonus'), '#fde047', 1.1);
       } else {
         CoopManager.sendToClient(reviverId, {
           type: 'evt_team_reward',
@@ -4749,11 +4760,11 @@ export class GameEngine {
         s.mechDog.x = st.x;
         s.mechDog.y = st.y;
         SoundFX.fanfare();
-        this.spawnFloatingText(st.x, st.y - 34, '🐕 机械警犬出击!', '#7dd3fc', 1.2);
+        this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftMechDog'), '#7dd3fc', 1.2);
       } else if (st.type === 'laser_trap' && st.activeTimer <= 0) {
         st.activeTimer = 18;
         SoundFX.alarm();
-        this.spawnFloatingText(st.x, st.y - 34, '🚨 激光绞杀已激活', '#f87171', 1.15);
+        this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftLaserOn'), '#f87171', 1.15);
       }
       return;
     }
@@ -4769,7 +4780,7 @@ export class GameEngine {
         win.planks = win.maxPlanks;
         this.pushOutdoorZombiesOutsidePlanks(win);
       }
-      const bText = '⚡ 队友支援：全图窗户已升级为【高压电击钢网】！';
+      const bText = I18n.t('bannerAllyElec');
       this.showBanner(bText, 3.2);
       CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bText, dur: 3.2 }, msg.ownerId);
       return;
@@ -4808,7 +4819,7 @@ export class GameEngine {
           rp.downed = false;
           rp.spectating = false;
           rp.reviveProgress = 0;
-          this.spawnFloatingText(rp.x, rp.y - 36, `💉 ${rp.callsign} 已获救!`, '#4ade80', 1.15);
+          this.spawnFloatingText(rp.x, rp.y - 36, I18n.t('ftAllySaved', { name: rp.callsign }), '#4ade80', 1.15);
         }
       }
       return;
@@ -4832,8 +4843,9 @@ export class GameEngine {
       }
       if (msg.powerUp) {
         const meta = POWERUP_META[msg.powerUp];
+        const pName = I18n.powerupName(msg.powerUp, meta.name);
         SoundFX.fanfare();
-        this.spawnFloatingText(s.player.x, s.player.y - 36, `${meta.icon} ${meta.name}!`, meta.color, 1.2);
+        this.spawnFloatingText(s.player.x, s.player.y - 36, `${meta.icon} ${pName}!`, meta.color, 1.2);
         if (msg.powerUp === 'carpenter') {
           s.cash += 40;
         }
@@ -4860,7 +4872,7 @@ export class GameEngine {
     if (!s || !s.isCoop || s.waveState === 'ended') return;
 
     if (peerId === 'host' && CoopManager.role === 'client') {
-      this.showBanner('⚠️ 房主连接已断开 · 小队行动中止', 4);
+      this.showBanner(I18n.t('bannerHostDisc'), 4);
       s.waveState = 'ended';
       this.callbacks.onRunFinished(false, s);
       return;
@@ -4871,7 +4883,7 @@ export class GameEngine {
       const leftName = s.remotePlayers[idx].callsign;
       s.remotePlayers.splice(idx, 1);
       s.squadCount = Math.max(1, 1 + s.remotePlayers.length);
-      this.showBanner(`📡 队友【${leftName}】已离线 · 尸潮强度已自动重平衡`, 3.2);
+      this.showBanner(I18n.t('bannerPeerLeft', { name: leftName }), 3.2);
       if (CoopManager.role === 'host') {
         this.checkCoopSquadWipe();
       }

@@ -1,5 +1,6 @@
 import { AdPlacement } from '../types';
 import { SoundFX } from '../audio/SoundFX';
+import { I18n } from '../i18n/I18n';
 
 declare global {
   interface Window {
@@ -8,9 +9,15 @@ declare global {
         init: () => Promise<void>;
         environment?: string;
         game?: {
+          loadingStart?: () => void;
+          loadingStop?: () => void;
           gameplayStart: () => void;
           gameplayStop: () => void;
           happytime: () => void;
+          inviteLink?: (params: Record<string, string>) => string;
+          showInviteButton?: (params: Record<string, string>) => string;
+          hideInviteButton?: () => void;
+          getInviteParam?: (key: string) => string | null;
         };
         ad?: {
           requestAd: (
@@ -42,6 +49,19 @@ class PlatformAdapter {
     this.initialized = true;
 
     try {
+      // 若 SDK 脚本尚在异步加载中，短暂等待最多 600ms 以确保识别 CrazyGames 环境
+      if (!window.CrazyGames?.SDK) {
+        await new Promise<void>((resolve) => {
+          let checks = 0;
+          const timer = setInterval(() => {
+            checks++;
+            if (window.CrazyGames?.SDK || checks >= 12) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 50);
+        });
+      }
       if (window.CrazyGames?.SDK) {
         await window.CrazyGames.SDK.init();
         const env = window.CrazyGames.SDK.environment;
@@ -49,6 +69,22 @@ class PlatformAdapter {
       }
     } catch {
       this.isCrazyGames = false;
+    }
+  }
+
+  public loadingStart(): void {
+    try {
+      window.CrazyGames?.SDK?.game?.loadingStart?.();
+    } catch {
+      // ignore
+    }
+  }
+
+  public loadingStop(): void {
+    try {
+      window.CrazyGames?.SDK?.game?.loadingStop?.();
+    } catch {
+      // ignore
     }
   }
 
@@ -76,11 +112,62 @@ class PlatformAdapter {
     }
   }
 
-  /**
-   * 统一纯激励视频接口（不接入任何开屏或强弹插屏）
-   * 播放期间严格暂停游戏主循环并静音音频，完全符合 CrazyGames 审核规范；
-   * 本地开发或未挂载 SDK 时自动走 2 秒可视化模拟激励广告弹窗，方便直接测试全流程。
-   */
+  public buildInviteLink(roomCode: string): string {
+    try {
+      if (this.isCrazyGames && window.CrazyGames?.SDK?.game?.inviteLink) {
+        const cgLink = window.CrazyGames.SDK.game.inviteLink({ roomId: roomCode });
+        if (cgLink) return cgLink;
+      }
+    } catch {
+      // fallback to URL param
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', roomCode);
+    return url.toString();
+  }
+
+  public showInviteButton(roomCode: string): void {
+    try {
+      if (this.isCrazyGames && window.CrazyGames?.SDK?.game?.showInviteButton) {
+        window.CrazyGames.SDK.game.showInviteButton({ roomId: roomCode });
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  public hideInviteButton(): void {
+    try {
+      window.CrazyGames?.SDK?.game?.hideInviteButton?.();
+    } catch {
+      // ignore
+    }
+  }
+
+  public consumeInviteRoomCode(): string | null {
+    try {
+      const cgRoom = window.CrazyGames?.SDK?.game?.getInviteParam?.('roomId');
+      if (cgRoom && cgRoom.trim().length >= 4) {
+        return cgRoom.trim().toUpperCase();
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get('room') || url.searchParams.get('roomId');
+      if (code && code.trim().length >= 4) {
+        url.searchParams.delete('room');
+        url.searchParams.delete('roomId');
+        window.history.replaceState({}, '', url.toString());
+        return code.trim().toUpperCase();
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
   public showRewardedAd(placement: AdPlacement, rewardTitle: string): Promise<boolean> {
     this.gameplayStop();
     SoundFX.setAdMuted(true);
@@ -105,7 +192,6 @@ class PlatformAdapter {
             resolve(finish(true));
           },
           adError: () => {
-            // 若在本地环境报错则回退模拟框，正式环境返回失败提示
             if (window.CrazyGames?.SDK?.environment === 'local') {
               this.runMockAdModal(placement, rewardTitle).then((ok) => resolve(finish(ok)));
             } else {
@@ -125,15 +211,15 @@ class PlatformAdapter {
       overlay.className = 'mock-ad-overlay';
       overlay.innerHTML = `
         <div class="mock-ad-card">
-          <div class="mock-ad-badge">开发调试 · 模拟激励视频 (${placement})</div>
-          <h3>📡 正在呼叫总部空投支援...</h3>
-          <p class="mock-ad-reward">即将解锁：<strong>${rewardTitle}</strong></p>
+          <div class="mock-ad-badge">${I18n.t('mockAdBadge')} (${placement})</div>
+          <h3>${I18n.t('mockAdTitle')}</h3>
+          <p class="mock-ad-reward">${I18n.t('mockAdReward', { title: rewardTitle })}</p>
           <div class="mock-ad-bar-wrap">
             <div class="mock-ad-bar-fill" id="mock-ad-bar"></div>
           </div>
-          <p class="mock-ad-sub" id="mock-ad-timer">游戏已自动静音并暂停 · 剩余 2.0 秒</p>
+          <p class="mock-ad-sub" id="mock-ad-timer">${I18n.t('mockAdTimer', { s: '2.0' })}</p>
           <div class="mock-ad-actions">
-            <button class="btn-cartoon btn-gray" id="mock-ad-cancel">放弃奖励</button>
+            <button class="btn-cartoon btn-gray" id="mock-ad-cancel">${I18n.t('mockAdCancel')}</button>
           </div>
         </div>
       `;
@@ -163,7 +249,7 @@ class PlatformAdapter {
         const pct = Math.min(1, elapsed / totalMs);
         bar.style.width = `${pct * 100}%`;
         const remain = Math.max(0, (totalMs - elapsed) / 1000).toFixed(1);
-        timerText.textContent = `游戏已自动静音并暂停 · 剩余 ${remain} 秒`;
+        timerText.textContent = I18n.t('mockAdTimer', { s: remain });
         if (pct >= 1) {
           cleanup();
           resolve(true);

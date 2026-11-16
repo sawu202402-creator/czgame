@@ -4,6 +4,7 @@ import { STAGES } from '../data/stages';
 import { WEAPON_LIST, WEAPONS } from '../data/weapons';
 import { RunSnapshot } from '../game/Entities';
 import { GameEngine } from '../game/GameEngine';
+import { I18n, LANG_OPTIONS, LangCode } from '../i18n/I18n';
 import { SaveManager, UPGRADE_TRACKS } from '../meta/SaveManager';
 import { CoopManager } from '../net/CoopManager';
 import { SQUAD_SLOTS, getCoopScaling } from '../net/CoopProtocol';
@@ -49,14 +50,12 @@ export class UIManager {
     }
   }
 
-  // ==================== 特工战术指挥大厅 ====================
-
   private getAgentRankTitle(level: number): string {
-    if (level >= 12) return '传奇统帅';
-    if (level >= 8) return '王牌指挥官';
-    if (level >= 5) return '铁血军士长';
-    if (level >= 3) return '破阵先锋';
-    return '新锐特工';
+    if (level >= 12) return I18n.t('rank12');
+    if (level >= 8) return I18n.t('rank8');
+    if (level >= 5) return I18n.t('rank5');
+    if (level >= 3) return I18n.t('rank3');
+    return I18n.t('rank1');
   }
 
   private isFullscreenSupported(): boolean {
@@ -90,7 +89,7 @@ export class UIManager {
         orient?.lock?.('landscape').catch(() => {});
       }
     } catch {
-      // 忽略部分移动浏览器全屏权限限制
+      // ignore fullscreen restrictions
     }
   }
 
@@ -126,6 +125,8 @@ export class UIManager {
     };
   }
 
+  // ==================== 特工战术指挥大厅 ====================
+
   public showHomeHub(): void {
     cancelAnimationFrame(this.needleAnimId);
     this.armoryOpen = false;
@@ -135,6 +136,12 @@ export class UIManager {
     this.hudRoot?.remove();
     this.hudRoot = null;
     this.engine.state = null;
+
+    if (this.hubTab !== 'coop' || !CoopManager.lobby) {
+      PlatformSDK.hideInviteButton();
+    } else {
+      PlatformSDK.showInviteButton(CoopManager.lobby.roomCode);
+    }
 
     const save = SaveManager.get();
     const hasAffordableUpgrade = UPGRADE_TRACKS.some(
@@ -156,6 +163,10 @@ export class UIManager {
         ? ` (${CoopManager.lobby.members.length}/4)`
         : '';
 
+    const langOptsHtml = LANG_OPTIONS.map(
+      (o) => `<option value="${o.code}" ${o.code === I18n.lang ? 'selected' : ''}>🌐 ${o.label}</option>`
+    ).join('');
+
     this.modalRoot.innerHTML = `
       <div class="hub-screen">
         <div class="hub-bg-art">
@@ -166,23 +177,24 @@ export class UIManager {
           <div class="brand-block">
             <img class="brand-avatar" src="./assets/player_hero.png" alt="" />
             <div class="brand-titles">
-              <h1>僵尸防线大作战</h1>
-              <span class="brand-sub">SAS ZOMBIE FRONTLINE · 1~4人联机突围</span>
+              <h1>${I18n.t('gameTitle')}</h1>
+              <span class="brand-sub">${I18n.t('gameSub')}</span>
             </div>
           </div>
 
           <div class="hub-nav-tabs">
-            <button class="seg-btn ${this.hubTab === 'stages' ? 'active' : ''}" data-hub-tab="stages">🗺️ 单人战区</button>
-            <button class="seg-btn ${this.hubTab === 'coop' ? 'active' : ''}" data-hub-tab="coop">🤝 多人联机${coopCountBadge}</button>
+            <button class="seg-btn ${this.hubTab === 'stages' ? 'active' : ''}" data-hub-tab="stages">${I18n.t('tabStages')}</button>
+            <button class="seg-btn ${this.hubTab === 'coop' ? 'active' : ''}" data-hub-tab="coop">${I18n.t('tabCoop')}${coopCountBadge}</button>
             <button class="seg-btn ${this.hubTab === 'upgrades' ? 'active' : ''}" data-hub-tab="upgrades">
-              ⚡ 特工强化${hasAffordableUpgrade ? '<span class="nav-dot"></span>' : ''}
+              ${I18n.t('tabUpgrades')}${hasAffordableUpgrade ? '<span class="nav-dot"></span>' : ''}
             </button>
           </div>
 
           <div class="agent-bar">
-            <span class="gold-pill" title="永久特工金币"><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${save.gold}</span>
-            <button class="hub-util-btn" id="btn-hub-mute" title="音效开关">${muted ? '🔇' : '🔊'}</button>
-            ${fsSupported ? `<button class="hub-util-btn ${fsActive ? 'active' : ''}" id="btn-hub-fs" title="全屏沉浸模式">⛶</button>` : ''}
+            <span class="gold-pill"><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${save.gold}</span>
+            <select class="hub-lang-select" id="hub-lang-sel" aria-label="Language">${langOptsHtml}</select>
+            <button class="hub-util-btn" id="btn-hub-mute" title="Sound">${muted ? '🔇' : '🔊'}</button>
+            ${fsSupported ? `<button class="hub-util-btn ${fsActive ? 'active' : ''}" id="btn-hub-fs" title="Fullscreen">⛶</button>` : ''}
           </div>
         </header>
 
@@ -191,10 +203,18 @@ export class UIManager {
         </main>
 
         <footer class="hub-footer-tip">
-          📱 触屏：左手摇杆走位 · 右下角王者荣耀式轮盘射击/拖动瞄准 + 扇形切枪/手雷/换弹 ｜ 💻 键鼠：WASD · 鼠标射击 · B 商店 · G 手雷
+          ${I18n.t('footerTip')}
         </footer>
       </div>
     `;
+
+    const langSel = this.modalRoot.querySelector('#hub-lang-sel') as HTMLSelectElement | null;
+    if (langSel) {
+      langSel.onchange = () => {
+        I18n.setLang(langSel.value as LangCode, (k, v) => PlatformSDK.setStorageItem(k, v));
+        this.showHomeHub();
+      };
+    }
 
     const muteBtn = this.modalRoot.querySelector('#btn-hub-mute') as HTMLButtonElement | null;
     if (muteBtn) {
@@ -322,29 +342,37 @@ export class UIManager {
     ];
 
     const cards = STAGES.map((st, idx) => {
-      const meta = stageVisualMeta[idx] || stageVisualMeta[0];
+      const baseMeta = stageVisualMeta[idx] || stageVisualMeta[0];
+      const locMeta = I18n.stageMeta(st.id, {
+        name: st.name,
+        subtitle: st.subtitle,
+        sector: baseMeta.sector,
+        diffLabel: baseMeta.diffLabel,
+        tags: baseMeta.tags,
+      });
+
       const cleared = save.clearedStages.includes(st.id);
       const bestWave = save.endlessBestWave[st.id] || 0;
       const statusText =
         this.selectedMode === 'standard'
           ? cleared
-            ? '✅ 已通关'
-            : meta.diffLabel
+            ? I18n.t('stageCleared')
+            : locMeta.diffLabel
           : bestWave > 0
-            ? `🏆 最高 ${bestWave} 波`
-            : '♾️ 极限生存';
+            ? I18n.t('stageEndlessBest', { w: bestWave })
+            : I18n.t('stageEndlessTry');
 
-      const spritesHtml = meta.sprites
+      const spritesHtml = baseMeta.sprites
         .map((sp, sIdx) => `<img class="stage-vis-sp sp-${sIdx}" src="./assets/${sp}.png" alt="" />`)
         .join('');
 
-      const tagsHtml = meta.tags.map((tag) => `<span class="stage-tag">${tag}</span>`).join('');
+      const tagsHtml = locMeta.tags.map((tag) => `<span class="stage-tag">${tag}</span>`).join('');
 
       return `
         <article class="stage-card ${cleared ? 'is-cleared' : ''}">
-          <div class="stage-visual-strip ${meta.theme}">
+          <div class="stage-visual-strip ${baseMeta.theme}">
             <div class="stage-vis-top">
-              <span class="stage-sector">${meta.sector}</span>
+              <span class="stage-sector">${locMeta.sector}</span>
               <span class="stage-badge ${cleared && this.selectedMode === 'standard' ? 'cleared' : ''}">${statusText}</span>
             </div>
             <div class="stage-vis-sprites">
@@ -353,11 +381,11 @@ export class UIManager {
           </div>
 
           <div class="stage-card-body">
-            <h3>${st.name}</h3>
-            <p>${st.subtitle}</p>
+            <h3>${locMeta.name}</h3>
+            <p>${locMeta.subtitle}</p>
             <div class="stage-tags">${tagsHtml}</div>
             <button class="btn-cartoon ${this.selectedMode === 'standard' ? 'btn-green' : 'btn-purple'} stage-go-btn" data-stage-go="${st.id}">
-              ${this.selectedMode === 'standard' ? '▶ 空降出击 (10波撤离)' : '▶ 迎战无尽尸潮'}
+              ${this.selectedMode === 'standard' ? I18n.t('deployStandard') : I18n.t('deployEndless')}
             </button>
           </div>
         </article>
@@ -380,10 +408,10 @@ export class UIManager {
         if (!w) return '';
         return `
           <div class="arsenal-preview-chip">
-            <img src="./assets/gun_${w.id}.png" alt="${w.name}" />
+            <img src="./assets/gun_${w.id}.png" alt="${I18n.wName(w.id, w.name)}" />
             <div class="arsenal-chip-meta">
-              <span class="arsenal-chip-name">${w.name}</span>
-              <span class="arsenal-chip-evo">⚡${w.superName}</span>
+              <span class="arsenal-chip-name">${I18n.wName(w.id, w.name)}</span>
+              <span class="arsenal-chip-evo">⚡${I18n.wSuperName(w.id, w.superName)}</span>
             </div>
           </div>
         `;
@@ -391,43 +419,47 @@ export class UIManager {
       .join('');
 
     const modeDesc =
-      this.selectedMode === 'standard'
-        ? '坚守 10 波防线并击毙狂暴尸王，前往停机坪搭乘直升机撤离'
-        : '无波次上限，精英暴君与尸王轮番压境，冲击最高生存波次纪录';
+      this.selectedMode === 'standard' ? I18n.t('modeDescStandard') : I18n.t('modeDescEndless');
+    const endlessRecordStr =
+      bestEndless > 0
+        ? I18n.isZh()
+          ? `${bestEndless}`
+          : `W${bestEndless}`
+        : I18n.t('noRecord');
 
     return `
       <section class="hub-hero-banner">
         <div class="hero-dossier">
           <div class="hero-rank-row">
             <span class="hero-rank-pill">🎖️ Lv.${save.agentLevel} ${rankTitle}</span>
-            <span class="hero-dmg-bonus">全枪伤害 +${(save.agentLevel - 1) * 4}%</span>
+            <span class="hero-dmg-bonus">${I18n.t('allGunDmgBonus', { pct: (save.agentLevel - 1) * 3 })}</span>
           </div>
 
           <div class="hero-xp-wrap">
             <div class="hero-xp-bar">
               <div class="hero-xp-fill" style="width:${xpPct}%"></div>
             </div>
-            <span class="hero-xp-text">经验 ${save.agentXp}/${xpNext}</span>
+            <span class="hero-xp-text">${I18n.t('xpProgress', { cur: save.agentXp, next: xpNext })}</span>
           </div>
 
           <div class="hero-stats-row">
-            <span class="hero-stat-chip">🏆 通关 ${save.clearedStages.length}/${STAGES.length}</span>
-            <span class="hero-stat-chip">♾️ 最高 ${bestEndless > 0 ? `${bestEndless} 波` : '待挑战'}</span>
-            <span class="hero-stat-chip">🔫 15把超武重火器</span>
+            <span class="hero-stat-chip">${I18n.t('clearedStat', { done: save.clearedStages.length, total: STAGES.length })}</span>
+            <span class="hero-stat-chip">${I18n.t('bestEndlessStat', { wave: endlessRecordStr })}</span>
+            <span class="hero-stat-chip">${I18n.t('arsenalStat')}</span>
           </div>
 
           <div class="hero-mode-box">
             <div class="seg-group">
-              <button class="seg-btn ${this.selectedMode === 'standard' ? 'active' : ''}" data-mode-pick="standard">🚁 10波撤离</button>
-              <button class="seg-btn ${this.selectedMode === 'endless' ? 'active' : ''}" data-mode-pick="endless">♾️ 无尽尸潮</button>
+              <button class="seg-btn ${this.selectedMode === 'standard' ? 'active' : ''}" data-mode-pick="standard">${I18n.t('modeStandard')}</button>
+              <button class="seg-btn ${this.selectedMode === 'endless' ? 'active' : ''}" data-mode-pick="endless">${I18n.t('modeEndless')}</button>
             </div>
             <span class="hero-mode-desc">${modeDesc}</span>
           </div>
         </div>
 
         <div class="hero-art-panel">
-          <img class="hero-key-art" src="./assets/hub_banner.jpg" alt="僵尸防线大作战" />
-          <div class="hero-art-caption">🔨 修窗固防 · 🔓 开门拓荒 · ⚡ 超武觉醒</div>
+          <img class="hero-key-art" src="./assets/hub_banner.jpg" alt="Zombie Room Defense" />
+          <div class="hero-art-caption">${I18n.t('heroCaption')}</div>
         </div>
       </section>
 
@@ -435,11 +467,11 @@ export class UIManager {
 
       <section class="hub-arsenal-strip">
         <div class="arsenal-strip-head">
-          <span class="arsenal-strip-title">🔥 战地军火库图鉴 <small>局内开门解锁 · 全枪械支持超武进化</small></span>
+          <span class="arsenal-strip-title">${I18n.t('arsenalPreviewTitle')} <small>${I18n.t('arsenalPreviewSub')}</small></span>
           <div class="tactical-loop-pills">
-            <span>🔨 近窗自动钉板</span>
-            <span>🎁 奇物空投箱</span>
-            <span>👑 决战狂暴尸王</span>
+            <span>${I18n.t('pillRepair')}</span>
+            <span>${I18n.t('pillChest')}</span>
+            <span>${I18n.t('pillBoss')}</span>
           </div>
         </div>
         <div class="arsenal-preview-rail">${showcaseGunsHtml}</div>
@@ -466,22 +498,27 @@ export class UIManager {
       const cost = SaveManager.getUpgradeCost(t.key);
       const canBuy = !isMax && save.gold >= cost;
       const pct = Math.round((lvl / t.maxLevel) * 100);
+      const locUpg = I18n.upgradeMeta(t.key, lvl, {
+        name: t.name,
+        desc: t.desc,
+        val: t.valueText(lvl),
+      });
       return `
         <div class="upgrade-card ${isMax ? 'maxed' : ''}">
           <div class="upg-top">
             <div class="upg-icon-box"><img class="upg-sprite-icon" src="${upgSpriteMap[t.key]}" alt="" /></div>
             <div class="upg-info">
-              <div class="upg-title">${t.name} <small>Lv.${lvl}/${t.maxLevel}</small></div>
-              <div class="upg-val">${t.valueText(lvl)}</div>
+              <div class="upg-title">${locUpg.name} <small>Lv.${lvl}/${t.maxLevel}</small></div>
+              <div class="upg-val">${locUpg.val}</div>
             </div>
           </div>
-          <p class="upg-desc">${t.desc}</p>
+          <p class="upg-desc">${locUpg.desc}</p>
           <div class="upg-prog-track">
             <div class="upg-prog-fill" style="width:${pct}%"></div>
           </div>
           <button class="btn-cartoon btn-mini ${isMax ? 'btn-gray' : canBuy ? 'btn-yellow' : 'btn-disabled'}"
             data-upg="${t.key}" ${!canBuy ? 'disabled' : ''}>
-            ${isMax ? '已满级' : `<img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${cost} 强化升级`}
+            ${isMax ? I18n.t('upgMaxed') : `<img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${cost} ${I18n.t('upgBuy')}`}
           </button>
         </div>
       `;
@@ -493,13 +530,13 @@ export class UIManager {
         <div class="upg-dossier-body">
           <div class="upg-dossier-top">
             <strong>🎖️ Lv.${save.agentLevel} ${rankTitle}</strong>
-            <span>全枪械永久伤害加成 +${(save.agentLevel - 1) * 4}%</span>
+            <span>${I18n.t('upgPermanentBonus', { pct: (save.agentLevel - 1) * 3 })}</span>
           </div>
           <div class="hero-xp-wrap">
             <div class="hero-xp-bar">
               <div class="hero-xp-fill" style="width:${xpPct}%"></div>
             </div>
-            <span class="hero-xp-text">升级经验 ${save.agentXp}/${xpNext}</span>
+            <span class="hero-xp-text">${I18n.t('xpProgress', { cur: save.agentXp, next: xpNext })}</span>
           </div>
         </div>
       </div>
@@ -515,26 +552,26 @@ export class UIManager {
 
     const rulesStrip = `
       <div class="coop-rules-strip">
-        <span>🧟 <strong>动态尸潮强化</strong>：2~4 人尸潮规模最高 ×3.04 · 尸王血量 ×2.65 · 双暴君突袭</span>
-        <span>💰 <strong>独立钱包+合资开门</strong>：掉落赏金全队协防分成，防爆门可多人凑钱解锁</span>
-        <span>💉 <strong>倒地救援</strong>：重伤可爬行求援，队友靠近 2.2s 拉起，波次清空全员自动起身</span>
+        <span>${I18n.t('coopRule1')}</span>
+        <span>${I18n.t('coopRule2')}</span>
+        <span>${I18n.t('coopRule3')}</span>
       </div>
     `;
 
     const callsignBar = `
       <div class="coop-callsign-bar">
         <div class="coop-callsign-left">
-          <span>🪖 特工代号：</span>
-          <input id="coop-callsign-inp" class="coop-inp callsign-inp" type="text" maxlength="10" value="${callsign}" placeholder="输入昵称" />
-          <button class="btn-cartoon btn-mini btn-blue" id="btn-save-callsign" type="button">保存代号</button>
+          <span>${I18n.t('callsignLabel')}</span>
+          <input id="coop-callsign-inp" class="coop-inp callsign-inp" type="text" maxlength="10" value="${callsign}" placeholder="${I18n.t('callsignPlaceholder')}" />
+          <button class="btn-cartoon btn-mini btn-blue" id="btn-save-callsign" type="button">${I18n.t('saveCallsign')}</button>
         </div>
-        <span class="coop-p2p-tag">🌐 WebRTC P2P 直连 · 零服务器延迟 · 支持电脑/手机跨平台组队</span>
+        <span class="coop-p2p-tag">${I18n.t('p2pBadge')}</span>
       </div>
     `;
 
     const statusBanner =
       status === 'connecting'
-        ? `<div class="coop-alert info">⏳ 正在建立加密战术通信频道，请稍候...</div>`
+        ? `<div class="coop-alert info">${I18n.t('connectingMsg')}</div>`
         : err
           ? `<div class="coop-alert error">⚠️ ${err}</div>`
           : this.coopToast
@@ -549,20 +586,20 @@ export class UIManager {
           ${statusBanner}
           <div class="coop-entry-grid">
             <div class="coop-panel-card">
-              <h3>📡 创建战术小队（房主）</h3>
-              <p>生成 5 位房间码或一键复制直连邀请链接，发给微信/QQ好友点开即进（最多 4 人）。</p>
+              <h3>${I18n.t('createCardTitle')}</h3>
+              <p>${I18n.t('createCardDesc')}</p>
               <button class="btn-cartoon btn-green" id="btn-coop-create" ${status === 'connecting' ? 'disabled' : ''}>
-                ➕ 创建 1~4 人联机房间
+                ${I18n.t('createRoomBtn')}
               </button>
             </div>
 
             <div class="coop-panel-card">
-              <h3>🔑 输入房间码加入小队</h3>
-              <p>输入房主分享的 5 位房间码，立即加入防守编队协同作战。</p>
+              <h3>${I18n.t('joinCardTitle')}</h3>
+              <p>${I18n.t('joinCardDesc')}</p>
               <div class="coop-join-row">
-                <input id="coop-code-inp" class="coop-inp code-inp" type="text" maxlength="6" placeholder="输入5位房间码" />
+                <input id="coop-code-inp" class="coop-inp code-inp" type="text" maxlength="6" placeholder="${I18n.t('codePlaceholder')}" />
                 <button class="btn-cartoon btn-yellow" id="btn-coop-join" ${status === 'connecting' ? 'disabled' : ''}>
-                  🚀 加入房间
+                  ${I18n.t('joinRoomBtn')}
                 </button>
               </div>
             </div>
@@ -576,68 +613,92 @@ export class UIManager {
     const activeScale = getCoopScaling(memberCount);
     const isHost = CoopManager.role === 'host';
     const selectedStage = STAGES.find((s) => s.id === lobby.stageId) || STAGES[0];
+    const selectedStageTitle = I18n.stageMeta(selectedStage.id, {
+      name: selectedStage.name,
+      subtitle: selectedStage.subtitle,
+      sector: '',
+      diffLabel: '',
+      tags: [],
+    }).name;
     const me = lobby.members.find((m) => m.peerId === CoopManager.myPeerId);
 
     const slotsHtml = SQUAD_SLOTS.map((sl) => {
       const mem = lobby.members.find((m) => m.slot === sl.slot);
+      const slotTitle = I18n.slotLabel(sl.slot);
       if (!mem) {
         return `
           <div class="coop-slot-card empty">
-            <span class="slot-badge" style="background:#334155">${sl.label}</span>
-            <div class="slot-empty-txt">等待好友加入...</div>
-            <small>分享房间码 ${lobby.roomCode}</small>
+            <span class="slot-badge" style="background:#334155">${slotTitle}</span>
+            <div class="slot-empty-txt">${I18n.t('waitingFriend')}</div>
+            <small>${I18n.t('shareCodeHint', { code: lobby.roomCode })}</small>
           </div>
         `;
       }
       return `
         <div class="coop-slot-card filled" style="border-color:${sl.color}">
           <div class="slot-head">
-            <span class="slot-badge" style="background:${sl.badgeBg}">${sl.label}</span>
-            <span class="slot-ready ${mem.ready ? 'ok' : ''}">${mem.isHost ? '👑 房主' : mem.ready ? '✅ 已准备' : '⏳ 准备中'}</span>
+            <span class="slot-badge" style="background:${sl.badgeBg}">${slotTitle}</span>
+            <span class="slot-ready ${mem.ready ? 'ok' : ''}">${mem.isHost ? I18n.t('hostBadge') : mem.ready ? I18n.t('readyYes') : I18n.t('readyNo')}</span>
           </div>
           <div class="slot-player">
             <img src="./assets/player_hero.png" alt="" />
-            <strong>${mem.callsign}${mem.peerId === CoopManager.myPeerId ? ' (我)' : ''}</strong>
+            <strong>${mem.callsign}${mem.peerId === CoopManager.myPeerId ? I18n.t('meSuffix') : ''}</strong>
           </div>
         </div>
       `;
     }).join('');
 
-    const stageOptionsHtml = STAGES.map(
-      (st) => `<option value="${st.id}" ${st.id === lobby.stageId ? 'selected' : ''}>${st.name}</option>`
-    ).join('');
+    const stageOptionsHtml = STAGES.map((st) => {
+      const sTitle = I18n.stageMeta(st.id, {
+        name: st.name,
+        subtitle: st.subtitle,
+        sector: '',
+        diffLabel: '',
+        tags: [],
+      }).name;
+      return `<option value="${st.id}" ${st.id === lobby.stageId ? 'selected' : ''}>${sTitle}</option>`;
+    }).join('');
 
     const hostControls = isHost
       ? `
         <div class="coop-stage-Controls">
           <div class="coop-sel-group">
-            <label>作战地图：</label>
+            <label>${I18n.t('stageSelectLabel')}</label>
             <select id="coop-stage-sel" class="coop-select">${stageOptionsHtml}</select>
           </div>
           <div class="seg-group dark">
-            <button class="seg-btn ${lobby.mode === 'standard' ? 'active' : ''}" data-coop-mode="standard">🚁 10波撤离</button>
-            <button class="seg-btn ${lobby.mode === 'endless' ? 'active' : ''}" data-coop-mode="endless">♾️ 无尽尸潮</button>
+            <button class="seg-btn ${lobby.mode === 'standard' ? 'active' : ''}" data-coop-mode="standard">${I18n.t('modeStandard')}</button>
+            <button class="seg-btn ${lobby.mode === 'endless' ? 'active' : ''}" data-coop-mode="endless">${I18n.t('modeEndless')}</button>
           </div>
-          <button class="btn-cartoon btn-green coop-launch-btn" id="btn-coop-launch" ${memberCount < 2 ? 'title="建议等待至少1名好友加入以体验多人联机"' : ''}>
-            🚀 ${memberCount >= 2 ? `全队空降出击 (${memberCount}/4人)` : '单人试跑此房间 (1/4人)'}
+          <button class="btn-cartoon btn-green coop-launch-btn" id="btn-coop-launch">
+            ${memberCount >= 2 ? I18n.t('launchSquadBtn', { n: memberCount }) : I18n.t('launchSoloRoomBtn', { n: memberCount })}
           </button>
         </div>
       `
       : `
         <div class="coop-stage-Controls">
           <div class="coop-client-stage-info">
-            🗺️ 房主已选：<strong>${selectedStage.name}</strong> · <span>${lobby.mode === 'standard' ? '🚁 10波撤离' : '♾️ 无尽尸潮'}</span>
+            ${I18n.t('hostPickedLabel')} <strong>${selectedStageTitle}</strong> · <span>${lobby.mode === 'standard' ? I18n.t('modeStandard') : I18n.t('modeEndless')}</span>
           </div>
           <button class="btn-cartoon ${me?.ready ? 'btn-gray' : 'btn-green'}" id="btn-coop-ready">
-            ${me?.ready ? '✅ 已就绪（等待房主发车）' : '🙋 点击准备就绪'}
+            ${me?.ready ? I18n.t('readyWaitingHost') : I18n.t('clickReady')}
           </button>
         </div>
       `;
 
     const scaleInfo =
       memberCount >= 2
-        ? `当前 <strong>${memberCount}人小队</strong> 生效难度：尸潮数量 <strong>×${activeScale.countMult}</strong> · 僵尸/尸王血量 <strong>×${activeScale.hpMult}</strong> · 伤害 <strong>×${activeScale.dmgMult}</strong> · 合资门费 <strong>×${activeScale.doorCostMult}</strong>`
-        : `待好友加入（2人时预计难度：尸潮数量 <strong>×${previewScale.countMult}</strong> · 血量 <strong>×${previewScale.hpMult}</strong>；4人满编尸潮 <strong>×3.04</strong> · 血量 <strong>×2.65</strong>）`;
+        ? I18n.t('scaleActiveInfo', {
+            n: memberCount,
+            c: activeScale.countMult,
+            hp: activeScale.hpMult,
+            dmg: activeScale.dmgMult,
+            door: activeScale.doorCostMult,
+          })
+        : I18n.t('scalePreviewInfo', {
+            c: previewScale.countMult,
+            hp: previewScale.hpMult,
+          });
 
     return `
       <div class="coop-wrap">
@@ -647,12 +708,12 @@ export class UIManager {
         <div class="coop-lobby-box">
           <div class="coop-lobby-head">
             <div class="room-code-block">
-              <span class="rc-label">小队房间码</span>
+              <span class="rc-label">${I18n.t('roomCodeLabel')}</span>
               <strong class="rc-val">${lobby.roomCode}</strong>
-              <button class="btn-cartoon btn-mini btn-yellow" id="btn-copy-code" type="button">📋 复制房间码</button>
-              <button class="btn-cartoon btn-mini btn-blue" id="btn-copy-link" type="button">🔗 复制直连邀请链接</button>
+              <button class="btn-cartoon btn-mini btn-yellow" id="btn-copy-code" type="button">${I18n.t('copyCodeBtn')}</button>
+              <button class="btn-cartoon btn-mini btn-blue" id="btn-copy-link" type="button">${I18n.t('copyLinkBtn')}</button>
             </div>
-            <button class="btn-cartoon btn-mini btn-gray" id="btn-coop-leave" type="button">🚪 离开房间</button>
+            <button class="btn-cartoon btn-mini btn-gray" id="btn-coop-leave" type="button">${I18n.t('leaveRoomBtn')}</button>
           </div>
 
           <div class="coop-slots-grid">${slotsHtml}</div>
@@ -671,7 +732,7 @@ export class UIManager {
     if (saveCallBtn && callInp) {
       saveCallBtn.onclick = () => {
         CoopManager.setCallsign(callInp.value);
-        this.coopToast = `特工代号已更新为【${CoopManager.getCallsign()}】`;
+        this.coopToast = I18n.t('callsignSaved', { name: CoopManager.getCallsign() });
         this.showHomeHub();
       };
     }
@@ -704,9 +765,9 @@ export class UIManager {
       copyCodeBtn.onclick = async () => {
         try {
           await navigator.clipboard.writeText(CoopManager.lobby!.roomCode);
-          this.coopToast = `房间码 ${CoopManager.lobby!.roomCode} 已复制，快发给好友吧！`;
+          this.coopToast = I18n.t('codeCopied', { code: CoopManager.lobby!.roomCode });
         } catch {
-          this.coopToast = `房间码：${CoopManager.lobby!.roomCode}`;
+          this.coopToast = CoopManager.lobby!.roomCode;
         }
         this.showHomeHub();
       };
@@ -718,7 +779,7 @@ export class UIManager {
         const url = CoopManager.getInviteUrl();
         try {
           await navigator.clipboard.writeText(url);
-          this.coopToast = '直连邀请链接已复制！好友点开链接即可秒进房间';
+          this.coopToast = I18n.t('linkCopied');
         } catch {
           this.coopToast = url;
         }
@@ -771,6 +832,7 @@ export class UIManager {
     this.pauseOpen = false;
     this.armoryTab = 'guns';
     this.modalRoot.innerHTML = '';
+    PlatformSDK.hideInviteButton();
     if (this.engine.input.usingTouch && this.isFullscreenActive()) {
       const orient = screen.orientation as ScreenOrientation & {
         lock?: (mode: string) => Promise<void>;
@@ -807,26 +869,26 @@ export class UIManager {
         </div>
 
         <div class="hud-center">
-          <div class="wave-pill" id="hud-wave">第 1/10 波</div>
+          <div class="wave-pill" id="hud-wave">Wave 1/10</div>
           <div class="boss-bar-wrap" id="hud-boss-box" style="display:none">
             <div class="boss-bar-fill" id="hud-boss-fill"></div>
-            <span id="hud-boss-text">尸王</span>
+            <span id="hud-boss-text">Boss</span>
           </div>
           <div class="fever-wrap" id="hud-fever-box" style="display:none">
             <div class="fever-fill fever-active" id="hud-fever-fill"></div>
-            <span id="hud-fever-text">狂暴</span>
+            <span id="hud-fever-text">FEVER</span>
           </div>
           <div class="powerup-row" id="hud-powerups"></div>
         </div>
 
         <div class="hud-right-stack">
           <div class="hud-right">
-            <button class="cash-pill" id="hud-cash" type="button" title="点击打开军火商店 (B)">$80</button>
-            <button class="hud-icon-btn" id="btn-pause" type="button" title="暂停 / 设置 (Esc)">⏸</button>
+            <button class="cash-pill" id="hud-cash" type="button">$80</button>
+            <button class="hud-icon-btn" id="btn-pause" type="button">⏸</button>
           </div>
-          <button class="moba-shop-btn" id="btn-open-armory" type="button" title="军火商店 (B / Tab)">
+          <button class="moba-shop-btn" id="btn-open-armory" type="button">
             <img class="moba-shop-sprite" src="./assets/prop_armory_kiosk.png" alt="" />
-            <span>商店</span>
+            <span id="hud-shop-label">${I18n.t('shopBtn')}</span>
           </button>
         </div>
       </div>
@@ -836,34 +898,34 @@ export class UIManager {
         <img class="loot-toast-img" id="loot-toast-img" src="./assets/gun_rifle.png" alt="" />
         <div class="loot-toast-body">
           <div class="loot-toast-head">
-            <span class="loot-toast-badge" id="loot-toast-badge">战地晋升</span>
-            <strong id="loot-toast-title">强装火药</strong>
+            <span class="loot-toast-badge" id="loot-toast-badge">Lv.2</span>
+            <strong id="loot-toast-title">Perk</strong>
           </div>
-          <div class="loot-toast-desc" id="loot-toast-desc">所有武器伤害提升 +18%</div>
+          <div class="loot-toast-desc" id="loot-toast-desc"></div>
         </div>
       </div>
 
       <div class="moba-wheel-zone">
-        <button class="moba-arc-btn arc-pos-1 empty-slot" id="btn-arc-switch" type="button" title="轮换已拥有枪械 (Q / 滚轮 / 数字键)">
+        <button class="moba-arc-btn arc-pos-1 empty-slot" id="btn-arc-switch" type="button">
           <img class="moba-arc-img" id="arc-switch-icon" src="./assets/gun_smg.png" alt="" />
-          <span class="moba-arc-badge" id="arc-switch-badge">副武</span>
+          <span class="moba-arc-badge" id="arc-switch-badge">${I18n.t('subWepBadge')}</span>
         </button>
 
-        <button class="moba-arc-btn arc-pos-2 moba-gren-btn" id="btn-grenade" type="button" title="投掷手雷 (G / 右键)">
+        <button class="moba-arc-btn arc-pos-2 moba-gren-btn" id="btn-grenade" type="button">
           <img class="moba-arc-img" src="./assets/prop_grenade.png" alt="" />
           <span class="moba-arc-badge" id="hud-gren-count">2</span>
         </button>
 
-        <button class="moba-arc-btn arc-pos-3 moba-reload-btn" id="btn-arc-reload" type="button" title="战术换弹 (R)">
+        <button class="moba-arc-btn arc-pos-3 moba-reload-btn" id="btn-arc-reload" type="button">
           <img class="moba-reload-ico" src="./assets/prop_ammo_box.png" alt="" />
           <span class="moba-arc-badge" id="arc-reload-glyph">↻</span>
         </button>
 
-        <button class="moba-main-atk" id="btn-main-attack" type="button" title="点按索敌开火 · 按住拖动 360° 瞄准">
+        <button class="moba-main-atk" id="btn-main-attack" type="button">
           <span class="moba-atk-ring"></span>
           <span class="moba-atk-knob" id="main-atk-knob"></span>
           <img class="moba-atk-gun" id="main-atk-icon" src="./assets/gun_pistol.png" alt="" />
-          <span class="moba-atk-ammo" id="main-atk-ammo">15/∞</span>
+          <span class="moba-atk-ammo" id="main-atk-ammo">14/∞</span>
         </button>
       </div>
     `;
@@ -1059,6 +1121,7 @@ export class UIManager {
       this.pauseOpen = false;
       this.modalRoot.innerHTML = '';
       this.engine.modalPaused = false;
+      if (!s.isCoop) PlatformSDK.gameplayStart();
       this.engine.flushQueuedModals();
       return;
     }
@@ -1068,6 +1131,7 @@ export class UIManager {
     this.pauseOpen = true;
     if (!s.isCoop) {
       this.engine.modalPaused = true;
+      PlatformSDK.gameplayStop();
     }
     this.engine.input.resetStates();
     this.renderPauseMenu();
@@ -1084,24 +1148,27 @@ export class UIManager {
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop" id="pause-backdrop">
         <div class="popup-box compact-modal">
-          <h2>⏸ 战术暂停</h2>
-          <p class="popup-sub">第 ${s.wave} 波 · 击杀 ${s.kills} · 战斗 Lv.${s.battleLevel}</p>
+          <h2>${I18n.t('pauseTitle')}</h2>
+          <p class="popup-sub">${I18n.t('pauseSub', { w: s.wave, k: s.kills, lv: s.battleLevel })}</p>
           <div class="pause-btn-stack">
-            <button class="btn-cartoon btn-green" id="btn-resume">▶ 继续战斗</button>
+            <button class="btn-cartoon btn-green" id="btn-resume">${I18n.t('resumeBtn')}</button>
             <button class="btn-cartoon ${autoOn ? 'btn-blue' : 'btn-gray'}" id="btn-toggle-auto">
-              🎯 自动射击：${autoOn ? '开启' : '关闭'}
+              ${I18n.t('autoFireBtn', { state: autoOn ? I18n.t('on') : I18n.t('off') })}
             </button>
             <button class="btn-cartoon btn-gray" id="btn-toggle-mute">
-              ${muted ? '🔇 音效：已静音' : '🔊 音效：开启'}
+              ${muted ? I18n.t('soundMuted') : I18n.t('soundOn')}
+            </button>
+            <button class="btn-cartoon btn-blue" id="btn-cycle-lang">
+              ${I18n.t('langBtn', { lang: I18n.getLangLabel() })}
             </button>
             ${
               fsSupported
                 ? `<button class="btn-cartoon ${fsActive ? 'btn-yellow' : 'btn-gray'}" id="btn-toggle-fs">
-                    ⛶ 全屏模式：${fsActive ? '开启中' : '点击开启'}
+                    ${I18n.t('fsBtn', { state: fsActive ? I18n.t('on') : I18n.t('off') })}
                   </button>`
                 : ''
             }
-            <button class="btn-cartoon btn-gray" id="btn-quit-hub">🏠 返回基地大厅</button>
+            <button class="btn-cartoon btn-gray" id="btn-quit-hub">${I18n.t('quitHubBtn')}</button>
           </div>
         </div>
       </div>
@@ -1122,6 +1189,16 @@ export class UIManager {
 
     (this.modalRoot.querySelector('#btn-toggle-mute') as HTMLButtonElement).onclick = () => {
       SoundFX.toggleUserMute();
+      this.renderPauseMenu();
+    };
+
+    (this.modalRoot.querySelector('#btn-cycle-lang') as HTMLButtonElement).onclick = () => {
+      I18n.cycleLang((k, v) => PlatformSDK.setStorageItem(k, v));
+      this.hudCache = {};
+      if (this.hudRoot) {
+        const shopLbl = this.hudRoot.querySelector('#hud-shop-label');
+        if (shopLbl) shopLbl.textContent = I18n.t('shopBtn');
+      }
       this.renderPauseMenu();
     };
 
@@ -1159,6 +1236,7 @@ export class UIManager {
       this.armoryOpen = false;
       this.modalRoot.innerHTML = '';
       this.engine.modalPaused = false;
+      if (!s.isCoop) PlatformSDK.gameplayStart();
       this.engine.flushQueuedModals();
       return;
     }
@@ -1168,6 +1246,7 @@ export class UIManager {
     this.armoryOpen = true;
     if (!s.isCoop) {
       this.engine.modalPaused = true;
+      PlatformSDK.gameplayStop();
     }
     this.engine.input.resetStates();
     this.renderArmoryShop('');
@@ -1180,17 +1259,19 @@ export class UIManager {
     const unlockedRooms = this.engine.getUnlockedExtraRoomsCount();
     const activeWep = s.player.weapons[s.player.activeSlot];
     const activeDef = WEAPONS[activeWep.defId];
+    const activeBaseName = I18n.wName(activeDef.id, activeDef.name);
+    const activeSupName = I18n.wSuperName(activeDef.id, activeDef.superName);
     const save = SaveManager.get();
 
     let contentHtml = '';
     if (this.armoryTab === 'guns') {
       const canEvolve = !activeWep.evolved && s.cash >= 1850;
       const evolveStrip = activeWep.evolved
-        ? `<div class="evolve-strip done">⚡ 当前主武器已进化为超武【${activeDef.superName}】</div>`
+        ? `<div class="evolve-strip done">${I18n.t('evolvedDone', { name: activeSupName })}</div>`
         : `<div class="evolve-strip">
-            <span>⚡ 将【${activeDef.name}】进化为超武【${activeDef.superName}】</span>
+            <span>${I18n.t('evolvePrompt', { base: activeBaseName, sup: activeSupName })}</span>
             <button class="btn-cartoon btn-mini ${canEvolve ? 'btn-purple' : 'btn-disabled'}" id="btn-shop-evolve">
-              $1850 进化
+              ${I18n.t('evolveBtn', { cost: 1850 })}
             </button>
           </div>`;
 
@@ -1199,21 +1280,21 @@ export class UIManager {
         const isPermanent = !!owned && owned.tempWavesLeft === undefined;
         const isEquipped = activeWep.defId === w.id;
         const locked = unlockedRooms < w.unlockRoomsRequired && !owned;
+        const wTitle = owned?.evolved ? `⚡${I18n.wSuperName(w.id, w.superName)}` : I18n.wName(w.id, w.name);
 
-        let btnLabel = `$${w.shopCost} 购买`;
+        let btnLabel = I18n.t('buyBtn', { cost: w.shopCost });
         let btnClass = s.cash >= w.shopCost ? 'btn-green' : 'btn-disabled';
         let refillBtnHtml = '';
 
         if (locked) {
-          btnLabel = `🔒 需开 ${w.unlockRoomsRequired} 扇门`;
+          btnLabel = I18n.t('needDoors', { n: w.unlockRoomsRequired });
           btnClass = 'btn-disabled';
         } else if (owned && !isPermanent) {
-          // 战场宝箱临时试用武器：可免费切换装备，也可花钱买断永久保留
           if (!isEquipped) {
-            btnLabel = '免费切换';
+            btnLabel = I18n.t('freeSwitch');
             btnClass = 'btn-blue';
           } else {
-            btnLabel = `$${w.shopCost} 转永久`;
+            btnLabel = I18n.t('buyPermanent', { cost: w.shopCost });
             btnClass = s.cash >= w.shopCost ? 'btn-green' : 'btn-disabled';
           }
         } else if (owned) {
@@ -1222,39 +1303,39 @@ export class UIManager {
             w.maxReserve < 0 ||
             (owned.reserve >= maxRes && owned.mag >= this.engine.getMaxMag(w.id, owned.evolved));
           if (!isEquipped) {
-            btnLabel = '切换上阵';
+            btnLabel = I18n.t('equipNow');
             btnClass = 'btn-blue';
             if (!full) {
               const canRefill = s.cash >= w.ammoCost;
-              refillBtnHtml = `<button class="btn-cartoon btn-mini ${canRefill ? 'btn-yellow' : 'btn-disabled'}" data-refill-gun="${w.id}">+$${w.ammoCost} 补弹</button>`;
+              refillBtnHtml = `<button class="btn-cartoon btn-mini ${canRefill ? 'btn-yellow' : 'btn-disabled'}" data-refill-gun="${w.id}">${I18n.t('refillBtn', { cost: w.ammoCost })}</button>`;
             }
           } else if (full) {
-            btnLabel = w.maxReserve < 0 ? '装备中' : '装备中·满弹';
+            btnLabel = w.maxReserve < 0 ? I18n.t('equippedTag') : I18n.t('equippedFull');
             btnClass = 'btn-gray';
           } else {
-            btnLabel = `补弹 $${w.ammoCost}`;
+            btnLabel = I18n.t('refillMainBtn', { cost: w.ammoCost });
             btnClass = s.cash >= w.ammoCost ? 'btn-yellow' : 'btn-disabled';
           }
         }
 
         const ownedBadge = isEquipped
-          ? '<span class="gun-owned-pill active">当前装备</span>'
+          ? `<span class="gun-owned-pill active">${I18n.t('pillEquipped')}</span>`
           : isPermanent
-            ? '<span class="gun-owned-pill">已拥有</span>'
+            ? `<span class="gun-owned-pill">${I18n.t('pillOwned')}</span>`
             : owned
-              ? `<span class="gun-owned-pill trial">试用${owned.tempWavesLeft}波</span>`
+              ? `<span class="gun-owned-pill trial">${I18n.t('pillTrial', { n: owned.tempWavesLeft ?? 1 })}</span>`
               : '';
 
         return `
           <div class="armory-gun-card ${isEquipped ? 'equipped' : isPermanent ? 'owned' : ''} ${locked ? 'locked' : ''}">
             <div class="gun-card-head">
-              <img src="./assets/gun_${w.id}.png" alt="${w.name}" class="armory-gun-img" />
+              <img src="./assets/gun_${w.id}.png" alt="${wTitle}" class="armory-gun-img" />
               <div class="gun-head-info">
                 <div class="gun-title-row">
-                  <span class="gun-title">${owned?.evolved ? `⚡${w.superName}` : w.name}</span>
+                  <span class="gun-title">${wTitle}</span>
                   ${ownedBadge}
                 </div>
-                <div class="gun-tag">威力 ${w.damage * w.pellets} · 射速 ${w.fireRate}/s</div>
+                <div class="gun-tag">${I18n.t('gunStatsTag', { dmg: w.damage * w.pellets, rate: w.fireRate })}</div>
               </div>
             </div>
             <div class="gun-card-actions">
@@ -1267,60 +1348,64 @@ export class UIManager {
         `;
       }).join('');
 
-      const arsenalHint = `<div class="arsenal-keep-bar">🎒 本局已购枪械全部保留（当前持有 <strong>${s.player.weapons.length}</strong> 把 · 已拥有枪械可随时免费切换，或按 Q / 滚轮 / 右下切枪键轮换）</div>`;
+      const arsenalHint = `<div class="arsenal-keep-bar">${I18n.t('arsenalKeepHint', { n: s.player.weapons.length })}</div>`;
       contentHtml = `${evolveStrip}${arsenalHint}<div class="armory-gun-grid">${gunCards}</div>`;
     } else {
       const turretSupportText =
         s.hqSupportCooldown > 0
-          ? `冷却 ${s.hqSupportCooldown.toFixed(0)}s`
+          ? I18n.t('supCooldown', { s: s.hqSupportCooldown.toFixed(0) })
           : save.freeHqSupportUsed
-            ? '🎬 支援获取'
-            : '🎁 首次免费';
+            ? I18n.t('supWatchAd')
+            : I18n.t('supFreeFirst');
       const elecSupportText =
-        s.electricFortifyWaves > 0 ? `生效中(${s.electricFortifyWaves}波)` : '🎬 支援获取';
+        s.electricFortifyWaves > 0
+          ? I18n.t('supActiveWaves', { w: s.electricFortifyWaves })
+          : I18n.t('supWatchAd');
       const cashSupportText =
-        s.armoryAdCooldown > 0 ? `冷却 ${s.armoryAdCooldown.toFixed(0)}s` : '🎬 空投 +$450';
+        s.armoryAdCooldown > 0
+          ? I18n.t('supCooldown', { s: s.armoryAdCooldown.toFixed(0) })
+          : I18n.t('supCashBtn');
 
       contentHtml = `
         <div class="supply-grid">
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_armor.png" alt="" /> 防弹护甲 +65</div>
-            <div class="sup-meta">当前 ${Math.round(s.player.armor)}/100 · 减伤70%</div>
-            <button class="btn-cartoon btn-mini ${s.cash >= 380 && s.player.armor < 100 ? 'btn-blue' : 'btn-disabled'}" data-tac="armor">$380 购买</button>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_armor.png" alt="" /> ${I18n.t('supArmorName')}</div>
+            <div class="sup-meta">${I18n.t('supArmorMeta', { cur: Math.round(s.player.armor) })}</div>
+            <button class="btn-cartoon btn-mini ${s.cash >= 380 && s.player.armor < 100 ? 'btn-blue' : 'btn-disabled'}" data-tac="armor">${I18n.t('buyBtn', { cost: 380 })}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_medkit.png" alt="" /> 战地急救包</div>
-            <div class="sup-meta">生命 ${Math.ceil(s.player.hp)}/${s.player.maxHp}</div>
-            <button class="btn-cartoon btn-mini ${s.cash >= 300 && s.player.hp < s.player.maxHp ? 'btn-green' : 'btn-disabled'}" data-tac="medkit">$300 恢复满血</button>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_medkit.png" alt="" /> ${I18n.t('supMedkitName')}</div>
+            <div class="sup-meta">${I18n.t('supMedkitMeta', { hp: Math.ceil(s.player.hp), max: s.player.maxHp })}</div>
+            <button class="btn-cartoon btn-mini ${s.cash >= 300 && s.player.hp < s.player.maxHp ? 'btn-green' : 'btn-disabled'}" data-tac="medkit">${I18n.t('supMedkitBtn')}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_grenade.png" alt="" /> M67 破片手雷 x3</div>
-            <div class="sup-meta">当前持有 x${s.player.grenades}</div>
-            <button class="btn-cartoon btn-mini ${s.cash >= 220 ? 'btn-yellow' : 'btn-disabled'}" data-tac="grenades">$220 购买</button>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_grenade.png" alt="" /> ${I18n.t('supGrenName')}</div>
+            <div class="sup-meta">${I18n.t('supGrenMeta', { n: s.player.grenades })}</div>
+            <button class="btn-cartoon btn-mini ${s.cash >= 220 ? 'btn-yellow' : 'btn-disabled'}" data-tac="grenades">${I18n.t('buyBtn', { cost: 220 })}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_ammo_box.png" alt="" /> 全枪弹药补满</div>
-            <div class="sup-meta">补满携带的所有枪械</div>
-            <button class="btn-cartoon btn-mini ${s.cash >= 320 ? 'btn-blue' : 'btn-disabled'}" data-tac="all_ammo">$320 补满</button>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_ammo_box.png" alt="" /> ${I18n.t('supAllAmmoName')}</div>
+            <div class="sup-meta">${I18n.t('supAllAmmoMeta')}</div>
+            <button class="btn-cartoon btn-mini ${s.cash >= 320 ? 'btn-blue' : 'btn-disabled'}" data-tac="all_ammo">${I18n.t('supAllAmmoBtn')}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_turret.png" alt="" /> 自动哨戒机枪塔</div>
-            <div class="sup-meta">持续协防 38 秒</div>
-            <button class="btn-cartoon btn-mini ${s.cash >= 650 ? 'btn-yellow' : 'btn-disabled'}" data-tac="turret">$650 部署</button>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_turret.png" alt="" /> ${I18n.t('supTurretName')}</div>
+            <div class="sup-meta">${I18n.t('supTurretMeta')}</div>
+            <button class="btn-cartoon btn-mini ${s.cash >= 650 ? 'btn-yellow' : 'btn-disabled'}" data-tac="turret">${I18n.t('supTurretBtn')}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/drop_cash.png" alt="" /> 紧急军费空投</div>
-            <div class="sup-meta">立即获得 $450 战地经费</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/drop_cash.png" alt="" /> ${I18n.t('supCashName')}</div>
+            <div class="sup-meta">${I18n.t('supCashMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.armoryAdCooldown > 0 ? 'btn-disabled' : 'btn-yellow'}" id="btn-armory-ad" ${s.armoryAdCooldown > 0 ? 'disabled' : ''}>${cashSupportText}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_chest.png" alt="" /> 总部炮塔+满弹支援</div>
-            <div class="sup-meta">满弹 + 手雷x2 + 45秒炮塔</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_chest.png" alt="" /> ${I18n.t('supHqName')}</div>
+            <div class="sup-meta">${I18n.t('supHqMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.hqSupportCooldown > 0 ? 'btn-disabled' : 'btn-green'}" id="btn-sup-turret" ${s.hqSupportCooldown > 0 ? 'disabled' : ''}>${turretSupportText}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> 全图高压电网</div>
-            <div class="sup-meta">全窗封满 + 持续2波电击减速</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> ${I18n.t('supElecName')}</div>
+            <div class="sup-meta">${I18n.t('supElecMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.electricFortifyWaves > 0 ? 'btn-disabled' : 'btn-blue'}" id="btn-sup-elec" ${s.electricFortifyWaves > 0 ? 'disabled' : ''}>${elecSupportText}</button>
           </div>
         </div>
@@ -1332,16 +1417,16 @@ export class UIManager {
         <div class="armory-modal">
           <header class="armory-header">
             <div class="armory-left-head">
-              <h2>🛒 军火库</h2>
+              <h2>${I18n.t('armoryTitle')}</h2>
               <div class="seg-group dark">
-                <button class="seg-btn ${this.armoryTab === 'guns' ? 'active' : ''}" data-shop-tab="guns">🔫 枪械</button>
-                <button class="seg-btn ${this.armoryTab === 'supplies' ? 'active' : ''}" data-shop-tab="supplies">🧰 补给与支援</button>
+                <button class="seg-btn ${this.armoryTab === 'guns' ? 'active' : ''}" data-shop-tab="guns">${I18n.t('tabGuns')}</button>
+                <button class="seg-btn ${this.armoryTab === 'supplies' ? 'active' : ''}" data-shop-tab="supplies">${I18n.t('tabSupplies')}</button>
               </div>
             </div>
             <div class="armory-wallet">
-              <span class="shop-room-tag">已开防区 ${unlockedRooms}</span>
+              <span class="shop-room-tag">${I18n.t('unlockedSectors', { n: unlockedRooms })}</span>
               <span class="cash-pill">$${s.cash}</span>
-              <button class="shop-close-btn" id="btn-close-armory" title="关闭">✕</button>
+              <button class="shop-close-btn" id="btn-close-armory">✕</button>
             </div>
           </header>
 
@@ -1403,12 +1488,12 @@ export class UIManager {
     if (cashAdBtn) {
       cashAdBtn.onclick = async () => {
         if (s.armoryAdCooldown > 0) return;
-        const ok = await PlatformSDK.showRewardedAd('armory_free_cash', '紧急军费空投 +$450');
+        const ok = await PlatformSDK.showRewardedAd('armory_free_cash', I18n.t('supCashName'));
         if (ok) {
           s.cash += 450;
           s.armoryAdCooldown = 90;
-          PlatformSDK.gameplayStart();
-          this.renderArmoryShop('💰 军费 +$450 已到账');
+          if (s.isCoop) PlatformSDK.gameplayStart();
+          this.renderArmoryShop(I18n.t('cashAddedToast'));
         }
       };
     }
@@ -1423,7 +1508,7 @@ export class UIManager {
           this.toggleArmoryShop();
           this.engine.applyHqAmmoAndTurret();
         } else {
-          const ok = await PlatformSDK.showRewardedAd('hq_ammo_turret', '满弹药 + 自动哨戒机枪塔');
+          const ok = await PlatformSDK.showRewardedAd('hq_ammo_turret', I18n.t('supHqName'));
           if (ok) {
             this.toggleArmoryShop();
             this.engine.applyHqAmmoAndTurret();
@@ -1436,7 +1521,7 @@ export class UIManager {
     if (supElecBtn) {
       supElecBtn.onclick = async () => {
         if (s.electricFortifyWaves > 0) return;
-        const ok = await PlatformSDK.showRewardedAd('electric_fortify', '全图高压电网加固 (2波)');
+        const ok = await PlatformSDK.showRewardedAd('electric_fortify', I18n.t('supElecName'));
         if (ok) {
           this.toggleArmoryShop();
           this.engine.applyElectricFortify();
@@ -1493,22 +1578,25 @@ export class UIManager {
       }
     });
 
-    const coopSuffix = s.isCoop ? ` · 👥${s.squadCount}人` : '';
+    const coopSuffix = s.isCoop ? I18n.t('coopCountSuffix', { n: s.squadCount }) : '';
     let waveStr = '';
     if (s.waveState === 'extraction') {
-      waveStr = `直升机登机撤离 ${Math.round(s.extractionProgress * 100)}%${coopSuffix}`;
+      waveStr = `${I18n.t('waveEvac', { pct: Math.round(s.extractionProgress * 100) })}${coopSuffix}`;
     } else if (s.waveState === 'intermission') {
-      waveStr = `战备休整 ${Math.ceil(s.intermissionTimer)}s${coopSuffix}`;
+      waveStr = `${I18n.t('waveBreak', { s: Math.ceil(s.intermissionTimer) })}${coopSuffix}`;
     } else {
-      const waveLabel = s.mode === 'standard' ? `第 ${s.wave}/${s.maxWaves} 波` : `无尽 第 ${s.wave} 波`;
-      waveStr = `${waveLabel} · 剩余 ${s.zombiesRemainingInWave}${coopSuffix}`;
+      waveStr =
+        (s.mode === 'standard'
+          ? I18n.t('waveStd', { w: s.wave, m: s.maxWaves, n: s.zombiesRemainingInWave })
+          : I18n.t('waveEndl', { w: s.wave, n: s.zombiesRemainingInWave })) + coopSuffix;
     }
     setIfChanged('wave', waveStr, () => {
       (this.hudRoot!.querySelector('#hud-wave') as HTMLElement).textContent = waveStr;
     });
 
     const squadSig = s.isCoop
-      ? s.remotePlayers
+      ? `${I18n.lang}|` +
+        s.remotePlayers
           .map(
             (rp) =>
               `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}`
@@ -1525,9 +1613,9 @@ export class UIManager {
         .map((rp) => {
           const hpPct = Math.max(0, Math.min(100, Math.round((rp.hp / Math.max(1, rp.maxHp)) * 100)));
           const stText = rp.spectating
-            ? '⏳ 待下波起身'
+            ? I18n.t('squadWaitWave')
             : rp.downed
-              ? `🆘 求救 ${Math.ceil(rp.bleedoutTimer)}s`
+              ? I18n.t('squadSOS', { s: Math.ceil(rp.bleedoutTimer) })
               : `$${rp.cash}`;
           return `
             <div class="squad-hud-chip ${rp.downed ? 'is-downed' : ''}">
@@ -1543,14 +1631,14 @@ export class UIManager {
 
     const bossTarget =
       s.zombies.find((z) => z.kind === 'boss') || s.zombies.find((z) => z.kind === 'miniboss');
-    const bossKey = bossTarget ? `${bossTarget.id}:${Math.ceil(bossTarget.hp)}` : 'none';
+    const bossKey = bossTarget ? `${I18n.lang}:${bossTarget.id}:${Math.ceil(bossTarget.hp)}` : 'none';
     setIfChanged('bossHud', bossKey, () => {
       const bossBox = this.hudRoot!.querySelector('#hud-boss-box') as HTMLElement;
       if (bossTarget) {
         bossBox.style.display = 'block';
         const pct = Math.max(0, (bossTarget.hp / bossTarget.maxHp) * 100);
         (this.hudRoot!.querySelector('#hud-boss-fill') as HTMLElement).style.width = `${pct}%`;
-        const title = bossTarget.kind === 'boss' ? '深渊尸王' : '重装暴君';
+        const title = bossTarget.kind === 'boss' ? I18n.t('bossKing') : I18n.t('bossTyrant');
         (this.hudRoot!.querySelector('#hud-boss-text') as HTMLElement).textContent =
           `${title} ${Math.ceil(bossTarget.hp)}`;
       } else {
@@ -1558,16 +1646,17 @@ export class UIManager {
       }
     });
 
-    // 仅在 6.5 秒狂暴激活时显示紧凑计时条，平时完全隐藏不占视野
-    const feverKey = s.feverTimer > 0 ? s.feverTimer.toFixed(1) : 'off';
+    const feverKey = s.feverTimer > 0 ? `${I18n.lang}:${s.feverTimer.toFixed(1)}` : 'off';
     setIfChanged('fever', feverKey, () => {
       const feverBox = this.hudRoot!.querySelector('#hud-fever-box') as HTMLElement;
       if (s.feverTimer > 0) {
         feverBox.style.display = 'block';
         (this.hudRoot!.querySelector('#hud-fever-fill') as HTMLElement).style.width =
           `${(s.feverTimer / 6.5) * 100}%`;
-        (this.hudRoot!.querySelector('#hud-fever-text') as HTMLElement).textContent =
-          `狂暴火力 ${s.feverTimer.toFixed(1)}s`;
+        (this.hudRoot!.querySelector('#hud-fever-text') as HTMLElement).textContent = I18n.t(
+          'feverActive',
+          { s: s.feverTimer.toFixed(1) }
+        );
       } else {
         feverBox.style.display = 'none';
       }
@@ -1626,15 +1715,15 @@ export class UIManager {
       }
     });
 
-    const relicSig = s.relicIds.join(',');
+    const relicSig = `${I18n.lang}:${s.relicIds.join(',')}`;
     setIfChanged('relics', relicSig, () => {
       const relicRow = this.hudRoot!.querySelector('#hud-relics') as HTMLElement;
       relicRow.innerHTML = s.relicIds
         .map((id) => {
           const r = RELICS.find((item) => item.id === id);
-          return r
-            ? `<span class="relic-chip rarity-${r.rarity}" title="${r.name}：${r.desc}"><img src="${r.sprite}" alt="" /></span>`
-            : '';
+          if (!r) return '';
+          const rm = I18n.relicMeta(r.id, r.name, r.desc);
+          return `<span class="relic-chip rarity-${r.rarity}" title="${rm.name}: ${rm.desc}"><img src="${r.sprite}" alt="" /></span>`;
         })
         .join('');
     });
@@ -1643,19 +1732,18 @@ export class UIManager {
       .filter((k) => s.powerUpTimers[k] > 0)
       .map(
         (k) =>
-          `<span class="pow-chip" style="border-color:${POWERUP_META[k].color}"><img class="pow-chip-ico" src="${POWERUP_META[k].sprite}" alt="" /> ${POWERUP_META[k].name} ${s.powerUpTimers[k].toFixed(0)}s</span>`
+          `<span class="pow-chip" style="border-color:${POWERUP_META[k].color}"><img class="pow-chip-ico" src="${POWERUP_META[k].sprite}" alt="" /> ${I18n.powerupName(k, POWERUP_META[k].name)} ${s.powerUpTimers[k].toFixed(0)}s</span>`
       )
       .join('');
     setIfChanged('pows', activePows, () => {
       (this.hudRoot!.querySelector('#hud-powerups') as HTMLElement).innerHTML = activePows;
     });
 
-    // 王者荣耀式右下角 1+3 扇形技能轮盘状态同步（主攻轮盘 + 副武切枪 + 战术换弹）
     const activeWep = s.player.weapons[s.player.activeSlot];
     const maxMag = this.engine.getMaxMag(activeWep.defId, activeWep.evolved);
     const isReloading = s.player.reloadTimer > 0;
     const ammoStr = isReloading
-      ? '换弹中'
+      ? I18n.t('reloadingShort')
       : activeWep.reserve < 0
         ? `${activeWep.mag}/∞`
         : `${activeWep.mag}/${activeWep.reserve}`;
@@ -1688,7 +1776,7 @@ export class UIManager {
     const secWep = hasSecond ? s.player.weapons[nextIdx] : null;
     const switchKey = secWep
       ? `${secWep.defId}:${secWep.evolved ? 1 : 0}:${s.player.activeSlot}/${weaponCount}`
-      : 'empty';
+      : `empty:${I18n.lang}`;
     setIfChanged('arcSwitch', switchKey, () => {
       const swBtn = this.hudRoot!.querySelector('#btn-arc-switch') as HTMLButtonElement;
       const swIcon = this.hudRoot!.querySelector('#arc-switch-icon') as HTMLImageElement;
@@ -1702,7 +1790,7 @@ export class UIManager {
         swBtn.classList.add('empty-slot');
         swBtn.classList.remove('evolved');
         swIcon.setAttribute('src', './assets/gun_smg.png');
-        swBadge.textContent = '副武';
+        swBadge.textContent = I18n.t('subWepBadge');
       }
     });
 
@@ -1734,16 +1822,16 @@ export class UIManager {
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop">
         <div class="popup-box compact-modal">
-          <h2>🚨 特工倒地</h2>
-          <p class="popup-sub">坚守至第 ${s.wave} 波 · 歼灭 ${s.kills} 只僵尸</p>
+          <h2>${I18n.t('downedTitle')}</h2>
+          <p class="popup-sub">${I18n.t('downedSub', { w: s.wave, k: s.kills })}</p>
           <div class="revive-perks">
-            <span><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> 全屏震飞</span>
-            <span><img class="sup-inline-icon" src="./assets/item_medkit.png" alt="" /> 满血满弹</span>
-            <span><img class="sup-inline-icon" src="./assets/prop_wood_plank.png" alt="" /> 全窗封死</span>
+            <span><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> ${I18n.t('revPerk1')}</span>
+            <span><img class="sup-inline-icon" src="./assets/item_medkit.png" alt="" /> ${I18n.t('revPerk2')}</span>
+            <span><img class="sup-inline-icon" src="./assets/prop_wood_plank.png" alt="" /> ${I18n.t('revPerk3')}</span>
           </div>
           <div class="popup-footer">
-            <button class="btn-cartoon btn-green" id="btn-do-revive">🎬 空投复活</button>
-            <button class="btn-cartoon btn-gray" id="btn-skip-revive">直接结算</button>
+            <button class="btn-cartoon btn-green" id="btn-do-revive">${I18n.t('reviveAdBtn')}</button>
+            <button class="btn-cartoon btn-gray" id="btn-skip-revive">${I18n.t('skipReviveBtn')}</button>
           </div>
         </div>
       </div>
@@ -1752,7 +1840,7 @@ export class UIManager {
     const reviveBtn = this.modalRoot.querySelector('#btn-do-revive') as HTMLButtonElement;
     reviveBtn.onclick = async () => {
       reviveBtn.disabled = true;
-      const ok = await PlatformSDK.showRewardedAd('revive_shockwave', '绝境震爆复活 + 全窗加固');
+      const ok = await PlatformSDK.showRewardedAd('revive_shockwave', I18n.t('reviveAdBtn'));
       if (ok) {
         this.modalRoot.innerHTML = '';
         this.engine.modalPaused = false;
@@ -1784,8 +1872,8 @@ export class UIManager {
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop">
         <div class="popup-box compact-modal">
-          <h2>${victory ? '🚁 撤离成功' : '🎖️ 行动结算'}</h2>
-          <p class="popup-sub">第 ${s.wave} 波 · 歼灭 ${s.kills} 只僵尸</p>
+          <h2>${victory ? I18n.t('victoryTitle') : I18n.t('settleTitle')}</h2>
+          <p class="popup-sub">${I18n.t('downedSub', { w: s.wave, k: s.kills })}</p>
 
           <div class="reward-preview">
             <span><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> <strong id="rew-gold">+${baseGold}</strong></span>
@@ -1805,9 +1893,9 @@ export class UIManager {
 
           <div class="popup-footer">
             <button class="btn-cartoon btn-yellow" id="btn-mult-claim">
-              🎬 翻倍领取 (<span id="mult-live">x5</span>)
+              ${I18n.t('multClaimBtn')} (<span id="mult-live">x5</span>)
             </button>
-            <button class="btn-cartoon btn-gray" id="btn-normal-claim">普通领取</button>
+            <button class="btn-cartoon btn-gray" id="btn-normal-claim">${I18n.t('normalClaimBtn')}</button>
           </div>
         </div>
       </div>
@@ -1839,7 +1927,7 @@ export class UIManager {
       const lockedMult = currentMult;
       const ok = await PlatformSDK.showRewardedAd(
         'settlement_multiplier',
-        `结算奖励 x${lockedMult} 倍暴击领取`
+        `x${lockedMult} ${I18n.t('multClaimBtn')}`
       );
       if (ok) {
         goldEl.textContent = `+${baseGold * lockedMult}`;

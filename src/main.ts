@@ -1,13 +1,23 @@
 import './style.css';
-import { STAGES } from './data/stages';
 import { Assets } from './game/AssetLoader';
 import { GameEngine } from './game/GameEngine';
 import { InputManager } from './game/InputManager';
+import { I18n } from './i18n/I18n';
 import { SaveManager } from './meta/SaveManager';
 import { PlatformSDK } from './platform/PlatformSDK';
 import { UIManager } from './ui/UIManager';
 
 async function bootstrap() {
+  let engineRef: GameEngine | null = null;
+  let inputRef: InputManager | null = null;
+
+  await PlatformSDK.init((adPaused) => {
+    if (engineRef) engineRef.paused = adPaused;
+    if (adPaused) inputRef?.resetStates();
+  });
+
+  I18n.init((k) => PlatformSDK.getStorageItem(k));
+  PlatformSDK.loadingStart();
   SaveManager.load();
   await Assets.preloadAll();
 
@@ -48,6 +58,7 @@ async function bootstrap() {
   let viewH = window.innerHeight;
 
   const input = new InputManager(canvas);
+  inputRef = input;
 
   let ui!: UIManager;
   const engine = new GameEngine(canvas, ctx, input, {
@@ -56,6 +67,7 @@ async function bootstrap() {
     onPlayerDowned: (canRevive) => ui.showReviveModal(canRevive),
     onRunFinished: (victory, snapshot) => ui.showSettlementModal(victory, snapshot),
   });
+  engineRef = engine;
 
   const syncViewportAndOrientation = () => {
     if (window.scrollX !== 0 || window.scrollY !== 0) {
@@ -76,7 +88,6 @@ async function bootstrap() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    // 手机端强制横屏体验：若处于竖屏握持，自动冻结战局并提示旋转手机
     const portraitOnMobile = (isMobileTouchDevice() || input.usingTouch) && viewH > viewW;
     landscapeGuard.classList.toggle('visible', portraitOnMobile);
     if (engine.landscapePaused !== portraitOnMobile) {
@@ -98,14 +109,8 @@ async function bootstrap() {
   syncViewportAndOrientation();
 
   ui = new UIManager(uiLayer, engine);
-
-  await PlatformSDK.init((adPaused) => {
-    engine.paused = adPaused;
-    if (adPaused) input.resetStates();
-  });
-
-  // 当前开放全关卡自由选关预览，进入直接展示基地选关大厅
   ui.showHomeHub();
+  PlatformSDK.loadingStop();
 
   let lastTime = performance.now();
   let hudTick = 0;
@@ -127,7 +132,7 @@ async function bootstrap() {
         }
       }
     } catch (err) {
-      console.error('[GameLoop Recovered]', err);
+      console.error('[GameLoop Error]', err);
     }
   };
 

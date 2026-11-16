@@ -48,8 +48,21 @@ export class InputManager {
     );
 
     window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
+      ) {
+        return;
+      }
+
       const code = e.code;
+      // 阻止方向键与空格键触发外部网页滚动（符合 CrazyGames 审核强制要求）
+      if (code.startsWith('Arrow') || code === 'Space') {
+        e.preventDefault();
+      }
+      if (e.repeat) return;
+
       this.keys.add(code);
       if (code === 'Escape') {
         e.preventDefault();
@@ -65,7 +78,6 @@ export class InputManager {
         e.preventDefault();
         this.onToggleArmoryCb?.();
       } else if (code === 'KeyG' || code === 'Space') {
-        if (code === 'Space') e.preventDefault();
         this.onThrowGrenadeCb?.();
       }
     });
@@ -92,11 +104,12 @@ export class InputManager {
     this.canvas.addEventListener(
       'wheel',
       (e) => {
+        e.preventDefault();
         if (Math.abs(e.deltaY) > 4) {
           this.onSwitchWeaponCb?.();
         }
       },
-      { passive: true }
+      { passive: false }
     );
 
     this.canvas.addEventListener('mousemove', (e) => {

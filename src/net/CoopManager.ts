@@ -1,4 +1,6 @@
 import Peer, { DataConnection } from 'peerjs';
+import { I18n } from '../i18n/I18n';
+import { PlatformSDK } from '../platform/PlatformSDK';
 import { GameMode } from '../types';
 import {
   CoopNetMessage,
@@ -45,23 +47,19 @@ class CoopNetworkManager {
 
   public getCallsign(): string {
     try {
-      const saved = localStorage.getItem(CALLSIGN_KEY);
+      const saved = PlatformSDK.getStorageItem(CALLSIGN_KEY);
       if (saved && saved.trim()) return saved.trim().slice(0, 10);
-      const gen = `特工-${Math.floor(10 + Math.random() * 89)}`;
-      localStorage.setItem(CALLSIGN_KEY, gen);
+      const gen = `${I18n.t('defaultCallsignPrefix')}-${Math.floor(10 + Math.random() * 89)}`;
+      PlatformSDK.setStorageItem(CALLSIGN_KEY, gen);
       return gen;
     } catch {
-      return '特工-01';
+      return 'Agent-01';
     }
   }
 
   public setCallsign(name: string): void {
     const clean = name.trim().slice(0, 10) || this.getCallsign();
-    try {
-      localStorage.setItem(CALLSIGN_KEY, clean);
-    } catch {
-      // ignore storage errors
-    }
+    PlatformSDK.setStorageItem(CALLSIGN_KEY, clean);
     if (this.lobby) {
       const me = this.lobby.members.find((m) => m.peerId === this.myPeerId);
       if (me) {
@@ -107,27 +105,15 @@ class CoopNetworkManager {
 
   public getInviteUrl(): string {
     if (!this.lobby) return window.location.href;
-    const url = new URL(window.location.href);
-    url.searchParams.set('room', this.lobby.roomCode);
-    return url.toString();
+    return PlatformSDK.buildInviteLink(this.lobby.roomCode);
   }
 
   public consumeUrlRoomParam(): string | null {
-    try {
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get('room');
-      if (code && code.trim().length >= 4) {
-        url.searchParams.delete('room');
-        window.history.replaceState({}, '', url.toString());
-        return code.trim().toUpperCase();
-      }
-    } catch {
-      // ignore
-    }
-    return null;
+    return PlatformSDK.consumeInviteRoomCode();
   }
 
   public disconnect(): void {
+    PlatformSDK.hideInviteButton();
     this.clientConns.forEach((c) => {
       try {
         c.close();
@@ -195,6 +181,7 @@ class CoopNetworkManager {
           },
         ],
       };
+      PlatformSDK.showInviteButton(code);
       this.notifyLobby();
     });
 
@@ -204,12 +191,11 @@ class CoopNetworkManager {
 
     peer.on('error', (err: Error & { type?: string }) => {
       if (err.type === 'unavailable-id') {
-        // 房间号碰撞则自动重生成
         this.createHostRoom(initialStageId, initialMode);
         return;
       }
       this.status = 'error';
-      this.errorMsg = `联机信令连接异常：${err.message || err.type || '请检查网络'}`;
+      this.errorMsg = I18n.t('errSignal', { msg: err.message || err.type || 'Network error' });
       this.notifyLobby();
     });
   }
@@ -222,12 +208,12 @@ class CoopNetworkManager {
       if (msg.type === 'join_req') {
         if (!this.lobby) return;
         if (this.lobby.inGame) {
-          conn.send({ type: 'join_ack', ok: false, reason: '该小队已经空降开战，无法中途加入！' } satisfies CoopNetMessage);
+          conn.send({ type: 'join_ack', ok: false, reason: I18n.t('errRoomInGame') } satisfies CoopNetMessage);
           setTimeout(() => conn.close(), 250);
           return;
         }
         if (this.lobby.members.length >= 4) {
-          conn.send({ type: 'join_ack', ok: false, reason: '小队人数已满（最多 4 人）！' } satisfies CoopNetMessage);
+          conn.send({ type: 'join_ack', ok: false, reason: I18n.t('errRoomFull') } satisfies CoopNetMessage);
           setTimeout(() => conn.close(), 250);
           return;
         }
@@ -239,7 +225,7 @@ class CoopNetworkManager {
         const member: LobbyMember = {
           peerId: conn.peer,
           slot,
-          callsign: (msg.callsign || `特工-${slot + 1}`).slice(0, 10),
+          callsign: (msg.callsign || `P${slot + 1}`).slice(0, 10),
           color: SQUAD_SLOTS[slot]?.color || '#4ade80',
           ready: true,
           isHost: false,
@@ -271,7 +257,6 @@ class CoopNetworkManager {
         return;
       }
 
-      // 局内消息交由 GameEngine 权威处理
       this.onGameMessageCb?.(msg, conn.peer);
     });
 
@@ -298,7 +283,7 @@ class CoopNetworkManager {
     const code = rawCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (code.length < 4) {
       this.status = 'error';
-      this.errorMsg = '请输入有效的 5 位小队房间码！';
+      this.errorMsg = I18n.t('errInvalidCode');
       this.notifyLobby();
       return;
     }
@@ -334,13 +319,14 @@ class CoopNetworkManager {
         if (msg.type === 'join_ack') {
           if (!msg.ok || !msg.lobby) {
             this.status = 'error';
-            this.errorMsg = msg.reason || '加入房间失败';
+            this.errorMsg = msg.reason || 'Failed to join';
             this.notifyLobby();
             return;
           }
           this.status = 'ready';
           this.mySlot = msg.slot ?? 1;
           this.lobby = msg.lobby;
+          PlatformSDK.showInviteButton(this.lobby.roomCode);
           this.notifyLobby();
           return;
         }
@@ -356,6 +342,7 @@ class CoopNetworkManager {
         if (msg.type === 'start_game') {
           this.lobby = msg.lobby;
           this.lobby.inGame = true;
+          PlatformSDK.hideInviteButton();
           this.onMatchStartCb?.(msg.stageId, msg.mode, msg.lobby);
           return;
         }
@@ -366,7 +353,7 @@ class CoopNetworkManager {
       const onHostDisconnected = () => {
         if (this.role !== 'client') return;
         this.status = 'error';
-        this.errorMsg = '与房主连接已断开';
+        this.errorMsg = I18n.t('errHostLeft');
         this.onPeerLeaveCb?.('host');
         this.notifyLobby();
       };
@@ -378,9 +365,9 @@ class CoopNetworkManager {
     peer.on('error', (err: Error & { type?: string }) => {
       this.status = 'error';
       if (err.type === 'peer-unavailable') {
-        this.errorMsg = `未找到房间【${code}】，请确认房间码正确且房主在线！`;
+        this.errorMsg = I18n.t('errRoomNotFound', { code });
       } else {
-        this.errorMsg = `连接失败：${err.message || err.type || '网络受限'}`;
+        this.errorMsg = I18n.t('errSignal', { msg: err.message || err.type || 'Network error' });
       }
       this.notifyLobby();
     });
@@ -406,6 +393,7 @@ class CoopNetworkManager {
   public launchHostMatch(): void {
     if (this.role !== 'host' || !this.lobby) return;
     this.lobby.inGame = true;
+    PlatformSDK.hideInviteButton();
     const pkt: CoopNetMessage = {
       type: 'start_game',
       stageId: this.lobby.stageId,
@@ -419,6 +407,7 @@ class CoopNetworkManager {
   public returnSquadToLobby(): void {
     if (!this.lobby) return;
     this.lobby.inGame = false;
+    PlatformSDK.showInviteButton(this.lobby.roomCode);
     if (this.role === 'host') {
       this.broadcastLobby();
     }
@@ -438,7 +427,7 @@ class CoopNetworkManager {
         try {
           conn.send(msg);
         } catch {
-          // ignore transient send error
+          // ignore
         }
       }
     });
