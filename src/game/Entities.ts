@@ -223,6 +223,15 @@ export interface RunSnapshot {
   waveState: 'fighting' | 'intermission' | 'extraction' | 'ended';
   intermissionTimer: number;
   extractionProgress: number;
+  extractionTimer: number;
+  lootToast: {
+    sprite: string;
+    badge: string;
+    title: string;
+    desc: string;
+    color: string;
+    timer: number;
+  } | null;
   zombiesRemainingInWave: number;
   cash: number;
   battleLevel: number;

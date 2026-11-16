@@ -40,6 +40,23 @@ export type SpriteKey =
   | 'item_armor'
   | 'item_medkit'
   | 'item_emp_grid'
+  | 'prop_helicopter'
+  | 'proj_rocket'
+  | 'gear_backpack'
+  | 'ui_coin'
+  | 'decal_scorch'
+  | 'decal_blood'
+  | 'pool_acid'
+  | 'prop_turbine'
+  | 'prop_floor_grate'
+  | 'prop_traffic_cone'
+  | 'relic_ricochet'
+  | 'relic_shock_plank'
+  | 'relic_war_bonds'
+  | 'relic_tesla_boots'
+  | 'relic_vamp_core'
+  | 'relic_napalm'
+  | 'relic_cluster_core'
   | 'td_pistol'
   | 'td_revolver'
   | 'td_smg'
@@ -122,6 +139,23 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   item_armor: './assets/item_armor.png',
   item_medkit: './assets/item_medkit.png',
   item_emp_grid: './assets/item_emp_grid.png',
+  prop_helicopter: './assets/prop_helicopter.png',
+  proj_rocket: './assets/proj_rocket.png',
+  gear_backpack: './assets/gear_backpack.png',
+  ui_coin: './assets/ui_coin.png',
+  decal_scorch: './assets/decal_scorch.png',
+  decal_blood: './assets/decal_blood.png',
+  pool_acid: './assets/pool_acid.png',
+  prop_turbine: './assets/prop_turbine.png',
+  prop_floor_grate: './assets/prop_floor_grate.png',
+  prop_traffic_cone: './assets/prop_traffic_cone.png',
+  relic_ricochet: './assets/relic_ricochet.png',
+  relic_shock_plank: './assets/relic_shock_plank.png',
+  relic_war_bonds: './assets/relic_war_bonds.png',
+  relic_tesla_boots: './assets/relic_tesla_boots.png',
+  relic_vamp_core: './assets/relic_vamp_core.png',
+  relic_napalm: './assets/relic_napalm.png',
+  relic_cluster_core: './assets/relic_cluster_core.png',
   td_pistol: './assets/td_pistol.png',
   td_revolver: './assets/td_revolver.png',
   td_smg: './assets/td_smg.png',

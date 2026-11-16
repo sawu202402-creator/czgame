@@ -91,6 +91,8 @@ export class GameEngine {
       waveState: 'fighting',
       intermissionTimer: 0,
       extractionProgress: 0,
+      extractionTimer: 0,
+      lootToast: null,
       zombiesRemainingInWave: 0,
       cash: pStats.startCash,
       battleLevel: 1,
@@ -807,6 +809,10 @@ export class GameEngine {
     s.camera.zoom = Math.max(0.66, Math.min(1.1, fitZoom));
 
     if (s.bannerTimer > 0) s.bannerTimer -= dt;
+    if (s.lootToast) {
+      s.lootToast.timer -= dt;
+      if (s.lootToast.timer <= 0) s.lootToast = null;
+    }
     if (s.hqSupportCooldown > 0) s.hqSupportCooldown -= dt;
     if (s.armoryAdCooldown > 0) s.armoryAdCooldown -= dt;
     if (s.camera.shake > 0) s.camera.shake = Math.max(0, s.camera.shake - dt * 2.8);
@@ -888,12 +894,13 @@ export class GameEngine {
         if (s.relicIds.includes('piggy_bank') && s.cash > 0) {
           const interest = Math.min(180, Math.round(s.cash * 0.1));
           s.cash += interest;
-          this.spawnFloatingText(s.player.x, s.player.y - 42, `🐷 存钱罐利息 +$${interest}!`, '#fde047', 1.3);
+          this.spawnFloatingText(s.player.x, s.player.y - 42, `战备利息 +$${interest}!`, '#fde047', 1.3);
           SoundFX.coin();
         }
 
         if (s.mode === 'standard' && s.wave >= s.maxWaves) {
           s.waveState = 'extraction';
+          s.extractionTimer = 0;
           this.extractionSpawnTimer = 1.2;
           const yard = s.rooms.find((r) => r.id === 'courtyard');
           if (yard && !yard.unlocked) {
@@ -919,6 +926,7 @@ export class GameEngine {
         this.prepareWave(s.wave + 1);
       }
     } else if (s.waveState === 'extraction') {
+      s.extractionTimer += dt;
       // 撤离突围阶段持续刷出追击尸潮，拒绝白给通关！
       this.extractionSpawnTimer -= dt;
       if (this.extractionSpawnTimer <= 0 && s.zombies.length < 14) {
@@ -1750,12 +1758,24 @@ export class GameEngine {
     SoundFX.fanfare();
     if (pool.length === 0) {
       s.cash += 350;
-      this.spawnFloatingText(cx, cy - 28, '🎁 奇物满阶 +$350', '#fde047', 1.25);
+      this.spawnFloatingText(cx, cy - 28, '战术模组满阶 +$350', '#fde047', 1.25);
       return;
     }
     const picked = pool[Math.floor(Math.random() * pool.length)];
     s.relicIds.push(picked.id);
-    this.spawnFloatingText(cx, cy - 28, `🎁 ${picked.icon} ${picked.name}`, '#fde047', 1.25);
+    const rarityColor =
+      picked.rarity === 'legendary' ? '#f59e0b' : picked.rarity === 'epic' ? '#c084fc' : '#38bdf8';
+    const rarityLabel =
+      picked.rarity === 'legendary' ? '传奇战术遗物' : picked.rarity === 'epic' ? '史诗战术装置' : '精良战术模组';
+    s.lootToast = {
+      sprite: picked.sprite,
+      badge: rarityLabel,
+      title: picked.name,
+      desc: picked.desc,
+      color: rarityColor,
+      timer: 3.4,
+    };
+    this.spawnFloatingText(cx, cy - 28, `获得 ${picked.name}`, rarityColor, 1.25);
   }
 
   private damageZombiesWithLaserTrap(st: RuntimeStation, dt: number): void {
@@ -2120,7 +2140,7 @@ export class GameEngine {
         s.player.vampCounter = 0;
         const heal = Math.round(s.player.maxHp * 0.08);
         s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
-        this.spawnFloatingText(s.player.x, s.player.y - 30, `🦇 吸血 +${heal}`, '#4ade80', 1.15);
+        this.spawnFloatingText(s.player.x, s.player.y - 30, `纳米修复 +${heal}`, '#4ade80', 1.15);
       }
     }
 
@@ -2142,7 +2162,7 @@ export class GameEngine {
       25
     );
 
-    if (z.kind === 'thief') {
+    if (z.kind === 'thief' || z.kind === 'boss') {
       const rm = this.getRoomAt(dropPt.x, dropPt.y) || s.rooms[0];
       s.chests.push({
         id: this.nextEntityId++,
@@ -2153,8 +2173,8 @@ export class GameEngine {
         bobPhase: 0,
       });
       SoundFX.fanfare();
-      this.spawnFloatingText(dropPt.x, dropPt.y - 26, '🎁 掉落宝物箱!', '#fde047', 1.25);
-    } else if (Math.random() < (z.kind === 'miniboss' || z.kind === 'boss' ? 0.55 : 0.035)) {
+      this.spawnFloatingText(dropPt.x, dropPt.y - 26, '掉落战术空投箱!', '#fde047', 1.25);
+    } else if (Math.random() < (z.kind === 'miniboss' ? 0.55 : 0.035)) {
       const types: PowerUpType[] = ['overdrive', 'nuke', 'carpenter', 'double_cash', 'freeze'];
       const pType = types[Math.floor(Math.random() * types.length)];
       s.drops.push({
@@ -2823,10 +2843,18 @@ export class GameEngine {
     const picked = IN_RUN_PERKS[Math.floor(Math.random() * IN_RUN_PERKS.length)];
     picked.apply(s.modifiers);
     SoundFX.fanfare();
+    s.lootToast = {
+      sprite: picked.sprite,
+      badge: `战地晋升 Lv.${s.battleLevel}`,
+      title: picked.name,
+      desc: picked.desc,
+      color: picked.color,
+      timer: 2.8,
+    };
     this.spawnFloatingText(
       s.player.x,
       s.player.y - 40,
-      `🆙 Lv.${s.battleLevel} · ${picked.icon}${picked.name}`,
+      `Lv.${s.battleLevel} · ${picked.name}`,
       '#fde047',
       1.22
     );

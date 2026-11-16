@@ -146,9 +146,10 @@ export class CartoonRenderer {
     // 9. 特种部队主角（夜视仪头盔躯干 + 战术护肘双臂 + 9把枪械俯视建模 + 枪口地面火光）
     this.drawPlayer(ctx, state);
 
-    // 10. 抛物线手雷、流光曳光弹、闪电链、粒子与跳字
+    // 10. 抛物线手雷、流光曳光弹、闪电链、粒子、跳字与高空悬停救援黑鹰直升机
     this.drawGrenades(ctx, state);
     this.drawBulletsAndFX(ctx, state);
+    this.drawExtractionHelicopterOverhead(ctx, state);
 
     ctx.restore();
 
@@ -788,7 +789,8 @@ export class CartoonRenderer {
     mctx.strokeRect(sx + 16, sy + 16, sw - 32, sh - 32);
     mctx.setLineDash([]);
 
-    // 上下两座巨型工业冷却涡轮风机井口
+    // 上下两座巨型工业冷却涡轮风机井口（高精度俯视反应堆涡轮贴图）
+    const turbImg = Assets.getSprite('prop_turbine');
     for (const fy of [sy + sh * 0.3, sy + sh * 0.7]) {
       const fx = sx + sw / 2;
       const fr = sw * 0.33;
@@ -802,34 +804,16 @@ export class CartoonRenderer {
       mctx.arc(fx, fy, fr * 1.15, 0, Math.PI * 2);
       mctx.fill();
 
-      // 涡轮扇叶
-      mctx.save();
-      mctx.translate(fx, fy);
-      for (let b = 0; b < 7; b++) {
-        mctx.rotate((Math.PI * 2) / 7);
-        mctx.fillStyle = '#1e293b';
-        mctx.strokeStyle = '#090e17';
-        mctx.lineWidth = 2;
+      if (turbImg) {
+        const tDim = fr * 2.12;
+        mctx.drawImage(turbImg, fx - tDim / 2, fy - tDim / 2, tDim, tDim);
+      } else {
+        mctx.strokeStyle = '#475569';
+        mctx.lineWidth = 5;
         mctx.beginPath();
-        mctx.moveTo(14, -6);
-        mctx.lineTo(fr - 8, -18);
-        mctx.lineTo(fr - 4, 10);
-        mctx.lineTo(14, 8);
-        mctx.closePath();
-        mctx.fill();
+        mctx.arc(fx, fy, fr, 0, Math.PI * 2);
         mctx.stroke();
       }
-      mctx.fillStyle = '#334155';
-      mctx.beginPath();
-      mctx.arc(0, 0, 22, 0, Math.PI * 2);
-      mctx.fill();
-      mctx.stroke();
-
-      mctx.fillStyle = '#22d3ee';
-      mctx.beginPath();
-      mctx.arc(0, 0, 8, 0, Math.PI * 2);
-      mctx.fill();
-      mctx.restore();
 
       // 井口十字承重钢梁
       mctx.strokeStyle = '#334155';
@@ -837,12 +821,6 @@ export class CartoonRenderer {
       mctx.beginPath();
       mctx.moveTo(sx + 20, fy);
       mctx.lineTo(sx + sw - 20, fy);
-      mctx.stroke();
-
-      mctx.strokeStyle = '#475569';
-      mctx.lineWidth = 5;
-      mctx.beginPath();
-      mctx.arc(fx, fy, fr, 0, Math.PI * 2);
       mctx.stroke();
     }
 
@@ -1169,29 +1147,21 @@ export class CartoonRenderer {
           mctx.restore();
         }
       } else if (pr.kind === 'crates' || pr.kind === 'police_car' || pr.kind === 'swat_van') {
-        // 车辆/货箱边摆放俯视橙白反光警示锥（雪糕筒）
+        // 车辆/货箱边摆放高精度俯视橙白反光战术路锥
         const cx = pr.x + pr.w * 0.52 + 16;
         const cy = pr.y + pr.h * 0.32;
         if (pointInAnyRect(cx, cy, room.rects, -18)) {
+          const coneImg = Assets.getSprite('prop_traffic_cone');
           mctx.save();
           mctx.translate(cx, cy);
           mctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
-          mctx.fillRect(-6, -5, 14, 14);
-          mctx.fillStyle = '#ea580c';
-          mctx.strokeStyle = '#090e17';
-          mctx.lineWidth = 1.6;
-          mctx.beginPath();
-          mctx.roundRect(-7, -7, 14, 14, 3);
-          mctx.fill();
-          mctx.stroke();
-          mctx.beginPath();
-          mctx.arc(0, 0, 4.6, 0, Math.PI * 2);
-          mctx.fillStyle = '#f8fafc';
-          mctx.fill();
-          mctx.beginPath();
-          mctx.arc(0, 0, 2.2, 0, Math.PI * 2);
-          mctx.fillStyle = '#f97316';
-          mctx.fill();
+          mctx.fillRect(-7, -6, 16, 16);
+          if (coneImg) {
+            mctx.drawImage(coneImg, -10, -10, 20, 20);
+          } else {
+            mctx.fillStyle = '#ea580c';
+            mctx.fillRect(-7, -7, 14, 14);
+          }
           mctx.restore();
         }
       }
@@ -1199,14 +1169,12 @@ export class CartoonRenderer {
   }
 
   private bakeFloorGrate(mctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
-    mctx.fillStyle = '#0f172a';
-    mctx.strokeStyle = '#475569';
-    mctx.lineWidth = 1.8;
-    mctx.fillRect(x, y, w, h);
-    mctx.strokeRect(x, y, w, h);
-    mctx.fillStyle = '#334155';
-    for (let sx = x + 5; sx < x + w - 4; sx += 6) {
-      mctx.fillRect(sx, y + 3, 2.5, h - 6);
+    const grateImg = Assets.getSprite('prop_floor_grate');
+    if (grateImg) {
+      mctx.drawImage(grateImg, x, y, w, h);
+    } else {
+      mctx.fillStyle = '#0f172a';
+      mctx.fillRect(x, y, w, h);
     }
   }
 
@@ -1552,83 +1520,87 @@ export class CartoonRenderer {
   // ==================== 地面与房间动态交互物 ====================
 
   private drawDecals(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    const scorchImg = Assets.getSprite('decal_scorch');
+    const bloodImg = Assets.getSprite('decal_blood');
+    const acidSpatterSil = Assets.getTintedSilhouette('decal_blood', '#84cc16');
+    const poolImg = Assets.getSprite('pool_acid');
+    const bossPoolSil = Assets.getTintedSilhouette('pool_acid', '#e11d48');
+
     for (const dc of state.decals) {
-      if (!this.inView(dc.x, dc.y, dc.radius + 30)) continue;
+      if (!this.inView(dc.x, dc.y, dc.radius + 36)) continue;
       ctx.save();
       if (dc.isScorch) {
-        // 高爆焦黑放射状弹坑贴花 + 初爆余烬微光边
-        const alpha = Math.min(0.9, dc.life / 3.2);
+        const alpha = Math.min(0.92, dc.life / 3.2);
         ctx.globalAlpha = alpha;
         ctx.translate(dc.x, dc.y);
-
-        const cg = ctx.createRadialGradient(0, 0, dc.radius * 0.12, 0, 0, dc.radius);
-        cg.addColorStop(0, 'rgba(2, 6, 23, 0.86)');
-        cg.addColorStop(0.55, 'rgba(15, 23, 42, 0.56)');
-        cg.addColorStop(1, 'rgba(15, 23, 42, 0)');
-        ctx.fillStyle = cg;
-        ctx.beginPath();
-        ctx.arc(0, 0, dc.radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // 放射状冲击波灼痕射线
-        ctx.strokeStyle = 'rgba(9, 13, 22, 0.62)';
-        ctx.lineWidth = 2.4;
-        ctx.beginPath();
-        for (let r = 0; r < 10; r++) {
-          const ang = (r / 10) * Math.PI * 2 + dc.seed;
-          const rLen = dc.radius * (0.72 + ((r * 37) % 5) * 0.11);
-          ctx.moveTo(Math.cos(ang) * dc.radius * 0.2, Math.sin(ang) * dc.radius * 0.2);
-          ctx.lineTo(Math.cos(ang) * rLen, Math.sin(ang) * rLen);
-        }
-        ctx.stroke();
-
-        // 刚爆炸后 2.5 秒内的坑心暗红余烬
-        const fresh = Math.max(0, 1 - (dc.maxLife - dc.life) / 2.5);
-        if (fresh > 0) {
-          ctx.fillStyle = `rgba(249, 115, 22, ${0.42 * fresh})`;
+        ctx.rotate(dc.seed);
+        const sz = dc.radius * 2.24;
+        if (scorchImg) {
+          ctx.drawImage(scorchImg, -sz / 2, -sz / 2, sz, sz);
+        } else {
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.78)';
           ctx.beginPath();
-          ctx.arc(0, 0, dc.radius * 0.28, 0, Math.PI * 2);
+          ctx.arc(0, 0, dc.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        const fresh = Math.max(0, 1 - (dc.maxLife - dc.life) / 2.4);
+        if (fresh > 0) {
+          ctx.fillStyle = `rgba(251, 146, 60, ${0.36 * fresh})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, dc.radius * 0.3, 0, Math.PI * 2);
           ctx.fill();
         }
       } else {
         ctx.globalAlpha = Math.min(0.88, dc.life / 3.5);
-        ctx.fillStyle = dc.color;
-        ctx.beginPath();
-        ctx.arc(dc.x, dc.y, dc.radius * 0.72, 0, Math.PI * 2);
-        ctx.arc(
-          dc.x + Math.cos(dc.seed) * dc.radius * 0.44,
-          dc.y + Math.sin(dc.seed) * dc.radius * 0.44,
-          dc.radius * 0.42,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
+        ctx.translate(dc.x, dc.y);
+        ctx.rotate(dc.seed);
+        const sz = dc.radius * 2.35;
+        if (bloodImg) {
+          ctx.drawImage(bloodImg, -sz / 2, -sz / 2, sz, sz);
+          if ((dc.color === '#84cc16' || dc.color === '#65a30d') && acidSpatterSil) {
+            ctx.globalAlpha *= 0.72;
+            ctx.drawImage(acidSpatterSil, -sz / 2, -sz / 2, sz, sz);
+          }
+        } else {
+          ctx.fillStyle = dc.color;
+          ctx.beginPath();
+          ctx.arc(0, 0, dc.radius * 0.72, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.restore();
     }
 
-    // 地面强酸/腐蚀熔岩毒潭
+    // 地面强酸/尸王熔岩腐蚀毒潭高精度贴图
     const now = performance.now() * 0.007;
     for (const ap of state.acidPools) {
-      if (!this.inView(ap.x, ap.y, ap.radius + 20)) continue;
-      const alpha = Math.min(1, ap.life / 0.8);
-      const pulse = 0.94 + Math.sin(now + ap.x * 0.05) * 0.06;
+      if (!this.inView(ap.x, ap.y, ap.radius + 26)) continue;
+      const alpha = Math.min(0.95, ap.life / 0.8);
+      const pulse = 0.95 + Math.sin(now + ap.x * 0.05) * 0.05;
+      const sz = ap.radius * 2.34 * pulse;
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.beginPath();
-      ctx.arc(ap.x, ap.y, ap.radius * pulse, 0, Math.PI * 2);
-      ctx.fillStyle = ap.isBoss ? 'rgba(225, 29, 72, 0.42)' : 'rgba(132, 204, 22, 0.42)';
-      ctx.fill();
-      ctx.lineWidth = 2.5;
-      ctx.strokeStyle = ap.isBoss ? '#fb7185' : '#bef264';
-      ctx.setLineDash([7, 5]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.translate(ap.x, ap.y);
+      ctx.rotate((ap.x + ap.y) * 0.03);
+      if (poolImg) {
+        ctx.drawImage(poolImg, -sz / 2, -sz / 2, sz, sz);
+        if (ap.isBoss && bossPoolSil) {
+          ctx.globalAlpha = alpha * 0.74;
+          ctx.drawImage(bossPoolSil, -sz / 2, -sz / 2, sz, sz);
+        }
+      } else {
+        ctx.fillStyle = ap.isBoss ? 'rgba(225, 29, 72, 0.45)' : 'rgba(132, 204, 22, 0.45)';
+        ctx.beginPath();
+        ctx.arc(0, 0, ap.radius * pulse, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
-      const bx = ap.x + Math.cos(now * 1.3 + ap.y) * ap.radius * 0.38;
-      const by = ap.y + Math.sin(now * 1.1 + ap.x) * ap.radius * 0.38;
+      const bx = Math.cos(now * 1.3 + ap.y) * ap.radius * 0.36;
+      const by = Math.sin(now * 1.1 + ap.x) * ap.radius * 0.36;
+      ctx.globalAlpha = alpha * 0.85;
       ctx.beginPath();
-      ctx.arc(bx, by, 5, 0, Math.PI * 2);
+      ctx.arc(bx, by, 4.2, 0, Math.PI * 2);
       ctx.fillStyle = ap.isBoss ? '#fda4af' : '#ecfccb';
       ctx.fill();
       ctx.restore();
@@ -1640,9 +1612,10 @@ export class CartoonRenderer {
     if (!courtyard?.unlocked && state.waveState !== 'extraction') return;
 
     const { x, y } = state.stage.helipadPos;
-    if (!this.inView(x, y, 130)) return;
+    if (!this.inView(x, y, 150)) return;
     const isExtracting = state.waveState === 'extraction';
-    const pulse = 0.85 + Math.sin(performance.now() * 0.008) * 0.15;
+    const now = performance.now();
+    const pulse = 0.85 + Math.sin(now * 0.008) * 0.15;
 
     ctx.save();
     ctx.beginPath();
@@ -1665,6 +1638,17 @@ export class CartoonRenderer {
       ctx.arc(x, y, 74, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(34, 197, 94, ${0.24 * pulse})`;
       ctx.fill();
+
+      // 旋翼下洗气流地面扩散风圈
+      for (let w = 0; w < 2; w++) {
+        const wavePhase = ((now * 0.0014 + w * 0.5) % 1);
+        const wr = 36 + wavePhase * 76;
+        ctx.beginPath();
+        ctx.arc(x, y, wr, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(226, 232, 240, ${(1 - wavePhase) * 0.26})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
 
     for (let i = 0; i < 8; i++) {
@@ -1682,23 +1666,112 @@ export class CartoonRenderer {
       ctx.lineWidth = 8;
       ctx.stroke();
 
-      const rotorAngle = performance.now() * 0.018;
-      ctx.save();
-      ctx.translate(x, y - 10);
-      ctx.rotate(rotorAngle);
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.48)';
-      ctx.lineWidth = 9;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(-82, 0);
-      ctx.lineTo(82, 0);
-      ctx.moveTo(0, -82);
-      ctx.lineTo(0, 82);
-      ctx.stroke();
-      ctx.restore();
-
-      this.drawCachedLabel(ctx, '踩入光圈撤离!', x, y - 98, '#fef08a', 15);
+      this.drawCachedLabel(ctx, '踩入停机坪登机撤离!', x, y - 102, '#fef08a', 15);
     }
+    ctx.restore();
+  }
+
+  private drawExtractionHelicopterOverhead(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    if (state.waveState !== 'extraction') return;
+    const { x: hx, y: hy } = state.stage.helipadPos;
+    const rawT = Math.min(1, (state.extractionTimer || 0) / 1.8);
+    const ease = 1 - Math.pow(1 - rawT, 3);
+
+    const now = performance.now();
+    const swayX = Math.sin(now * 0.0028) * 4.5;
+    const swayY = Math.cos(now * 0.0034) * 3.8;
+
+    const cx = hx - 420 * (1 - ease) - 18 + swayX;
+    const cy = hy - 190 * (1 - ease) - 14 + swayY;
+    if (!this.inView(cx, cy, 220)) return;
+
+    const heliImg = Assets.getSprite('prop_helicopter');
+    const heliHeading = -0.18 + Math.sin(now * 0.002) * 0.025;
+    const playerDist = Math.hypot(state.player.x - hx, state.player.y - hy);
+    const bodyAlpha = playerDist < 96 ? 0.72 : 0.94;
+
+    ctx.save();
+    // 1. 机身下方地面斜向投影
+    ctx.save();
+    ctx.translate(cx + 22, cy + 32);
+    ctx.rotate(heliHeading);
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.36)';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 108, 30, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 2. 高空悬停黑鹰救援直升机机身 + 机头探照灯 + 航行频闪灯 + 四叶高速残影旋翼盘
+    ctx.translate(cx, cy);
+    ctx.rotate(heliHeading);
+
+    // 机头探照灯暖白光锥
+    const sg = ctx.createLinearGradient(95, 0, 235, 0);
+    sg.addColorStop(0, 'rgba(254, 249, 195, 0.28)');
+    sg.addColorStop(1, 'rgba(254, 249, 195, 0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.moveTo(95, -14);
+    ctx.lineTo(235, -58);
+    ctx.lineTo(235, 58);
+    ctx.lineTo(95, 14);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = bodyAlpha;
+    const drawW = 248;
+    const drawH = heliImg ? drawW * (heliImg.height / heliImg.width) : 82;
+    if (heliImg) {
+      ctx.drawImage(heliImg, -drawW / 2, -drawH / 2, drawW, drawH);
+    }
+
+    // 两侧短翼红/绿航空防撞频闪灯
+    const blinkOn = Math.floor(now / 220) % 2 === 0;
+    if (blinkOn) {
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(24, -drawH * 0.44, 3.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#4ade80';
+      ctx.beginPath();
+      ctx.arc(24, drawH * 0.44, 3.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 主旋翼轴心（位于机身前中段 x=+34）高速旋转半透明气动扇盘与四叶桨影
+    const hubX = 34;
+    const rotorR = 104;
+    const rotorAng = now * 0.026;
+    ctx.save();
+    ctx.translate(hubX, 0);
+    ctx.globalAlpha = 0.24;
+    const rg = ctx.createRadialGradient(0, 0, 12, 0, 0, rotorR);
+    rg.addColorStop(0, 'rgba(15, 23, 42, 0.1)');
+    rg.addColorStop(0.82, 'rgba(203, 213, 225, 0.26)');
+    rg.addColorStop(1, 'rgba(248, 250, 252, 0.45)');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.arc(0, 0, rotorR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.rotate(rotorAng);
+    ctx.globalAlpha = 0.52;
+    for (let b = 0; b < 4; b++) {
+      ctx.rotate(Math.PI / 2);
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.moveTo(8, -2.5);
+      ctx.lineTo(rotorR, -6.5);
+      ctx.lineTo(rotorR, 4.5);
+      ctx.lineTo(8, 2.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(rotorR - 10, -5.5, 9, 9.5);
+    }
+    ctx.restore();
+
     ctx.restore();
   }
 
@@ -2379,39 +2452,36 @@ export class CartoonRenderer {
     evolved: boolean,
     torsoKick: number
   ): void {
+    if (wepId !== 'flamethrower' && wepId !== 'cryogun' && wepId !== 'minigun' && wepId !== 'tesla') {
+      return;
+    }
+
     ctx.save();
     ctx.translate(-torsoKick, 0);
-    ctx.strokeStyle = '#090d16';
-    ctx.lineWidth = 2.4;
+
+    const packImg = Assets.getSprite('gear_backpack');
+    if (packImg) {
+      ctx.drawImage(packImg, -36, -14.5, 25, 29);
+      if (evolved) {
+        const tintCol =
+          wepId === 'minigun' || wepId === 'tesla' ? '#c084fc' : '#38bdf8';
+        const packSil = Assets.getTintedSilhouette('gear_backpack', tintCol);
+        if (packSil) {
+          ctx.globalAlpha = 0.36;
+          ctx.drawImage(packSil, -36, -14.5, 25, 29);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
 
     if (wepId === 'flamethrower') {
-      // 背部双联高压燃油气瓶 + 右侧黄色编织输油软管
-      const tankColor = evolved ? '#0284c7' : '#ea580c';
-      const stripeColor = evolved ? '#7dd3fc' : '#fde047';
-      for (const ty of [-10, 10]) {
-        ctx.fillStyle = tankColor;
-        ctx.beginPath();
-        ctx.roundRect(-34, ty - 5.5, 18, 11, 5);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = stripeColor;
-        ctx.fillRect(-28, ty - 4.5, 4, 9);
-      }
-      ctx.strokeStyle = '#eab308';
+      ctx.strokeStyle = evolved ? '#38bdf8' : '#eab308';
       ctx.lineWidth = 3.2;
       ctx.beginPath();
       ctx.moveTo(-18, 11);
       ctx.quadraticCurveTo(4, 24, 26, 8);
       ctx.stroke();
     } else if (wepId === 'cryogun') {
-      // 背部发光液氮冷媒钢瓶 + 冰蓝保温导管
-      ctx.fillStyle = evolved ? '#2563eb' : '#0891b2';
-      ctx.beginPath();
-      ctx.roundRect(-35, -13, 17, 26, 7);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#bae6fd';
-      ctx.fillRect(-30, -9, 7, 18);
       ctx.strokeStyle = '#38bdf8';
       ctx.lineWidth = 3.2;
       ctx.beginPath();
@@ -2419,12 +2489,6 @@ export class CartoonRenderer {
       ctx.quadraticCurveTo(4, 23, 26, 7);
       ctx.stroke();
     } else if (wepId === 'minigun') {
-      // 背部重型军绿弹药箱 + 侧面黄铜金属供弹链条
-      ctx.fillStyle = evolved ? '#4c1d95' : '#365314';
-      ctx.beginPath();
-      ctx.roundRect(-35, -14, 17, 28, 4);
-      ctx.fill();
-      ctx.stroke();
       ctx.strokeStyle = evolved ? '#e879f9' : '#facc15';
       ctx.lineWidth = 5;
       ctx.setLineDash([3.5, 2.2]);
@@ -2433,19 +2497,6 @@ export class CartoonRenderer {
       ctx.quadraticCurveTo(4, 25, 25, 8);
       ctx.stroke();
       ctx.setLineDash([]);
-    } else if (wepId === 'tesla') {
-      // 背部双紫铜电磁电容塔
-      for (const ty of [-10, 10]) {
-        ctx.fillStyle = '#b45309';
-        ctx.beginPath();
-        ctx.roundRect(-33, ty - 5.5, 15, 11, 3.5);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = evolved ? '#c084fc' : '#22d3ee';
-        ctx.beginPath();
-        ctx.arc(-26, ty, 3.4, 0, Math.PI * 2);
-        ctx.fill();
-      }
     }
 
     ctx.restore();
@@ -3079,60 +3130,34 @@ export class CartoonRenderer {
       }
 
       if (b.explosiveRadius > 0) {
-        // 40mm 尾翼高爆榴弹/爆破弹头（推进尾焰 + 浓烟拖尾 + 军绿弹体 + 红金引信尖锥！）
-        const smokeGrad = ctx.createLinearGradient(-44, 0, -6, 0);
+        // 40mm 尾翼高爆榴弹/爆破火箭弹头高精度贴图 + 推进浓烟尾焰
+        const smokeGrad = ctx.createLinearGradient(-44, 0, -8, 0);
         smokeGrad.addColorStop(0, 'rgba(148, 163, 184, 0)');
         smokeGrad.addColorStop(0.65, 'rgba(203, 213, 225, 0.36)');
         smokeGrad.addColorStop(1, 'rgba(251, 146, 60, 0.72)');
         ctx.strokeStyle = smokeGrad;
-        ctx.lineWidth = 7;
+        ctx.lineWidth = 6.5;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(-42, 0);
-        ctx.lineTo(-7, 0);
+        ctx.lineTo(-9, 0);
         ctx.stroke();
 
-        // 尾部推进喷火核
         ctx.fillStyle = '#fef08a';
         ctx.beginPath();
-        ctx.moveTo(-8, -3.2);
-        ctx.lineTo(-18 - Math.sin(now * 0.06) * 4, 0);
-        ctx.lineTo(-8, 3.2);
+        ctx.moveTo(-9, -3.2);
+        ctx.lineTo(-20 - Math.sin(now * 0.06) * 4, 0);
+        ctx.lineTo(-9, 3.2);
         ctx.closePath();
         ctx.fill();
 
-        // 稳定尾翼
-        ctx.fillStyle = '#334155';
-        ctx.strokeStyle = '#090d16';
-        ctx.lineWidth = 1.4;
-        ctx.beginPath();
-        ctx.moveTo(-6, -3);
-        ctx.lineTo(-11, -7);
-        ctx.lineTo(-4, -3);
-        ctx.moveTo(-6, 3);
-        ctx.lineTo(-11, 7);
-        ctx.lineTo(-4, 3);
-        ctx.stroke();
-
-        // 圆柱金属弹体 + 金色高爆铜环 + 赤红尖拱弹头
-        ctx.fillStyle = '#3f6212';
-        ctx.strokeStyle = '#090d16';
-        ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        ctx.roundRect(-8, -4.4, 13, 8.8, 2);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#facc15';
-        ctx.fillRect(1, -4.2, 3, 8.4);
-
-        ctx.fillStyle = '#ef4444';
-        ctx.beginPath();
-        ctx.moveTo(5, -4.3);
-        ctx.quadraticCurveTo(13, 0, 5, 4.3);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
+        const rktImg = Assets.getSprite('proj_rocket');
+        if (rktImg) {
+          ctx.drawImage(rktImg, -13, -4.6, 28, 9.2);
+        } else {
+          ctx.fillStyle = '#ef4444';
+          ctx.fillRect(-8, -4, 18, 8);
+        }
 
         ctx.restore();
         continue;
@@ -3314,16 +3339,21 @@ export class CartoonRenderer {
     state: RunSnapshot
   ): void {
     const zoom = state.camera.zoom;
-    const targets: { x: number; y: number; tag: string; color: string }[] = [];
+    const targets: { x: number; y: number; sp: SpriteKey; color: string }[] = [];
     for (const c of state.chests) {
-      targets.push({ x: c.x, y: c.y, tag: '箱', color: '#f59e0b' });
+      targets.push({ x: c.x, y: c.y, sp: 'prop_chest', color: '#f59e0b' });
     }
     for (const z of state.zombies) {
-      if (z.kind === 'thief') targets.push({ x: z.x, y: z.y, tag: '$', color: '#fde047' });
-      else if (z.kind === 'boss') targets.push({ x: z.x, y: z.y, tag: 'BOSS', color: '#ef4444' });
+      if (z.kind === 'thief') targets.push({ x: z.x, y: z.y, sp: 'zombie_thief', color: '#fde047' });
+      else if (z.kind === 'boss') targets.push({ x: z.x, y: z.y, sp: 'zombie_boss', color: '#ef4444' });
     }
     if (state.waveState === 'extraction') {
-      targets.push({ x: state.stage.helipadPos.x, y: state.stage.helipadPos.y, tag: 'H', color: '#4ade80' });
+      targets.push({
+        x: state.stage.helipadPos.x,
+        y: state.stage.helipadPos.y,
+        sp: 'prop_helipad',
+        color: '#4ade80',
+      });
     }
 
     const halfW = viewW / (2 * zoom) - 40;
@@ -3333,17 +3363,38 @@ export class CartoonRenderer {
       const dy = t.y - state.camera.y;
       if (Math.abs(dx) <= halfW && Math.abs(dy) <= halfH) continue;
       const angle = Math.atan2(dy, dx);
-      const ix = viewW / 2 + Math.cos(angle) * Math.min(viewW / 2 - 44, 320);
-      const iy = viewH / 2 + Math.sin(angle) * Math.min(viewH / 2 - 58, 195);
+      const ix = viewW / 2 + Math.cos(angle) * Math.min(viewW / 2 - 48, 320);
+      const iy = viewH / 2 + Math.sin(angle) * Math.min(viewH / 2 - 62, 195);
       ctx.save();
-      ctx.beginPath();
-      ctx.arc(ix, iy, 15, 0, Math.PI * 2);
+      ctx.translate(ix, iy);
+
+      // 方向三角尖角指针
+      ctx.save();
+      ctx.rotate(angle);
       ctx.fillStyle = t.color;
-      ctx.fill();
-      ctx.lineWidth = 2.5;
       ctx.strokeStyle = '#090d16';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(24, 0);
+      ctx.lineTo(13, -7);
+      ctx.lineTo(13, 7);
+      ctx.closePath();
+      ctx.fill();
       ctx.stroke();
-      this.drawCachedLabel(ctx, t.tag, ix, iy, '#ffffff', 10);
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 16, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(9, 14, 23, 0.88)';
+      ctx.fill();
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = t.color;
+      ctx.stroke();
+
+      const spImg = Assets.getSprite(t.sp);
+      if (spImg) {
+        ctx.drawImage(spImg, -12, -12, 24, 24);
+      }
       ctx.restore();
     }
   }

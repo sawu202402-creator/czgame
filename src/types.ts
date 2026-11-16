@@ -55,6 +55,7 @@ export interface InRunPerkDef {
   name: string;
   desc: string;
   icon: string;
+  sprite: string;
   color: string;
   apply: (stats: RunModifiers) => void;
 }
@@ -64,6 +65,7 @@ export interface RelicDef {
   name: string;
   desc: string;
   icon: string;
+  sprite: string;
   rarity: 'rare' | 'epic' | 'legendary';
 }
 

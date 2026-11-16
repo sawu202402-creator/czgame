@@ -149,7 +149,7 @@ export class UIManager {
           </div>
 
           <div class="agent-bar">
-            <span class="gold-pill" title="永久特工金币">🪙 ${save.gold}</span>
+            <span class="gold-pill" title="永久特工金币"><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${save.gold}</span>
             <button class="hub-util-btn" id="btn-hub-mute" title="音效开关">${muted ? '🔇' : '🔊'}</button>
             ${fsSupported ? `<button class="hub-util-btn ${fsActive ? 'active' : ''}" id="btn-hub-fs" title="全屏沉浸模式">⛶</button>` : ''}
           </div>
@@ -409,7 +409,7 @@ export class UIManager {
           </div>
           <button class="btn-cartoon btn-mini ${isMax ? 'btn-gray' : canBuy ? 'btn-yellow' : 'btn-disabled'}"
             data-upg="${t.key}" ${!canBuy ? 'disabled' : ''}>
-            ${isMax ? '✅ 已满级' : `🪙 ${cost} 强化升级`}
+            ${isMax ? '已满级' : `<img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${cost} 强化升级`}
           </button>
         </div>
       `;
@@ -465,9 +465,11 @@ export class UIManager {
           <div class="hp-row">
             <div class="bar-box hp-box">
               <div class="bar-fill hp-fill" id="hud-hp-fill"></div>
-              <span id="hud-hp-text">❤️ 100</span>
+              <div class="hud-xp-subbar"><div class="hud-xp-subfill" id="hud-xp-fill"></div></div>
+              <span class="hud-hp-label"><img class="hud-mini-ico" src="./assets/item_medkit.png" alt="" /><em id="hud-hp-text">100</em></span>
             </div>
-            <span class="armor-chip" id="hud-armor-chip" style="display:none">🛡️ 0</span>
+            <span class="lv-chip" id="hud-lv-chip">Lv.1</span>
+            <span class="armor-chip" id="hud-armor-chip" style="display:none"><img class="hud-mini-ico" src="./assets/item_armor.png" alt="" /><em id="hud-armor-val">0</em></span>
           </div>
           <div class="relic-row" id="hud-relics"></div>
         </div>
@@ -476,11 +478,11 @@ export class UIManager {
           <div class="wave-pill" id="hud-wave">第 1/10 波</div>
           <div class="boss-bar-wrap" id="hud-boss-box" style="display:none">
             <div class="boss-bar-fill" id="hud-boss-fill"></div>
-            <span id="hud-boss-text">👑 尸王</span>
+            <span id="hud-boss-text">尸王</span>
           </div>
           <div class="fever-wrap" id="hud-fever-box" style="display:none">
             <div class="fever-fill fever-active" id="hud-fever-fill"></div>
-            <span id="hud-fever-text">🔥 狂暴</span>
+            <span id="hud-fever-text">狂暴</span>
           </div>
           <div class="powerup-row" id="hud-powerups"></div>
         </div>
@@ -498,6 +500,16 @@ export class UIManager {
       </div>
 
       <div class="hud-banner" id="hud-banner"></div>
+      <div class="hud-loot-toast" id="hud-loot-toast">
+        <img class="loot-toast-img" id="loot-toast-img" src="./assets/gun_rifle.png" alt="" />
+        <div class="loot-toast-body">
+          <div class="loot-toast-head">
+            <span class="loot-toast-badge" id="loot-toast-badge">战地晋升</span>
+            <strong id="loot-toast-title">强装火药</strong>
+          </div>
+          <div class="loot-toast-desc" id="loot-toast-desc">所有武器伤害提升 +18%</div>
+        </div>
+      </div>
 
       <div class="moba-wheel-zone">
         <button class="moba-arc-btn arc-pos-1 empty-slot" id="btn-arc-switch" type="button" title="切换副武器 (Q / 1 / 2)">
@@ -511,8 +523,8 @@ export class UIManager {
         </button>
 
         <button class="moba-arc-btn arc-pos-3 moba-reload-btn" id="btn-arc-reload" type="button" title="战术换弹 (R)">
-          <span class="moba-reload-glyph" id="arc-reload-glyph">↻</span>
-          <span class="moba-arc-mini-txt">换弹</span>
+          <img class="moba-reload-ico" src="./assets/prop_ammo_box.png" alt="" />
+          <span class="moba-arc-badge" id="arc-reload-glyph">↻</span>
         </button>
 
         <button class="moba-main-atk" id="btn-main-attack" type="button" title="点按索敌开火 · 按住拖动 360° 瞄准">
@@ -1077,7 +1089,7 @@ export class UIManager {
       vig.classList.toggle('hit-flash', s.player.hitFlashTimer > 0);
     });
 
-    const hpTextStr = `❤️ ${Math.ceil(s.player.hp)}/${s.player.maxHp}`;
+    const hpTextStr = `${Math.ceil(s.player.hp)}/${s.player.maxHp}`;
     setIfChanged('hp', hpTextStr, () => {
       const hpFill = this.hudRoot!.querySelector('#hud-hp-fill') as HTMLElement;
       const hpText = this.hudRoot!.querySelector('#hud-hp-text') as HTMLElement;
@@ -1085,12 +1097,21 @@ export class UIManager {
       hpText.textContent = hpTextStr;
     });
 
+    const xpKey = `${s.battleLevel}:${Math.round((s.battleXp / Math.max(1, s.battleXpNext)) * 100)}`;
+    setIfChanged('xpLv', xpKey, () => {
+      const xpFill = this.hudRoot!.querySelector('#hud-xp-fill') as HTMLElement;
+      const lvChip = this.hudRoot!.querySelector('#hud-lv-chip') as HTMLElement;
+      xpFill.style.width = `${Math.min(100, Math.max(0, (s.battleXp / Math.max(1, s.battleXpNext)) * 100))}%`;
+      lvChip.textContent = `Lv.${s.battleLevel}`;
+    });
+
     const armorVal = Math.round(s.player.armor);
     setIfChanged('armor', `${armorVal}`, () => {
       const chip = this.hudRoot!.querySelector('#hud-armor-chip') as HTMLElement;
+      const armorText = this.hudRoot!.querySelector('#hud-armor-val') as HTMLElement;
       if (armorVal > 0) {
         chip.style.display = 'inline-flex';
-        chip.textContent = `🛡️ ${armorVal}`;
+        armorText.textContent = `${armorVal}`;
       } else {
         chip.style.display = 'none';
       }
@@ -1098,12 +1119,12 @@ export class UIManager {
 
     let waveStr = '';
     if (s.waveState === 'extraction') {
-      waveStr = `🚁 撤离 ${Math.round(s.extractionProgress * 100)}%`;
+      waveStr = `直升机登机撤离 ${Math.round(s.extractionProgress * 100)}%`;
     } else if (s.waveState === 'intermission') {
-      waveStr = `⏳ 备战 ${Math.ceil(s.intermissionTimer)}s`;
+      waveStr = `战备休整 ${Math.ceil(s.intermissionTimer)}s`;
     } else {
-      const waveLabel = s.mode === 'standard' ? `第 ${s.wave}/${s.maxWaves} 波` : `♾️ 第 ${s.wave} 波`;
-      waveStr = `${waveLabel} · 🧟 ${s.zombiesRemainingInWave}`;
+      const waveLabel = s.mode === 'standard' ? `第 ${s.wave}/${s.maxWaves} 波` : `无尽 第 ${s.wave} 波`;
+      waveStr = `${waveLabel} · 剩余 ${s.zombiesRemainingInWave}`;
     }
     setIfChanged('wave', waveStr, () => {
       (this.hudRoot!.querySelector('#hud-wave') as HTMLElement).textContent = waveStr;
@@ -1118,7 +1139,7 @@ export class UIManager {
         bossBox.style.display = 'block';
         const pct = Math.max(0, (bossTarget.hp / bossTarget.maxHp) * 100);
         (this.hudRoot!.querySelector('#hud-boss-fill') as HTMLElement).style.width = `${pct}%`;
-        const title = bossTarget.kind === 'boss' ? '👑 尸王' : '🛡️ 暴君';
+        const title = bossTarget.kind === 'boss' ? '深渊尸王' : '重装暴君';
         (this.hudRoot!.querySelector('#hud-boss-text') as HTMLElement).textContent =
           `${title} ${Math.ceil(bossTarget.hp)}`;
       } else {
@@ -1135,7 +1156,7 @@ export class UIManager {
         (this.hudRoot!.querySelector('#hud-fever-fill') as HTMLElement).style.width =
           `${(s.feverTimer / 6.5) * 100}%`;
         (this.hudRoot!.querySelector('#hud-fever-text') as HTMLElement).textContent =
-          `🔥 狂暴 ${s.feverTimer.toFixed(1)}s`;
+          `狂暴火力 ${s.feverTimer.toFixed(1)}s`;
       } else {
         feverBox.style.display = 'none';
       }
@@ -1174,13 +1195,35 @@ export class UIManager {
       }
     });
 
+    const toastKey = s.lootToast ? `${s.lootToast.badge}|${s.lootToast.title}` : '';
+    setIfChanged('lootToast', toastKey, () => {
+      const toastEl = this.hudRoot!.querySelector('#hud-loot-toast') as HTMLElement;
+      if (s.lootToast) {
+        const imgEl = this.hudRoot!.querySelector('#loot-toast-img') as HTMLImageElement;
+        const badgeEl = this.hudRoot!.querySelector('#loot-toast-badge') as HTMLElement;
+        const titleEl = this.hudRoot!.querySelector('#loot-toast-title') as HTMLElement;
+        const descEl = this.hudRoot!.querySelector('#loot-toast-desc') as HTMLElement;
+        imgEl.setAttribute('src', s.lootToast.sprite);
+        badgeEl.textContent = s.lootToast.badge;
+        badgeEl.style.background = s.lootToast.color;
+        titleEl.textContent = s.lootToast.title;
+        descEl.textContent = s.lootToast.desc;
+        toastEl.style.borderColor = s.lootToast.color;
+        toastEl.classList.add('visible');
+      } else {
+        toastEl.classList.remove('visible');
+      }
+    });
+
     const relicSig = s.relicIds.join(',');
     setIfChanged('relics', relicSig, () => {
       const relicRow = this.hudRoot!.querySelector('#hud-relics') as HTMLElement;
       relicRow.innerHTML = s.relicIds
         .map((id) => {
           const r = RELICS.find((item) => item.id === id);
-          return r ? `<span class="relic-chip" title="${r.name}">${r.icon}</span>` : '';
+          return r
+            ? `<span class="relic-chip rarity-${r.rarity}" title="${r.name}：${r.desc}"><img src="${r.sprite}" alt="" /></span>`
+            : '';
         })
         .join('');
     });
@@ -1189,7 +1232,7 @@ export class UIManager {
       .filter((k) => s.powerUpTimers[k] > 0)
       .map(
         (k) =>
-          `<span class="pow-chip" style="background:${POWERUP_META[k].color}">${POWERUP_META[k].icon} ${s.powerUpTimers[k].toFixed(0)}s</span>`
+          `<span class="pow-chip" style="border-color:${POWERUP_META[k].color}"><img class="pow-chip-ico" src="${POWERUP_META[k].sprite}" alt="" /> ${POWERUP_META[k].name} ${s.powerUpTimers[k].toFixed(0)}s</span>`
       )
       .join('');
     setIfChanged('pows', activePows, () => {
@@ -1279,9 +1322,9 @@ export class UIManager {
           <h2>🚨 特工倒地</h2>
           <p class="popup-sub">坚守至第 ${s.wave} 波 · 歼灭 ${s.kills} 只僵尸</p>
           <div class="revive-perks">
-            <span>⚡ 全屏震飞</span>
-            <span>❤️ 满血满弹</span>
-            <span>🔨 全窗封死</span>
+            <span><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> 全屏震飞</span>
+            <span><img class="sup-inline-icon" src="./assets/item_medkit.png" alt="" /> 满血满弹</span>
+            <span><img class="sup-inline-icon" src="./assets/prop_wood_plank.png" alt="" /> 全窗封死</span>
           </div>
           <div class="popup-footer">
             <button class="btn-cartoon btn-green" id="btn-do-revive">🎬 空投复活</button>
@@ -1325,8 +1368,8 @@ export class UIManager {
           <p class="popup-sub">第 ${s.wave} 波 · 歼灭 ${s.kills} 只僵尸</p>
 
           <div class="reward-preview">
-            <span>🪙 <strong id="rew-gold">+${baseGold}</strong></span>
-            <span>🎖️ <strong id="rew-xp">+${baseXp} XP</strong></span>
+            <span><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> <strong id="rew-gold">+${baseGold}</strong></span>
+            <span><img class="inline-coin" src="./assets/drop_xp.png" alt="" /> <strong id="rew-xp">+${baseXp} XP</strong></span>
           </div>
 
           <div class="meter-wrap">
