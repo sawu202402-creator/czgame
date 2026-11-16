@@ -7,7 +7,9 @@
     "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview --host",
-    "pack:crazygames": "npm run build && python3 scripts/pack_crazygames.py"
+    "pack:crazygames": "VITE_PLATFORM=crazygames npm run build && python3 scripts/pack_platforms.py crazygames",
+    "pack:poki": "VITE_PLATFORM=poki npm run build && python3 scripts/pack_platforms.py poki",
+    "pack:all": "npm run pack:crazygames && npm run pack:poki && npm run build"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

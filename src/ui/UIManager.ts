@@ -129,6 +129,7 @@ export class UIManager {
 
   public showHomeHub(): void {
     cancelAnimationFrame(this.needleAnimId);
+    PlatformSDK.gameplayStop();
     this.armoryOpen = false;
     this.pauseOpen = false;
     this.engine.modalPaused = false;
@@ -248,11 +249,13 @@ export class UIManager {
     });
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-stage-go]').forEach((btn) => {
-      btn.onclick = () => {
+      btn.onclick = async () => {
         if (CoopManager.role !== 'offline') {
           CoopManager.disconnect();
         }
+        btn.disabled = true;
         const st = STAGES.find((item) => item.id === btn.dataset.stageGo)!;
+        await PlatformSDK.showCommercialBreak();
         this.startStageRun(st, this.selectedMode);
       };
     });
@@ -776,7 +779,7 @@ export class UIManager {
     const copyLinkBtn = this.modalRoot.querySelector('#btn-copy-link') as HTMLButtonElement | null;
     if (copyLinkBtn && CoopManager.lobby) {
       copyLinkBtn.onclick = async () => {
-        const url = CoopManager.getInviteUrl();
+        const url = await CoopManager.getInviteUrl();
         try {
           await navigator.clipboard.writeText(url);
           this.coopToast = I18n.t('linkCopied');
@@ -1121,7 +1124,7 @@ export class UIManager {
       this.pauseOpen = false;
       this.modalRoot.innerHTML = '';
       this.engine.modalPaused = false;
-      if (!s.isCoop) PlatformSDK.gameplayStart();
+      PlatformSDK.gameplayStart();
       this.engine.flushQueuedModals();
       return;
     }
@@ -1236,7 +1239,7 @@ export class UIManager {
       this.armoryOpen = false;
       this.modalRoot.innerHTML = '';
       this.engine.modalPaused = false;
-      if (!s.isCoop) PlatformSDK.gameplayStart();
+      PlatformSDK.gameplayStart();
       this.engine.flushQueuedModals();
       return;
     }
@@ -1489,10 +1492,10 @@ export class UIManager {
       cashAdBtn.onclick = async () => {
         if (s.armoryAdCooldown > 0) return;
         const ok = await PlatformSDK.showRewardedAd('armory_free_cash', I18n.t('supCashName'));
+        if (s.isCoop) PlatformSDK.gameplayStart();
         if (ok) {
           s.cash += 450;
           s.armoryAdCooldown = 90;
-          if (s.isCoop) PlatformSDK.gameplayStart();
           this.renderArmoryShop(I18n.t('cashAddedToast'));
         }
       };
@@ -1512,6 +1515,8 @@ export class UIManager {
           if (ok) {
             this.toggleArmoryShop();
             this.engine.applyHqAmmoAndTurret();
+          } else if (s.isCoop) {
+            PlatformSDK.gameplayStart();
           }
         }
       };
@@ -1525,6 +1530,8 @@ export class UIManager {
         if (ok) {
           this.toggleArmoryShop();
           this.engine.applyElectricFortify();
+        } else if (s.isCoop) {
+          PlatformSDK.gameplayStart();
         }
       };
     }
@@ -1944,10 +1951,15 @@ export class UIManager {
       }
     };
 
-    (this.modalRoot.querySelector('#btn-normal-claim') as HTMLButtonElement).onclick = () => {
+    const normalClaimBtn = this.modalRoot.querySelector('#btn-normal-claim') as HTMLButtonElement;
+    normalClaimBtn.onclick = async () => {
+      normalClaimBtn.disabled = true;
       stopped = true;
       cancelAnimationFrame(this.needleAnimId);
       SaveManager.addRewards(baseGold, baseXp);
+      if (CoopManager.role === 'offline') {
+        await PlatformSDK.showCommercialBreak();
+      }
       if (CoopManager.role !== 'offline' && CoopManager.lobby) {
         CoopManager.returnSquadToLobby();
         this.hubTab = 'coop';

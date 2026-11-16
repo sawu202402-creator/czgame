@@ -103,7 +103,7 @@ class CoopNetworkManager {
     return Math.max(1, Math.min(4, this.lobby.members.length));
   }
 
-  public getInviteUrl(): string {
+  public async getInviteUrl(): Promise<string> {
     if (!this.lobby) return window.location.href;
     return PlatformSDK.buildInviteLink(this.lobby.roomCode);
   }
