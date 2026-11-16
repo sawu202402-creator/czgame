@@ -90,7 +90,7 @@ export interface Rect {
   h: number;
 }
 
-export type FloorTheme = 'lobby' | 'armory' | 'lab' | 'mall' | 'asphalt';
+export type FloorTheme = 'lobby' | 'armory' | 'lab' | 'mall' | 'asphalt' | 'hospital' | 'dock' | 'bunker';
 
 export interface RoomConfig {
   id: string;
@@ -135,7 +135,15 @@ export type PropKind =
   | 'sofa'
   | 'lockers'
   | 'cryo_pod'
-  | 'arcade';
+  | 'arcade'
+  | 'hospital_bed'
+  | 'ambulance'
+  | 'container'
+  | 'forklift'
+  | 'subway_car'
+  | 'military_truck'
+  | 'radar_console'
+  | 'missile_pod';
 
 export interface InteriorPropConfig {
   id: string;

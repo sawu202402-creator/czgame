@@ -692,4 +692,627 @@ const stageLab = buildArchitecturalStage({
   ],
 });
 
-export const STAGES: StageDef[] = [stagePolice, stageMall, stageLab];
+// ============================================================================
+// 第 4 关：圣玛丽隔离医院（T型急诊分诊大厅 + L型重症ICU + 生化药剂冷库 + 无菌手术廊 + 停尸样本库 + 救护停机坪）
+// ============================================================================
+const stageHospital = buildArchitecturalStage({
+  id: 'stage_hospital',
+  index: 4,
+  name: '第 4 关 · 圣玛丽隔离医院',
+  subtitle: '深入沦陷疫区急诊中心，穿越隔离病床阵与无菌手术廊突围撤离！',
+  wallColor: '#132226',
+  wallTopColor: '#365860',
+  cols: 58,
+  rows: 42,
+  playerSpawnCell: { gx: 25, gy: 20 },
+  helipadCell: { gx: 40, gy: 29 },
+  rooms: [
+    {
+      id: 'lobby',
+      name: '急诊分诊大厅',
+      floorTheme: 'hospital',
+      boxes: [
+        { gx: 18, gy: 15, gw: 15, gh: 8 },
+        { gx: 22, gy: 23, gw: 7, gh: 7 },
+      ],
+      initiallyUnlocked: true,
+    },
+    {
+      id: 'icu',
+      name: '重症隔离ICU',
+      floorTheme: 'hospital',
+      boxes: [
+        { gx: 9, gy: 7, gw: 13, gh: 8 },
+        { gx: 9, gy: 15, gw: 9, gh: 8 },
+      ],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'pharmacy',
+      name: '生化药剂冷库',
+      floorTheme: 'lab',
+      boxes: [{ gx: 25, gy: 6, gw: 14, gh: 9 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'surgery',
+      name: '无菌手术长廊',
+      floorTheme: 'hospital',
+      boxes: [{ gx: 33, gy: 15, gw: 14, gh: 8 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'morgue',
+      name: '地下样本停尸房',
+      floorTheme: 'lab',
+      boxes: [{ gx: 11, gy: 23, gw: 11, gh: 8 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'courtyard',
+      name: '急诊救护停机坪',
+      floorTheme: 'asphalt',
+      boxes: [{ gx: 29, gy: 23, gw: 18, gh: 12 }],
+      initiallyUnlocked: false,
+    },
+  ],
+  doors: [
+    { id: 'h_d1', orientation: 'vertical', gx: 18, gy: 18, span: 3, roomA: 'lobby', roomB: 'icu', unlockRoomId: 'icu', cost: 480, label: '重症隔离ICU' },
+    { id: 'h_d2', orientation: 'horizontal', gx: 27, gy: 15, span: 3, roomA: 'lobby', roomB: 'pharmacy', unlockRoomId: 'pharmacy', cost: 620, label: '生化药剂冷库' },
+    { id: 'h_d3', orientation: 'vertical', gx: 33, gy: 18, span: 3, roomA: 'lobby', roomB: 'surgery', unlockRoomId: 'surgery', cost: 680, label: '无菌手术长廊' },
+    { id: 'h_d4', orientation: 'vertical', gx: 22, gy: 26, span: 3, roomA: 'lobby', roomB: 'morgue', unlockRoomId: 'morgue', cost: 980, label: '地下样本停尸房' },
+    { id: 'h_d5', orientation: 'horizontal', gx: 13, gy: 23, span: 3, roomA: 'icu', roomB: 'morgue', unlockRoomId: 'morgue', cost: 980, label: '地下样本停尸房' },
+    { id: 'h_d6', orientation: 'vertical', gx: 29, gy: 26, span: 3, roomA: 'lobby', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1680, label: '救护停机坪' },
+    { id: 'h_d7', orientation: 'horizontal', gx: 37, gy: 23, span: 3, roomA: 'surgery', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1680, label: '救护停机坪' },
+  ],
+  windows: [
+    { id: 'hw1', roomId: 'lobby', orientation: 'horizontal', gx: 24, gy: 30, span: 3, outDir: 'S' },
+    { id: 'hw2', roomId: 'icu', orientation: 'horizontal', gx: 13, gy: 7, span: 3, outDir: 'N' },
+    { id: 'hw3', roomId: 'icu', orientation: 'vertical', gx: 9, gy: 16, span: 3, outDir: 'W' },
+    { id: 'hw4', roomId: 'pharmacy', orientation: 'horizontal', gx: 30, gy: 6, span: 3, outDir: 'N' },
+    { id: 'hw5', roomId: 'pharmacy', orientation: 'vertical', gx: 39, gy: 9, span: 3, outDir: 'E' },
+    { id: 'hw6', roomId: 'surgery', orientation: 'vertical', gx: 47, gy: 17, span: 3, outDir: 'E' },
+    { id: 'hw7', roomId: 'morgue', orientation: 'vertical', gx: 11, gy: 25, span: 3, outDir: 'W' },
+    { id: 'hw8', roomId: 'morgue', orientation: 'horizontal', gx: 15, gy: 31, span: 3, outDir: 'S' },
+    { id: 'hw9', roomId: 'courtyard', orientation: 'vertical', gx: 47, gy: 27, span: 3, outDir: 'E' },
+    { id: 'hw10', roomId: 'courtyard', orientation: 'horizontal', gx: 35, gy: 35, span: 4, outDir: 'S' },
+  ],
+  props: [
+    // 急诊分诊大厅：急诊导医台、候诊长排沙发、隔离检疫病床与医疗器械柜
+    { id: 'hp1', roomId: 'lobby', kind: 'desk', x: 22.0 * G, y: 18.2 * G, w: 88, h: 52, blocksBullets: false },
+    { id: 'hp2', roomId: 'lobby', kind: 'sofa', x: 29.5 * G, y: 16.4 * G, w: 92, h: 46, blocksBullets: false },
+    { id: 'hp3', roomId: 'lobby', kind: 'hospital_bed', x: 20.6 * G, y: 21.2 * G, w: 96, h: 54, rotation: 0.14, blocksBullets: false },
+    { id: 'hp4', roomId: 'lobby', kind: 'lockers', x: 30.8 * G, y: 16.2 * G, w: 86, h: 42, blocksBullets: true },
+    // 重症隔离ICU：多张检疫隔离病床阵列与药品铁柜
+    { id: 'hp5', roomId: 'icu', kind: 'hospital_bed', x: 12.6 * G, y: 10.4 * G, w: 98, h: 54, blocksBullets: false },
+    { id: 'hp6', roomId: 'icu', kind: 'hospital_bed', x: 18.8 * G, y: 11.2 * G, w: 98, h: 54, rotation: -0.1, blocksBullets: false },
+    { id: 'hp7', roomId: 'icu', kind: 'hospital_bed', x: 13.5 * G, y: 19.6 * G, w: 96, h: 54, rotation: Math.PI / 2, blocksBullets: false },
+    { id: 'hp8', roomId: 'icu', kind: 'lockers', x: 19.6 * G, y: 8.1 * G, w: 86, h: 42, blocksBullets: true },
+    // 生化药剂冷库：低温疫苗培养舱与冷链储药箱
+    { id: 'hp9', roomId: 'pharmacy', kind: 'cryo_pod', x: 28.0 * G, y: 10.2 * G, w: 78, h: 78, blocksBullets: false },
+    { id: 'hp10', roomId: 'pharmacy', kind: 'crates', x: 36.2 * G, y: 13.0 * G, w: 66, h: 66, blocksBullets: true },
+    { id: 'hp11', roomId: 'pharmacy', kind: 'lockers', x: 26.8 * G, y: 7.1 * G, w: 86, h: 42, blocksBullets: true },
+    // 无菌手术长廊：无影手术床与器械监护台
+    { id: 'hp12', roomId: 'surgery', kind: 'hospital_bed', x: 38.4 * G, y: 18.0 * G, w: 100, h: 56, blocksBullets: false },
+    { id: 'hp13', roomId: 'surgery', kind: 'hospital_bed', x: 43.2 * G, y: 20.6 * G, w: 100, h: 56, blocksBullets: false },
+    { id: 'hp14', roomId: 'surgery', kind: 'desk', x: 40.2 * G, y: 16.2 * G, w: 84, h: 48, blocksBullets: false },
+    // 地下样本停尸房：冷冻隔离舱与生物高危封存箱
+    { id: 'hp15', roomId: 'morgue', kind: 'cryo_pod', x: 15.2 * G, y: 27.2 * G, w: 78, h: 78, blocksBullets: false },
+    { id: 'hp16', roomId: 'morgue', kind: 'crates', x: 19.6 * G, y: 29.2 * G, w: 66, h: 66, blocksBullets: true },
+    // 急诊救护停机坪：急救车、特警防疫车与防疫物资箱
+    { id: 'hp17', roomId: 'courtyard', kind: 'ambulance', x: 33.4 * G, y: 31.2 * G, w: 146, h: 74, rotation: -0.18, blocksBullets: true },
+    { id: 'hp18', roomId: 'courtyard', kind: 'ambulance', x: 43.4 * G, y: 25.0 * G, w: 144, h: 72, rotation: 2.85, blocksBullets: true },
+    { id: 'hp19', roomId: 'courtyard', kind: 'crates', x: 32.0 * G, y: 24.8 * G, w: 64, h: 64, blocksBullets: true },
+  ],
+  stations: [
+    { id: 'hs_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 30.8 * G, y: 20.8 * G, cost: 0, label: '军火终端 [B]' },
+    { id: 'hs_air', roomId: 'lobby', type: 'starter_airdrop', x: 25.5 * G, y: 23.2 * G, cost: 0, weaponId: 'cryogun', label: '液氮炮空投' },
+    { id: 'hs_dog', roomId: 'icu', type: 'mech_dog_cage', x: 11.4 * G, y: 13.2 * G, cost: 580, label: '释放搜救机械犬' },
+    { id: 'hs_vend', roomId: 'pharmacy', type: 'vending_machine', x: 34.8 * G, y: 8.4 * G, cost: 240, label: '医疗补给机' },
+    { id: 'hs_ammo', roomId: 'surgery', type: 'ammo_box', x: 44.5 * G, y: 16.5 * G, cost: 220, label: '弹药补给箱' },
+    { id: 'hs_pap', roomId: 'morgue', type: 'pack_a_punch', x: 18.2 * G, y: 25.2 * G, cost: 1850, label: '超武改造台' },
+    { id: 'hs_laser', roomId: 'courtyard', type: 'laser_trap', x: 35.6 * G, y: 28.0 * G, cost: 320, label: '防疫消杀激光塔' },
+    { id: 'hs_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 31.8 * G, y: 33.4 * G, cost: 0, label: '军火终端 [B]' },
+  ],
+  barrels: [
+    { x: 27.6 * G, y: 22.0 * G, roomId: 'lobby' },
+    { x: 16.0 * G, y: 14.2 * G, roomId: 'icu' },
+    { x: 31.8 * G, y: 12.2 * G, roomId: 'pharmacy' },
+    { x: 36.2 * G, y: 20.8 * G, roomId: 'surgery' },
+    { x: 44.2 * G, y: 32.8 * G, roomId: 'courtyard' },
+  ],
+});
+
+// ============================================================================
+// 第 5 关：铁锈港集装箱码头（港务大厅 + 海关扣押仓 + 集装箱CQB迷宫 + 轮机船坞 + 深海冷库 + 防波堤停机坪）
+// ============================================================================
+const stageHarbor = buildArchitecturalStage({
+  id: 'stage_harbor',
+  index: 5,
+  name: '第 5 关 · 铁锈港集装箱码头',
+  subtitle: '在巨型海运集装箱巷战迷宫与重型叉车掩体间穿梭，引爆油桶粉碎尸潮！',
+  wallColor: '#161e29',
+  wallTopColor: '#475569',
+  cols: 60,
+  rows: 42,
+  playerSpawnCell: { gx: 14, gy: 19 },
+  helipadCell: { gx: 43, gy: 31 },
+  rooms: [
+    {
+      id: 'lobby',
+      name: '港务调度大厅',
+      floorTheme: 'dock',
+      boxes: [{ gx: 8, gy: 14, gw: 13, gh: 11 }],
+      initiallyUnlocked: true,
+    },
+    {
+      id: 'customs',
+      name: '海关扣押军火仓',
+      floorTheme: 'armory',
+      boxes: [{ gx: 10, gy: 6, gw: 11, gh: 8 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'containers',
+      name: '冷链集装箱迷宫',
+      floorTheme: 'dock',
+      boxes: [{ gx: 21, gy: 11, gw: 17, gh: 14 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'workshop',
+      name: '重机轮机船坞',
+      floorTheme: 'armory',
+      boxes: [{ gx: 12, gy: 25, gw: 15, gh: 9 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'cold_storage',
+      name: '深海冷冻货栈',
+      floorTheme: 'lab',
+      boxes: [{ gx: 38, gy: 8, gw: 12, gh: 12 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'courtyard',
+      name: '深水防波堤停机坪',
+      floorTheme: 'asphalt',
+      boxes: [{ gx: 31, gy: 25, gw: 19, gh: 11 }],
+      initiallyUnlocked: false,
+    },
+  ],
+  doors: [
+    { id: 'hb_d1', orientation: 'horizontal', gx: 14, gy: 14, span: 3, roomA: 'lobby', roomB: 'customs', unlockRoomId: 'customs', cost: 500, label: '海关扣押仓' },
+    { id: 'hb_d2', orientation: 'vertical', gx: 21, gy: 18, span: 3, roomA: 'lobby', roomB: 'containers', unlockRoomId: 'containers', cost: 640, label: '集装箱迷宫' },
+    { id: 'hb_d3', orientation: 'horizontal', gx: 15, gy: 25, span: 3, roomA: 'lobby', roomB: 'workshop', unlockRoomId: 'workshop', cost: 720, label: '重机轮机船坞' },
+    { id: 'hb_d4', orientation: 'horizontal', gx: 23, gy: 25, span: 3, roomA: 'containers', roomB: 'workshop', unlockRoomId: 'workshop', cost: 720, label: '重机轮机船坞' },
+    { id: 'hb_d5', orientation: 'vertical', gx: 38, gy: 14, span: 3, roomA: 'containers', roomB: 'cold_storage', unlockRoomId: 'cold_storage', cost: 1050, label: '深海冷冻货栈' },
+    { id: 'hb_d6', orientation: 'horizontal', gx: 33, gy: 25, span: 3, roomA: 'containers', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1750, label: '防波堤停机坪' },
+  ],
+  windows: [
+    { id: 'hbw1', roomId: 'lobby', orientation: 'vertical', gx: 8, gy: 18, span: 3, outDir: 'W' },
+    { id: 'hbw2', roomId: 'customs', orientation: 'horizontal', gx: 15, gy: 6, span: 3, outDir: 'N' },
+    { id: 'hbw3', roomId: 'customs', orientation: 'vertical', gx: 10, gy: 8, span: 3, outDir: 'W' },
+    { id: 'hbw4', roomId: 'containers', orientation: 'horizontal', gx: 28, gy: 11, span: 4, outDir: 'N' },
+    { id: 'hbw5', roomId: 'cold_storage', orientation: 'horizontal', gx: 42, gy: 8, span: 3, outDir: 'N' },
+    { id: 'hbw6', roomId: 'cold_storage', orientation: 'vertical', gx: 50, gy: 13, span: 3, outDir: 'E' },
+    { id: 'hbw7', roomId: 'workshop', orientation: 'horizontal', gx: 18, gy: 34, span: 3, outDir: 'S' },
+    { id: 'hbw8', roomId: 'workshop', orientation: 'vertical', gx: 12, gy: 28, span: 3, outDir: 'W' },
+    { id: 'hbw9', roomId: 'courtyard', orientation: 'vertical', gx: 50, gy: 29, span: 3, outDir: 'E' },
+    { id: 'hbw10', roomId: 'courtyard', orientation: 'horizontal', gx: 38, gy: 36, span: 4, outDir: 'S' },
+  ],
+  props: [
+    // 港务调度大厅：货运叉车、调度桌与报关集装木箱
+    { id: 'hbp1', roomId: 'lobby', kind: 'forklift', x: 12.2 * G, y: 16.4 * G, w: 96, h: 52, rotation: 0.25, blocksBullets: false },
+    { id: 'hbp2', roomId: 'lobby', kind: 'desk', x: 17.8 * G, y: 21.8 * G, w: 86, h: 50, blocksBullets: false },
+    { id: 'hbp3', roomId: 'lobby', kind: 'crates', x: 10.6 * G, y: 23.0 * G, w: 66, h: 66, blocksBullets: true },
+    // 海关扣押军火仓：查扣重武器柜与走私木箱垛
+    { id: 'hbp4', roomId: 'customs', kind: 'crates', x: 18.8 * G, y: 11.4 * G, w: 68, h: 68, blocksBullets: true },
+    { id: 'hbp5', roomId: 'customs', kind: 'lockers', x: 18.6 * G, y: 7.2 * G, w: 90, h: 42, blocksBullets: true },
+    // 冷链集装箱迷宫：三座错落重型海运集装箱 + 货运叉车构成黄金战术绕柱走廊！
+    { id: 'hbp6', roomId: 'containers', kind: 'container', x: 26.2 * G, y: 15.4 * G, w: 156, h: 82, rotation: 0.04, blocksBullets: true },
+    { id: 'hbp7', roomId: 'containers', kind: 'container', x: 33.4 * G, y: 19.8 * G, w: 156, h: 82, rotation: -0.05, blocksBullets: true },
+    { id: 'hbp8', roomId: 'containers', kind: 'forklift', x: 25.4 * G, y: 21.4 * G, w: 96, h: 52, rotation: -0.35, blocksBullets: false },
+    // 重机轮机船坞：维修叉车与重机零件货箱
+    { id: 'hbp9', roomId: 'workshop', kind: 'forklift', x: 23.2 * G, y: 31.2 * G, w: 98, h: 54, rotation: Math.PI - 0.2, blocksBullets: false },
+    { id: 'hbp10', roomId: 'workshop', kind: 'crates', x: 15.2 * G, y: 30.8 * G, w: 68, h: 68, blocksBullets: true },
+    // 深海冷冻货栈：冷链集装箱与冷冻舱
+    { id: 'hbp11', roomId: 'cold_storage', kind: 'cryo_pod', x: 42.0 * G, y: 12.2 * G, w: 78, h: 78, blocksBullets: false },
+    { id: 'hbp12', roomId: 'cold_storage', kind: 'crates', x: 46.8 * G, y: 17.4 * G, w: 68, h: 68, blocksBullets: true },
+    // 深水防波堤停机坪：集装箱掩体、军用卡车与港警巡逻车
+    { id: 'hbp13', roomId: 'courtyard', kind: 'container', x: 35.4 * G, y: 32.6 * G, w: 152, h: 80, rotation: 0.12, blocksBullets: true },
+    { id: 'hbp14', roomId: 'courtyard', kind: 'military_truck', x: 46.4 * G, y: 27.2 * G, w: 148, h: 72, rotation: 2.9, blocksBullets: true },
+  ],
+  stations: [
+    { id: 'hbs_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 18.6 * G, y: 16.0 * G, cost: 0, label: '军火终端 [B]' },
+    { id: 'hbs_air', roomId: 'lobby', type: 'starter_airdrop', x: 13.8 * G, y: 22.6 * G, cost: 0, weaponId: 'sawlauncher', label: '圆锯炮空投' },
+    { id: 'hbs_dog', roomId: 'customs', type: 'mech_dog_cage', x: 13.0 * G, y: 11.2 * G, cost: 580, label: '释放缉私机械犬' },
+    { id: 'hbs_ammo', roomId: 'containers', type: 'ammo_box', x: 34.8 * G, y: 13.4 * G, cost: 220, label: '弹药补给箱' },
+    { id: 'hbs_laser', roomId: 'containers', type: 'laser_trap', x: 29.8 * G, y: 17.6 * G, cost: 300, label: '港口切割激光塔' },
+    { id: 'hbs_vend', roomId: 'workshop', type: 'vending_machine', x: 19.6 * G, y: 28.2 * G, cost: 240, label: '船坞补给机' },
+    { id: 'hbs_pap', roomId: 'cold_storage', type: 'pack_a_punch', x: 45.6 * G, y: 11.6 * G, cost: 1850, label: '超武改造台' },
+    { id: 'hbs_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 38.2 * G, y: 27.2 * G, cost: 0, label: '军火终端 [B]' },
+  ],
+  barrels: [
+    { x: 16.5 * G, y: 18.5 * G, roomId: 'lobby' },
+    { x: 29.8 * G, y: 22.2 * G, roomId: 'containers' },
+    { x: 23.0 * G, y: 13.8 * G, roomId: 'containers' },
+    { x: 20.2 * G, y: 31.8 * G, roomId: 'workshop' },
+    { x: 41.2 * G, y: 17.0 * G, roomId: 'cold_storage' },
+    { x: 47.4 * G, y: 33.4 * G, roomId: 'courtyard' },
+  ],
+});
+
+// ============================================================================
+// 第 6 关：末日地铁枢纽站（安检售票大厅 + 地下商业街 + 牵引变电所 + 36格超宽双轨列车月台 + 抢修室 + 地面广场）
+// ============================================================================
+const stageSubway = buildArchitecturalStage({
+  id: 'stage_subway',
+  index: 6,
+  name: '第 6 关 · 末日地铁枢纽站',
+  subtitle: '依托脱轨地铁车厢构筑纵深交叉火力网，死守贯通东西的地下双轨月台！',
+  wallColor: '#15182a',
+  wallTopColor: '#414b6e',
+  cols: 60,
+  rows: 42,
+  playerSpawnCell: { gx: 30, gy: 12 },
+  helipadCell: { gx: 41, gy: 32 },
+  rooms: [
+    {
+      id: 'lobby',
+      name: '安检售票中庭',
+      floorTheme: 'lobby',
+      boxes: [{ gx: 22, gy: 6, gw: 16, gh: 13 }],
+      initiallyUnlocked: true,
+    },
+    {
+      id: 'concourse',
+      name: '地下商业街廊',
+      floorTheme: 'mall',
+      boxes: [{ gx: 9, gy: 9, gw: 13, gh: 10 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'power_room',
+      name: '高压牵引变电所',
+      floorTheme: 'lab',
+      boxes: [{ gx: 38, gy: 9, gw: 12, gh: 10 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'platform',
+      name: '一号双轨列车月台',
+      floorTheme: 'dock',
+      boxes: [{ gx: 12, gy: 19, gw: 36, gh: 9 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'maint',
+      name: '轨道抢修军械室',
+      floorTheme: 'armory',
+      boxes: [{ gx: 10, gy: 28, gw: 14, gh: 8 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'courtyard',
+      name: '地面换乘广场停机坪',
+      floorTheme: 'asphalt',
+      boxes: [{ gx: 28, gy: 28, gw: 20, gh: 9 }],
+      initiallyUnlocked: false,
+    },
+  ],
+  doors: [
+    { id: 'sw_d1', orientation: 'vertical', gx: 22, gy: 12, span: 3, roomA: 'lobby', roomB: 'concourse', unlockRoomId: 'concourse', cost: 520, label: '地下商业街廊' },
+    { id: 'sw_d2', orientation: 'vertical', gx: 38, gy: 12, span: 3, roomA: 'lobby', roomB: 'power_room', unlockRoomId: 'power_room', cost: 640, label: '高压牵引变电所' },
+    { id: 'sw_d3', orientation: 'horizontal', gx: 28, gy: 19, span: 4, roomA: 'lobby', roomB: 'platform', unlockRoomId: 'platform', cost: 780, label: '一号双轨月台' },
+    { id: 'sw_d4', orientation: 'horizontal', gx: 15, gy: 19, span: 3, roomA: 'concourse', roomB: 'platform', unlockRoomId: 'platform', cost: 780, label: '一号双轨月台' },
+    { id: 'sw_d5', orientation: 'horizontal', gx: 41, gy: 19, span: 3, roomA: 'power_room', roomB: 'platform', unlockRoomId: 'platform', cost: 780, label: '一号双轨月台' },
+    { id: 'sw_d6', orientation: 'horizontal', gx: 16, gy: 28, span: 3, roomA: 'platform', roomB: 'maint', unlockRoomId: 'maint', cost: 1050, label: '轨道抢修军械室' },
+    { id: 'sw_d7', orientation: 'horizontal', gx: 34, gy: 28, span: 4, roomA: 'platform', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1780, label: '地面换乘停机坪' },
+  ],
+  windows: [
+    { id: 'sww1', roomId: 'lobby', orientation: 'horizontal', gx: 24, gy: 6, span: 3, outDir: 'N' },
+    { id: 'sww2', roomId: 'lobby', orientation: 'horizontal', gx: 33, gy: 6, span: 3, outDir: 'N' },
+    { id: 'sww3', roomId: 'concourse', orientation: 'horizontal', gx: 13, gy: 9, span: 3, outDir: 'N' },
+    { id: 'sww4', roomId: 'concourse', orientation: 'vertical', gx: 9, gy: 13, span: 3, outDir: 'W' },
+    { id: 'sww5', roomId: 'power_room', orientation: 'horizontal', gx: 43, gy: 9, span: 3, outDir: 'N' },
+    { id: 'sww6', roomId: 'power_room', orientation: 'vertical', gx: 50, gy: 13, span: 3, outDir: 'E' },
+    { id: 'sww7', roomId: 'platform', orientation: 'vertical', gx: 12, gy: 22, span: 3, outDir: 'W' },
+    { id: 'sww8', roomId: 'platform', orientation: 'vertical', gx: 48, gy: 22, span: 3, outDir: 'E' },
+    { id: 'sww9', roomId: 'maint', orientation: 'horizontal', gx: 15, gy: 36, span: 3, outDir: 'S' },
+    { id: 'sww10', roomId: 'courtyard', orientation: 'horizontal', gx: 36, gy: 37, span: 4, outDir: 'S' },
+    { id: 'sww11', roomId: 'courtyard', orientation: 'vertical', gx: 48, gy: 31, span: 3, outDir: 'E' },
+  ],
+  props: [
+    // 安检售票中庭：售票服务台、候车长椅沙发与安检设备柜
+    { id: 'swp1', roomId: 'lobby', kind: 'desk', x: 26.2 * G, y: 10.6 * G, w: 88, h: 52, blocksBullets: false },
+    { id: 'swp2', roomId: 'lobby', kind: 'sofa', x: 34.2 * G, y: 10.6 * G, w: 92, h: 46, blocksBullets: false },
+    { id: 'swp3', roomId: 'lobby', kind: 'lockers', x: 29.8 * G, y: 7.2 * G, w: 88, h: 42, blocksBullets: true },
+    // 地下商业街廊：复古街机与休闲卡座
+    { id: 'swp4', roomId: 'concourse', kind: 'arcade', x: 18.8 * G, y: 10.4 * G, w: 94, h: 54, blocksBullets: true },
+    { id: 'swp5', roomId: 'concourse', kind: 'sofa', x: 13.0 * G, y: 16.6 * G, w: 90, h: 46, blocksBullets: false },
+    // 高压牵引变电所：电力监控雷达台与防爆器材箱
+    { id: 'swp6', roomId: 'power_room', kind: 'radar_console', x: 43.4 * G, y: 14.0 * G, w: 86, h: 86, blocksBullets: false },
+    { id: 'swp7', roomId: 'power_room', kind: 'crates', x: 47.6 * G, y: 10.8 * G, w: 66, h: 66, blocksBullets: true },
+    // 一号双轨列车月台：两节脱轨横停的不锈钢地铁列车车厢！
+    { id: 'swp8', roomId: 'platform', kind: 'subway_car', x: 22.4 * G, y: 23.5 * G, w: 196, h: 72, rotation: 0.04, blocksBullets: true },
+    { id: 'swp9', roomId: 'platform', kind: 'subway_car', x: 38.2 * G, y: 23.5 * G, w: 196, h: 72, rotation: -0.05, blocksBullets: true },
+    // 轨道抢修军械室：抢修工程叉车与备件箱
+    { id: 'swp10', roomId: 'maint', kind: 'forklift', x: 13.6 * G, y: 31.8 * G, w: 96, h: 52, rotation: 0.18, blocksBullets: false },
+    { id: 'swp11', roomId: 'maint', kind: 'crates', x: 21.2 * G, y: 33.4 * G, w: 68, h: 68, blocksBullets: true },
+    // 地面换乘广场停机坪：特警防暴车与救护车封锁阵
+    { id: 'swp12', roomId: 'courtyard', kind: 'swat_van', x: 31.8 * G, y: 33.6 * G, w: 148, h: 82, rotation: -0.15, blocksBullets: true },
+    { id: 'swp13', roomId: 'courtyard', kind: 'police_car', x: 45.2 * G, y: 29.8 * G, w: 132, h: 68, rotation: 2.8, blocksBullets: true },
+  ],
+  stations: [
+    { id: 'sws_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 34.8 * G, y: 16.0 * G, cost: 0, label: '军火终端 [B]' },
+    { id: 'sws_air', roomId: 'lobby', type: 'starter_airdrop', x: 25.0 * G, y: 15.8 * G, cost: 0, weaponId: 'tesla', label: '电弧炮空投' },
+    { id: 'sws_vend', roomId: 'concourse', type: 'vending_machine', x: 12.6 * G, y: 12.6 * G, cost: 240, label: '地铁补给贩卖机' },
+    { id: 'sws_dog', roomId: 'concourse', type: 'mech_dog_cage', x: 19.2 * G, y: 16.4 * G, cost: 580, label: '释放巡逻机械犬' },
+    { id: 'sws_laser', roomId: 'power_room', type: 'laser_trap', x: 46.8 * G, y: 16.4 * G, cost: 300, label: '高压电弧激光塔' },
+    { id: 'sws_ammo', roomId: 'platform', type: 'ammo_box', x: 30.4 * G, y: 23.5 * G, cost: 220, label: '月台弹药箱' },
+    { id: 'sws_pap', roomId: 'maint', type: 'pack_a_punch', x: 19.8 * G, y: 30.2 * G, cost: 1850, label: '超武改造台' },
+    { id: 'sws_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 30.6 * G, y: 30.2 * G, cost: 0, label: '军火终端 [B]' },
+  ],
+  barrels: [
+    { x: 30.0 * G, y: 15.2 * G, roomId: 'lobby' },
+    { x: 15.8 * G, y: 23.5 * G, roomId: 'platform' },
+    { x: 44.6 * G, y: 23.5 * G, roomId: 'platform' },
+    { x: 41.2 * G, y: 16.8 * G, roomId: 'power_room' },
+    { x: 36.8 * G, y: 34.4 * G, roomId: 'courtyard' },
+  ],
+});
+
+// ============================================================================
+// 第 7 关：66号荒漠空军基地（战备值班厅 + 一号重装机库 + 战略雷达中心 + 燃油调度厅 + 航空弹药库 + 主跑道停机坪）
+// ============================================================================
+const stageAirbase = buildArchitecturalStage({
+  id: 'stage_airbase',
+  index: 7,
+  name: '第 7 关 · 66号荒漠空军基地',
+  subtitle: '驻守战略空军重装机库与全息雷达中心，启动双联激光矩阵迎击重装尸潮！',
+  wallColor: '#1b1e19',
+  wallTopColor: '#4e5746',
+  cols: 62,
+  rows: 44,
+  playerSpawnCell: { gx: 31, gy: 12 },
+  helipadCell: { gx: 43, gy: 32 },
+  rooms: [
+    {
+      id: 'lobby',
+      name: '空勤战备值班厅',
+      floorTheme: 'armory',
+      boxes: [{ gx: 24, gy: 7, gw: 14, gh: 10 }],
+      initiallyUnlocked: true,
+    },
+    {
+      id: 'hangar_w',
+      name: '一号重装运输机库',
+      floorTheme: 'dock',
+      boxes: [{ gx: 8, gy: 10, gw: 16, gh: 16 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'radar',
+      name: '战略雷达指管中心',
+      floorTheme: 'bunker',
+      boxes: [{ gx: 38, gy: 9, gw: 14, gh: 12 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'fuel_bay',
+      name: '中央航空燃油枢纽',
+      floorTheme: 'dock',
+      boxes: [{ gx: 24, gy: 17, gw: 14, gh: 9 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'ordnance',
+      name: '航空弹药挂载库',
+      floorTheme: 'armory',
+      boxes: [{ gx: 11, gy: 26, gw: 16, gh: 10 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'courtyard',
+      name: '主跑道战备停机坪',
+      floorTheme: 'asphalt',
+      boxes: [{ gx: 29, gy: 26, gw: 22, gh: 12 }],
+      initiallyUnlocked: false,
+    },
+  ],
+  doors: [
+    { id: 'ab_d1', orientation: 'vertical', gx: 24, gy: 12, span: 3, roomA: 'lobby', roomB: 'hangar_w', unlockRoomId: 'hangar_w', cost: 560, label: '一号重装机库' },
+    { id: 'ab_d2', orientation: 'vertical', gx: 38, gy: 12, span: 3, roomA: 'lobby', roomB: 'radar', unlockRoomId: 'radar', cost: 680, label: '战略雷达中心' },
+    { id: 'ab_d3', orientation: 'horizontal', gx: 29, gy: 17, span: 4, roomA: 'lobby', roomB: 'fuel_bay', unlockRoomId: 'fuel_bay', cost: 620, label: '中央燃油枢纽' },
+    { id: 'ab_d4', orientation: 'horizontal', gx: 16, gy: 26, span: 3, roomA: 'hangar_w', roomB: 'ordnance', unlockRoomId: 'ordnance', cost: 1080, label: '航空弹药挂载库' },
+    { id: 'ab_d5', orientation: 'horizontal', gx: 24, gy: 26, span: 3, roomA: 'fuel_bay', roomB: 'ordnance', unlockRoomId: 'ordnance', cost: 1080, label: '航空弹药挂载库' },
+    { id: 'ab_d6', orientation: 'horizontal', gx: 32, gy: 26, span: 4, roomA: 'fuel_bay', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1850, label: '主跑道停机坪' },
+  ],
+  windows: [
+    { id: 'abw1', roomId: 'lobby', orientation: 'horizontal', gx: 29, gy: 7, span: 4, outDir: 'N' },
+    { id: 'abw2', roomId: 'hangar_w', orientation: 'horizontal', gx: 14, gy: 10, span: 4, outDir: 'N' },
+    { id: 'abw3', roomId: 'hangar_w', orientation: 'vertical', gx: 8, gy: 16, span: 4, outDir: 'W' },
+    { id: 'abw4', roomId: 'radar', orientation: 'horizontal', gx: 43, gy: 9, span: 3, outDir: 'N' },
+    { id: 'abw5', roomId: 'radar', orientation: 'vertical', gx: 52, gy: 14, span: 3, outDir: 'E' },
+    { id: 'abw6', roomId: 'ordnance', orientation: 'vertical', gx: 11, gy: 29, span: 3, outDir: 'W' },
+    { id: 'abw7', roomId: 'ordnance', orientation: 'horizontal', gx: 17, gy: 36, span: 3, outDir: 'S' },
+    { id: 'abw8', roomId: 'courtyard', orientation: 'vertical', gx: 51, gy: 30, span: 3, outDir: 'E' },
+    { id: 'abw9', roomId: 'courtyard', orientation: 'horizontal', gx: 38, gy: 38, span: 4, outDir: 'S' },
+  ],
+  props: [
+    // 空勤战备值班厅：战术简报桌与飞行员装备柜
+    { id: 'abp1', roomId: 'lobby', kind: 'desk', x: 27.6 * G, y: 11.4 * G, w: 88, h: 52, blocksBullets: false },
+    { id: 'abp2', roomId: 'lobby', kind: 'lockers', x: 35.0 * G, y: 8.2 * G, w: 90, h: 42, blocksBullets: true },
+    // 一号重装运输机库：两辆 6x6 重装军用运输卡车、机库叉车与空投集装箱
+    { id: 'abp3', roomId: 'hangar_w', kind: 'military_truck', x: 14.2 * G, y: 15.2 * G, w: 156, h: 76, rotation: 0.08, blocksBullets: true },
+    { id: 'abp4', roomId: 'hangar_w', kind: 'container', x: 19.6 * G, y: 20.8 * G, w: 152, h: 80, rotation: -0.06, blocksBullets: true },
+    { id: 'abp5', roomId: 'hangar_w', kind: 'forklift', x: 12.2 * G, y: 22.4 * G, w: 96, h: 52, rotation: -0.3, blocksBullets: false },
+    // 战略雷达指管中心：中央全息雷达沙盘主控台与加密机柜
+    { id: 'abp6', roomId: 'radar', kind: 'radar_console', x: 45.2 * G, y: 15.0 * G, w: 96, h: 96, blocksBullets: false },
+    { id: 'abp7', roomId: 'radar', kind: 'lockers', x: 49.4 * G, y: 10.4 * G, w: 88, h: 42, blocksBullets: true },
+    // 中央航空燃油枢纽：军用补给木箱与监控台
+    { id: 'abp8', roomId: 'fuel_bay', kind: 'crates', x: 26.8 * G, y: 21.2 * G, w: 68, h: 68, blocksBullets: true },
+    { id: 'abp9', roomId: 'fuel_bay', kind: 'desk', x: 35.2 * G, y: 21.2 * G, w: 84, h: 50, blocksBullets: false },
+    // 航空弹药挂载库：战术导弹发射巢与重火器军火箱
+    { id: 'abp10', roomId: 'ordnance', kind: 'missile_pod', x: 16.4 * G, y: 31.2 * G, w: 92, h: 92, blocksBullets: true },
+    { id: 'abp11', roomId: 'ordnance', kind: 'crates', x: 23.6 * G, y: 33.2 * G, w: 68, h: 68, blocksBullets: true },
+    // 主跑道战备停机坪：军用装甲卡车与战地救护车
+    { id: 'abp12', roomId: 'courtyard', kind: 'military_truck', x: 34.0 * G, y: 33.2 * G, w: 154, h: 74, rotation: -0.16, blocksBullets: true },
+    { id: 'abp13', roomId: 'courtyard', kind: 'swat_van', x: 47.4 * G, y: 28.0 * G, w: 146, h: 80, rotation: 2.85, blocksBullets: true },
+  ],
+  stations: [
+    { id: 'abs_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 35.2 * G, y: 14.8 * G, cost: 0, label: '军火终端 [B]' },
+    { id: 'abs_air', roomId: 'lobby', type: 'starter_airdrop', x: 26.8 * G, y: 14.8 * G, cost: 0, weaponId: 'autoshotgun', label: '连喷空投' },
+    { id: 'abs_dog', roomId: 'hangar_w', type: 'mech_dog_cage', x: 20.8 * G, y: 12.2 * G, cost: 580, label: '释放军用机械犬' },
+    { id: 'abs_ammo', roomId: 'hangar_w', type: 'ammo_box', x: 11.4 * G, y: 12.2 * G, cost: 220, label: '机库弹药柜' },
+    { id: 'abs_laser1', roomId: 'radar', type: 'laser_trap', x: 41.2 * G, y: 18.0 * G, cost: 300, label: '防空激光塔' },
+    { id: 'abs_vend', roomId: 'fuel_bay', type: 'vending_machine', x: 31.0 * G, y: 21.2 * G, cost: 240, label: '空勤补给机' },
+    { id: 'abs_pap', roomId: 'ordnance', type: 'pack_a_punch', x: 22.4 * G, y: 29.4 * G, cost: 1850, label: '超武改造台' },
+    { id: 'abs_laser2', roomId: 'courtyard', type: 'laser_trap', x: 37.8 * G, y: 29.8 * G, cost: 320, label: '跑道哨戒激光' },
+    { id: 'abs_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 31.4 * G, y: 28.6 * G, cost: 0, label: '军火终端 [B]' },
+  ],
+  barrels: [
+    { x: 31.2 * G, y: 14.6 * G, roomId: 'lobby' },
+    { x: 16.4 * G, y: 18.6 * G, roomId: 'hangar_w' },
+    { x: 28.6 * G, y: 23.8 * G, roomId: 'fuel_bay' },
+    { x: 33.4 * G, y: 18.8 * G, roomId: 'fuel_bay' },
+    { x: 19.8 * G, y: 33.6 * G, roomId: 'ordnance' },
+    { x: 47.6 * G, y: 35.4 * G, roomId: 'courtyard' },
+  ],
+});
+
+// ============================================================================
+// 第 8 关：零号核能地堡核心（北向气闸通道 + 战略核指控主厅 + 东西双洲际导弹发射井 + 聚变反应堆 + 重装试验场 + 地表装甲升降坪）
+// ============================================================================
+const stageBunker = buildArchitecturalStage({
+  id: 'stage_bunker',
+  index: 8,
+  name: '第 8 关 · 零号核能地堡核心',
+  subtitle: '终局禁区！死守地下洲际导弹发射井与战略指控核心，迎战最高强度深渊尸潮！',
+  wallColor: '#141118',
+  wallTopColor: '#4c3e52',
+  cols: 62,
+  rows: 44,
+  playerSpawnCell: { gx: 31, gy: 20 },
+  helipadCell: { gx: 31, gy: 32 },
+  rooms: [
+    {
+      id: 'lobby',
+      name: '战略核指控主厅',
+      floorTheme: 'bunker',
+      boxes: [
+        { gx: 23, gy: 15, gw: 16, gh: 11 },
+        { gx: 28, gy: 6, gw: 6, gh: 9 },
+      ],
+      initiallyUnlocked: true,
+    },
+    {
+      id: 'silo_w',
+      name: '一号洲际导弹井',
+      floorTheme: 'bunker',
+      boxes: [{ gx: 9, gy: 8, gw: 14, gh: 11 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'silo_e',
+      name: '二号洲际导弹井',
+      floorTheme: 'bunker',
+      boxes: [{ gx: 39, gy: 8, gw: 14, gh: 11 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'reactor',
+      name: '聚变反应堆冷却室',
+      floorTheme: 'lab',
+      boxes: [{ gx: 9, gy: 21, gw: 14, gh: 12 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'armory_s',
+      name: '末日重装武器试验场',
+      floorTheme: 'armory',
+      boxes: [{ gx: 39, gy: 21, gw: 14, gh: 12 }],
+      initiallyUnlocked: false,
+    },
+    {
+      id: 'courtyard',
+      name: '地表装甲升降停机坪',
+      floorTheme: 'asphalt',
+      boxes: [{ gx: 23, gy: 26, gw: 16, gh: 12 }],
+      initiallyUnlocked: false,
+    },
+  ],
+  doors: [
+    { id: 'bk_d1', orientation: 'vertical', gx: 23, gy: 15, span: 3, roomA: 'lobby', roomB: 'silo_w', unlockRoomId: 'silo_w', cost: 620, label: '一号洲际导弹井' },
+    { id: 'bk_d2', orientation: 'vertical', gx: 39, gy: 15, span: 3, roomA: 'lobby', roomB: 'silo_e', unlockRoomId: 'silo_e', cost: 620, label: '二号洲际导弹井' },
+    { id: 'bk_d3', orientation: 'vertical', gx: 23, gy: 22, span: 3, roomA: 'lobby', roomB: 'reactor', unlockRoomId: 'reactor', cost: 980, label: '聚变反应堆室' },
+    { id: 'bk_d4', orientation: 'vertical', gx: 39, gy: 22, span: 3, roomA: 'lobby', roomB: 'armory_s', unlockRoomId: 'armory_s', cost: 1100, label: '重装武器试验场' },
+    { id: 'bk_d5', orientation: 'horizontal', gx: 29, gy: 26, span: 4, roomA: 'lobby', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1950, label: '装甲升降停机坪' },
+    { id: 'bk_d6', orientation: 'vertical', gx: 23, gy: 28, span: 3, roomA: 'reactor', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1950, label: '装甲升降停机坪' },
+    { id: 'bk_d7', orientation: 'vertical', gx: 39, gy: 28, span: 3, roomA: 'armory_s', roomB: 'courtyard', unlockRoomId: 'courtyard', cost: 1950, label: '装甲升降停机坪' },
+  ],
+  windows: [
+    { id: 'bkw1', roomId: 'lobby', orientation: 'horizontal', gx: 29, gy: 6, span: 4, outDir: 'N' },
+    { id: 'bkw2', roomId: 'silo_w', orientation: 'horizontal', gx: 14, gy: 8, span: 4, outDir: 'N' },
+    { id: 'bkw3', roomId: 'silo_w', orientation: 'vertical', gx: 9, gy: 12, span: 3, outDir: 'W' },
+    { id: 'bkw4', roomId: 'silo_e', orientation: 'horizontal', gx: 44, gy: 8, span: 4, outDir: 'N' },
+    { id: 'bkw5', roomId: 'silo_e', orientation: 'vertical', gx: 53, gy: 12, span: 3, outDir: 'E' },
+    { id: 'bkw6', roomId: 'reactor', orientation: 'vertical', gx: 9, gy: 25, span: 3, outDir: 'W' },
+    { id: 'bkw7', roomId: 'reactor', orientation: 'horizontal', gx: 14, gy: 33, span: 3, outDir: 'S' },
+    { id: 'bkw8', roomId: 'armory_s', orientation: 'vertical', gx: 53, gy: 25, span: 3, outDir: 'E' },
+    { id: 'bkw9', roomId: 'armory_s', orientation: 'horizontal', gx: 45, gy: 33, span: 3, outDir: 'S' },
+    { id: 'bkw10', roomId: 'courtyard', orientation: 'horizontal', gx: 29, gy: 38, span: 4, outDir: 'S' },
+  ],
+  props: [
+    // 战略核指控主厅：中央全息核战略雷达沙盘与两侧加密控制台
+    { id: 'bkp1', roomId: 'lobby', kind: 'radar_console', x: 31.0 * G, y: 18.2 * G, w: 94, h: 94, blocksBullets: false },
+    { id: 'bkp2', roomId: 'lobby', kind: 'desk', x: 25.8 * G, y: 18.2 * G, w: 84, h: 50, rotation: Math.PI / 2, blocksBullets: false },
+    { id: 'bkp3', roomId: 'lobby', kind: 'desk', x: 36.2 * G, y: 18.2 * G, w: 84, h: 50, rotation: -Math.PI / 2, blocksBullets: false },
+    // 一号与二号洲际导弹发射井：四联装核弹头垂发井盖与防爆集装箱
+    { id: 'bkp4', roomId: 'silo_w', kind: 'missile_pod', x: 16.0 * G, y: 13.5 * G, w: 104, h: 104, blocksBullets: true },
+    { id: 'bkp5', roomId: 'silo_w', kind: 'crates', x: 11.4 * G, y: 16.8 * G, w: 66, h: 66, blocksBullets: true },
+    { id: 'bkp6', roomId: 'silo_e', kind: 'missile_pod', x: 46.0 * G, y: 13.5 * G, w: 104, h: 104, blocksBullets: true },
+    { id: 'bkp7', roomId: 'silo_e', kind: 'crates', x: 50.6 * G, y: 16.8 * G, w: 66, h: 66, blocksBullets: true },
+    // 聚变反应堆冷却室：高能低温冷却舱阵列与监控机柜
+    { id: 'bkp8', roomId: 'reactor', kind: 'cryo_pod', x: 14.2 * G, y: 25.2 * G, w: 82, h: 82, blocksBullets: false },
+    { id: 'bkp9', roomId: 'reactor', kind: 'cryo_pod', x: 18.6 * G, y: 28.8 * G, w: 82, h: 82, blocksBullets: false },
+    { id: 'bkp10', roomId: 'reactor', kind: 'lockers', x: 13.0 * G, y: 22.1 * G, w: 88, h: 42, blocksBullets: true },
+    // 末日重装武器试验场：导弹发射巢、军火集装箱与雷达测试台
+    { id: 'bkp11', roomId: 'armory_s', kind: 'container', x: 46.2 * G, y: 26.8 * G, w: 148, h: 78, rotation: 0.06, blocksBullets: true },
+    { id: 'bkp12', roomId: 'armory_s', kind: 'lockers', x: 43.2 * G, y: 22.1 * G, w: 90, h: 42, blocksBullets: true },
+    // 地表装甲升降停机坪：重装军用卡车与掩体箱
+    { id: 'bkp13', roomId: 'courtyard', kind: 'military_truck', x: 26.4 * G, y: 34.6 * G, w: 146, h: 72, rotation: -0.2, blocksBullets: true },
+    { id: 'bkp14', roomId: 'courtyard', kind: 'crates', x: 36.4 * G, y: 35.2 * G, w: 66, h: 66, blocksBullets: true },
+  ],
+  stations: [
+    { id: 'bks_shop1', roomId: 'lobby', type: 'armory_kiosk', x: 36.2 * G, y: 23.6 * G, cost: 0, label: '军火终端 [B]' },
+    { id: 'bks_air', roomId: 'lobby', type: 'starter_airdrop', x: 25.8 * G, y: 23.6 * G, cost: 0, weaponId: 'plasma', label: '等离子炮空投' },
+    { id: 'bks_dog', roomId: 'silo_w', type: 'mech_dog_cage', x: 20.2 * G, y: 10.6 * G, cost: 580, label: '激活重装战犬' },
+    { id: 'bks_laser1', roomId: 'silo_e', type: 'laser_trap', x: 41.8 * G, y: 10.8 * G, cost: 300, label: '导弹井防卫激光' },
+    { id: 'bks_vend', roomId: 'reactor', type: 'vending_machine', x: 19.6 * G, y: 23.6 * G, cost: 240, label: '地堡战备补给机' },
+    { id: 'bks_ammo', roomId: 'reactor', type: 'ammo_box', x: 12.2 * G, y: 30.2 * G, cost: 220, label: '弹药补给箱' },
+    { id: 'bks_pap', roomId: 'armory_s', type: 'pack_a_punch', x: 48.8 * G, y: 22.8 * G, cost: 1850, label: '终极超武改造舱' },
+    { id: 'bks_laser2', roomId: 'armory_s', type: 'laser_trap', x: 42.6 * G, y: 30.4 * G, cost: 320, label: '试验场激光矩阵' },
+    { id: 'bks_shop2', roomId: 'courtyard', type: 'armory_kiosk', x: 36.0 * G, y: 28.2 * G, cost: 0, label: '军火终端 [B]' },
+  ],
+  barrels: [
+    { x: 31.0 * G, y: 12.2 * G, roomId: 'lobby' },
+    { x: 19.8 * G, y: 16.8 * G, roomId: 'silo_w' },
+    { x: 42.2 * G, y: 16.8 * G, roomId: 'silo_e' },
+    { x: 16.0 * G, y: 30.8 * G, roomId: 'reactor' },
+    { x: 49.6 * G, y: 30.8 * G, roomId: 'armory_s' },
+    { x: 26.2 * G, y: 29.2 * G, roomId: 'courtyard' },
+  ],
+});
+
+export const STAGES: StageDef[] = [
+  stagePolice,
+  stageMall,
+  stageLab,
+  stageHospital,
+  stageHarbor,
+  stageSubway,
+  stageAirbase,
+  stageBunker,
+];

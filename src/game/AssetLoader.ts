@@ -50,6 +50,14 @@ export type SpriteKey =
   | 'prop_turbine'
   | 'prop_floor_grate'
   | 'prop_traffic_cone'
+  | 'prop_hospital_bed'
+  | 'prop_ambulance'
+  | 'prop_container'
+  | 'prop_forklift'
+  | 'prop_subway_car'
+  | 'prop_military_truck'
+  | 'prop_radar_console'
+  | 'prop_missile_pod'
   | 'relic_ricochet'
   | 'relic_shock_plank'
   | 'relic_war_bonds'
@@ -94,6 +102,9 @@ export type TileKey =
   | 'tile_floor_armory'
   | 'tile_floor_lab'
   | 'tile_floor_mall'
+  | 'tile_floor_hospital'
+  | 'tile_floor_dock'
+  | 'tile_floor_bunker'
   | 'tile_asphalt'
   | 'tile_wall_top';
 
@@ -149,6 +160,14 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   prop_turbine: './assets/prop_turbine.png',
   prop_floor_grate: './assets/prop_floor_grate.png',
   prop_traffic_cone: './assets/prop_traffic_cone.png',
+  prop_hospital_bed: './assets/prop_hospital_bed.png',
+  prop_ambulance: './assets/prop_ambulance.png',
+  prop_container: './assets/prop_container.png',
+  prop_forklift: './assets/prop_forklift.png',
+  prop_subway_car: './assets/prop_subway_car.png',
+  prop_military_truck: './assets/prop_military_truck.png',
+  prop_radar_console: './assets/prop_radar_console.png',
+  prop_missile_pod: './assets/prop_missile_pod.png',
   relic_ricochet: './assets/relic_ricochet.png',
   relic_shock_plank: './assets/relic_shock_plank.png',
   relic_war_bonds: './assets/relic_war_bonds.png',
@@ -194,6 +213,9 @@ const TILE_FILES: Record<TileKey, string> = {
   tile_floor_armory: './assets/tile_floor_armory.png',
   tile_floor_lab: './assets/tile_floor_lab.png',
   tile_floor_mall: './assets/tile_floor_mall.png',
+  tile_floor_hospital: './assets/tile_floor_hospital.png',
+  tile_floor_dock: './assets/tile_floor_dock.png',
+  tile_floor_bunker: './assets/tile_floor_bunker.png',
   tile_asphalt: './assets/tile_asphalt.png',
   tile_wall_top: './assets/tile_wall_top.png',
 };

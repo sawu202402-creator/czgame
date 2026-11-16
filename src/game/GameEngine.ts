@@ -580,7 +580,7 @@ export class GameEngine {
 
     const queue: ZombieKind[] = [];
     const totalCount = Math.round(
-      10 + wave * 6.2 + Math.pow(Math.max(0, wave - 3), 1.45) * 2.8 + (s.stage.index - 1) * 6
+      10 + wave * 6.2 + Math.pow(Math.max(0, wave - 3), 1.45) * 2.8 + (s.stage.index - 1) * 3.6
     );
     const spitterChance = wave >= 4 ? Math.min(0.27, 0.14 + (wave - 4) * 0.022) : 0;
     const runnerChance = wave >= 2 ? Math.min(0.66, 0.34 + (wave - 2) * 0.04) : 0.12;
@@ -980,19 +980,20 @@ export class GameEngine {
     }
     const wf = this.getWindowFrame(win);
 
-    // 紧绷硬核的尸潮血量/移速膨胀与赏金衰减曲线！
-    const stageMult = 1 + (s.stage.index - 1) * 0.38;
+    // 紧绷硬核且平滑衔接 8 大战区的尸潮血量/伤害膨胀与战地赏金曲线！
+    const stageMult = 1 + (s.stage.index - 1) * 0.22;
     const hpScale =
       (1 + (s.wave - 1) * 0.42 + Math.pow(Math.max(0, s.wave - 3), 1.76) * 0.36) * stageMult;
-    const dmgScale = 1 + Math.max(0, s.wave - 1) * 0.095 + (s.stage.index - 1) * 0.16;
-    const cashTaper = 1 / (1 + Math.max(0, s.wave - 3) * 0.14);
+    const dmgScale = 1 + Math.max(0, s.wave - 1) * 0.095 + (s.stage.index - 1) * 0.095;
+    const stageBountyMult = 1 + (s.stage.index - 1) * 0.08;
+    const cashTaper = stageBountyMult / (1 + Math.max(0, s.wave - 3) * 0.14);
 
     let hp = 68 * hpScale;
     let speed = 108 + Math.min(86, s.wave * 7.2);
     let radius = 24;
     let damage = Math.round(17 * dmgScale);
     let cash = Math.max(5, Math.round(10 * cashTaper));
-    let xp = 10;
+    let xp = Math.round(10 * stageBountyMult);
     let color = '#4ade80';
     let rangedCd = 2.2;
     let fleeTimer = 0;
@@ -1000,13 +1001,13 @@ export class GameEngine {
     if (kind === 'thief') {
       hp = Math.round(
         (320 + s.wave * 110 + Math.pow(Math.max(0, s.wave - 3), 1.65) * 75) *
-          (1 + (s.stage.index - 1) * 0.34)
+          (1 + (s.stage.index - 1) * 0.2)
       );
       speed = 214;
       radius = 25;
       damage = 0;
-      cash = 130;
-      xp = 42;
+      cash = Math.round(130 * stageBountyMult);
+      xp = Math.round(42 * stageBountyMult);
       color = '#facc15';
       rangedCd = 5; // 最多受击掉落 5 枚金币，杜绝高频冲锋枪无限刷钱！
       fleeTimer = 15;

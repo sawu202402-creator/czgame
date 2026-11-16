@@ -20,6 +20,9 @@ const FLOOR_THEME_TILE: Record<FloorTheme, TileKey> = {
   armory: 'tile_floor_armory',
   lab: 'tile_floor_lab',
   mall: 'tile_floor_mall',
+  hospital: 'tile_floor_hospital',
+  dock: 'tile_floor_dock',
+  bunker: 'tile_floor_bunker',
   asphalt: 'tile_asphalt',
 };
 
@@ -33,6 +36,14 @@ const PROP_SPRITE_MAP: Record<PropKind, SpriteKey> = {
   lockers: 'prop_lockers',
   cryo_pod: 'prop_cryo_pod',
   arcade: 'prop_arcade',
+  hospital_bed: 'prop_hospital_bed',
+  ambulance: 'prop_ambulance',
+  container: 'prop_container',
+  forklift: 'prop_forklift',
+  subway_car: 'prop_subway_car',
+  military_truck: 'prop_military_truck',
+  radar_console: 'prop_radar_console',
+  missile_pod: 'prop_missile_pod',
 };
 
 const MAP_PAD = 640;
@@ -356,10 +367,10 @@ export class CartoonRenderer {
       mctx.translate(pr.x, pr.y);
       if (pr.rotation) mctx.rotate(pr.rotation);
 
-      // 车辆警灯/前大灯、喷泉/冷冻舱冷光、街机霓虹环境反光
-      if (pr.kind === 'swat_van' || pr.kind === 'police_car') {
+      // 车辆警灯/前大灯、雷达台/导弹井环境光晕、喷泉/冷冻舱冷光、街机霓虹环境反光
+      if (pr.kind === 'swat_van' || pr.kind === 'police_car' || pr.kind === 'ambulance') {
         const rg = mctx.createRadialGradient(4, -22, 4, 4, -22, 68);
-        rg.addColorStop(0, 'rgba(239, 68, 68, 0.25)');
+        rg.addColorStop(0, 'rgba(239, 68, 68, 0.26)');
         rg.addColorStop(1, 'rgba(239, 68, 68, 0)');
         mctx.fillStyle = rg;
         mctx.fillRect(-72, -92, 150, 140);
@@ -370,8 +381,7 @@ export class CartoonRenderer {
         mctx.fillStyle = bg;
         mctx.fillRect(-72, -45, 150, 140);
 
-        if (pr.kind === 'police_car') {
-          // 巡逻警车车头双束暖白近光灯锥
+        if (pr.kind === 'police_car' || pr.kind === 'ambulance') {
           const hg = mctx.createLinearGradient(pr.w * 0.42, 0, pr.w * 0.42 + 125, 0);
           hg.addColorStop(0, 'rgba(254, 249, 195, 0.24)');
           hg.addColorStop(1, 'rgba(254, 249, 195, 0)');
@@ -384,12 +394,37 @@ export class CartoonRenderer {
           mctx.closePath();
           mctx.fill();
         }
-      } else if (pr.kind === 'fountain' || pr.kind === 'cryo_pod') {
-        const glowRgb = pr.kind === 'cryo_pod' ? '34, 211, 238' : '56, 189, 248';
-        const fg = mctx.createRadialGradient(0, 0, pr.w * 0.18, 0, 0, pr.w * 0.82);
-        fg.addColorStop(0, `rgba(${glowRgb}, ${pr.kind === 'cryo_pod' ? 0.28 : 0.16})`);
+      } else if (pr.kind === 'military_truck' || pr.kind === 'forklift') {
+        const hg = mctx.createLinearGradient(pr.w * 0.4, 0, pr.w * 0.4 + 105, 0);
+        hg.addColorStop(0, 'rgba(254, 240, 138, 0.2)');
+        hg.addColorStop(1, 'rgba(254, 240, 138, 0)');
+        mctx.fillStyle = hg;
+        mctx.beginPath();
+        mctx.moveTo(pr.w * 0.4, -20);
+        mctx.lineTo(pr.w * 0.4 + 105, -46);
+        mctx.lineTo(pr.w * 0.4 + 105, 46);
+        mctx.lineTo(pr.w * 0.4, 20);
+        mctx.closePath();
+        mctx.fill();
+      } else if (pr.kind === 'fountain' || pr.kind === 'cryo_pod' || pr.kind === 'radar_console') {
+        const glowRgb =
+          pr.kind === 'radar_console'
+            ? '16, 185, 129'
+            : pr.kind === 'cryo_pod'
+              ? '34, 211, 238'
+              : '56, 189, 248';
+        const fg = mctx.createRadialGradient(0, 0, pr.w * 0.18, 0, 0, pr.w * 0.86);
+        fg.addColorStop(0, `rgba(${glowRgb}, ${pr.kind === 'fountain' ? 0.16 : 0.28})`);
         fg.addColorStop(1, `rgba(${glowRgb}, 0)`);
         mctx.fillStyle = fg;
+        mctx.beginPath();
+        mctx.arc(0, 0, pr.w * 0.86, 0, Math.PI * 2);
+        mctx.fill();
+      } else if (pr.kind === 'missile_pod') {
+        const mg = mctx.createRadialGradient(0, 0, pr.w * 0.15, 0, 0, pr.w * 0.82);
+        mg.addColorStop(0, 'rgba(239, 68, 68, 0.24)');
+        mg.addColorStop(1, 'rgba(239, 68, 68, 0)');
+        mctx.fillStyle = mg;
         mctx.beginPath();
         mctx.arc(0, 0, pr.w * 0.82, 0, Math.PI * 2);
         mctx.fill();
@@ -407,7 +442,12 @@ export class CartoonRenderer {
       // 柔和接地 AO + 定向投影
       mctx.fillStyle = 'rgba(2, 6, 23, 0.44)';
       mctx.beginPath();
-      if (pr.kind === 'fountain' || pr.kind === 'cryo_pod') {
+      if (
+        pr.kind === 'fountain' ||
+        pr.kind === 'cryo_pod' ||
+        pr.kind === 'radar_console' ||
+        pr.kind === 'missile_pod'
+      ) {
         mctx.arc(5, 7, pr.w * 0.49, 0, Math.PI * 2);
       } else {
         mctx.roundRect(-pr.w / 2 + 5, -pr.h / 2 + 7, pr.w + 2, pr.h + 2, 10);
@@ -415,9 +455,14 @@ export class CartoonRenderer {
       mctx.fill();
 
       const scaleMult =
-        pr.kind === 'desk'
-          ? 1.22
-          : pr.kind === 'swat_van' || pr.kind === 'police_car'
+        pr.kind === 'desk' || pr.kind === 'hospital_bed'
+          ? 1.18
+          : pr.kind === 'swat_van' ||
+              pr.kind === 'police_car' ||
+              pr.kind === 'ambulance' ||
+              pr.kind === 'military_truck' ||
+              pr.kind === 'subway_car' ||
+              pr.kind === 'container'
             ? 1.12
             : pr.kind === 'sofa' || pr.kind === 'lockers' || pr.kind === 'arcade'
               ? 1.06
@@ -1107,6 +1152,77 @@ export class CartoonRenderer {
       mctx.strokeStyle = room.id === 'west_wing' ? 'rgba(34, 211, 238, 0.36)' : 'rgba(248, 113, 113, 0.34)';
       mctx.lineWidth = 3.5;
       mctx.stroke();
+    } else if (room.id === 'icu' || room.id === 'surgery') {
+      // 隔离医院病房与手术区：地面医疗红十字检疫标识与生物隔离警戒框
+      const mcx = r0.x + r0.w * 0.5;
+      const mcy = r0.y + r0.h * 0.5;
+      mctx.save();
+      mctx.strokeStyle = 'rgba(20, 184, 166, 0.24)';
+      mctx.lineWidth = 2;
+      mctx.setLineDash([12, 8]);
+      mctx.strokeRect(r0.x + 32, r0.y + 32, Math.max(40, r0.w - 64), Math.max(40, r0.h - 64));
+      mctx.setLineDash([]);
+      mctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+      mctx.fillRect(mcx - 24, mcy - 8, 48, 16);
+      mctx.fillRect(mcx - 8, mcy - 24, 16, 48);
+      mctx.restore();
+    } else if (room.id === 'platform') {
+      // 地铁枢纽双轨列车月台：贯穿东西的枕木钢轨与月台黄黑安全候车线
+      mctx.save();
+      const trackY = r0.y + r0.h * 0.5;
+      mctx.fillStyle = 'rgba(9, 13, 22, 0.45)';
+      mctx.fillRect(r0.x + 24, trackY - 30, Math.max(40, r0.w - 48), 60);
+      mctx.strokeStyle = 'rgba(71, 85, 105, 0.52)';
+      mctx.lineWidth = 3;
+      for (let tx = r0.x + 32; tx < r0.x + r0.w - 32; tx += 18) {
+        mctx.beginPath();
+        mctx.moveTo(tx, trackY - 24);
+        mctx.lineTo(tx, trackY + 24);
+        mctx.stroke();
+      }
+      mctx.strokeStyle = 'rgba(203, 213, 225, 0.62)';
+      mctx.lineWidth = 3.2;
+      mctx.beginPath();
+      mctx.moveTo(r0.x + 24, trackY - 16);
+      mctx.lineTo(r0.x + r0.w - 24, trackY - 16);
+      mctx.moveTo(r0.x + 24, trackY + 16);
+      mctx.lineTo(r0.x + r0.w - 24, trackY + 16);
+      mctx.stroke();
+      // 上下月台边缘黄色安全盲道线
+      mctx.strokeStyle = 'rgba(250, 204, 21, 0.45)';
+      mctx.lineWidth = 3;
+      mctx.setLineDash([16, 8]);
+      mctx.beginPath();
+      mctx.moveTo(r0.x + 28, trackY - 46);
+      mctx.lineTo(r0.x + r0.w - 28, trackY - 46);
+      mctx.moveTo(r0.x + 28, trackY + 46);
+      mctx.lineTo(r0.x + r0.w - 28, trackY + 46);
+      mctx.stroke();
+      mctx.restore();
+    } else if (room.id === 'containers' || room.id === 'hangar_w') {
+      // 港口集装箱堆场与空军重装机库：重型导引黄线与机位泊位框
+      mctx.save();
+      mctx.strokeStyle = 'rgba(234, 179, 8, 0.3)';
+      mctx.lineWidth = 3;
+      mctx.setLineDash([18, 12]);
+      mctx.strokeRect(r0.x + 42, r0.y + 42, Math.max(40, r0.w - 84), Math.max(40, r0.h - 84));
+      mctx.beginPath();
+      mctx.moveTo(r0.x + 36, r0.y + r0.h * 0.5);
+      mctx.lineTo(r0.x + r0.w - 36, r0.y + r0.h * 0.5);
+      mctx.stroke();
+      mctx.restore();
+    } else if (room.id === 'silo_w' || room.id === 'silo_e') {
+      // 核地堡导弹发射井：地面圆形防爆辐射警戒环
+      const scx = r0.x + r0.w * 0.5;
+      const scy = r0.y + r0.h * 0.5;
+      mctx.save();
+      mctx.strokeStyle = 'rgba(245, 158, 11, 0.34)';
+      mctx.lineWidth = 3.5;
+      mctx.setLineDash([14, 10]);
+      mctx.beginPath();
+      mctx.arc(scx, scy, Math.min(r0.w, r0.h) * 0.32, 0, Math.PI * 2);
+      mctx.stroke();
+      mctx.restore();
     } else if (room.id === 'courtyard' || room.id === 'cargo') {
       // 停机坪与卸货区：地面车位标线与叉车/装甲车轮胎印
       mctx.save();
@@ -1146,7 +1262,14 @@ export class CartoonRenderer {
           mctx.fillRect(-3, 0, 5, 1.5);
           mctx.restore();
         }
-      } else if (pr.kind === 'crates' || pr.kind === 'police_car' || pr.kind === 'swat_van') {
+      } else if (
+        pr.kind === 'crates' ||
+        pr.kind === 'police_car' ||
+        pr.kind === 'swat_van' ||
+        pr.kind === 'ambulance' ||
+        pr.kind === 'military_truck' ||
+        pr.kind === 'container'
+      ) {
         // 车辆/货箱边摆放高精度俯视橙白反光战术路锥
         const cx = pr.x + pr.w * 0.52 + 16;
         const cy = pr.y + pr.h * 0.32;

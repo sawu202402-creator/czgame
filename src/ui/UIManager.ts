@@ -229,23 +229,58 @@ export class UIManager {
       {
         theme: 'theme-police',
         sector: 'SECTOR 01 · 城市防线',
-        diffLabel: '★☆☆ 推荐首战',
+        diffLabel: '★☆☆☆☆ 推荐首战',
         sprites: ['prop_police_car', 'player_hero', 'mech_dog'],
-        tags: ['🚪 6大防区', '🐕 机械警犬', '⚡ 超武改造机'],
+        tags: ['6大防区', '机械警犬', '重装金库'],
       },
       {
         theme: 'theme-mall',
         sector: 'SECTOR 02 · 霓虹中庭',
-        diffLabel: '★★☆ 进阶战区',
+        diffLabel: '★★☆☆☆ 商业沦陷',
         sprites: ['prop_arcade', 'prop_vending', 'zombie_runner'],
-        tags: ['🚪 6大防区', '🎰 幸运贩卖机', '🕹️ 街机掩体阵'],
+        tags: ['5大防区', '幸运贩卖机', '街机掩体阵'],
       },
       {
         theme: 'theme-lab',
         sector: 'SECTOR 03 · 绝密深渊',
-        diffLabel: '★★★ 高危禁区',
-        sprites: ['prop_cryo_pod', 'prop_laser_tower', 'zombie_boss'],
-        tags: ['🚪 6大防区', '🚨 旋转激光塔', '🧬 冷冻培养舱'],
+        diffLabel: '★★★☆☆ 科研禁区',
+        sprites: ['prop_cryo_pod', 'prop_laser_tower', 'zombie_spitter'],
+        tags: ['双廊天井', '旋转激光塔', '冷冻培养舱'],
+      },
+      {
+        theme: 'theme-hospital',
+        sector: 'SECTOR 04 · 疫区急诊',
+        diffLabel: '★★★☆☆ 高危疫区',
+        sprites: ['prop_ambulance', 'prop_hospital_bed', 'zombie_spitter'],
+        tags: ['6大防区', '隔离ICU病床', '消杀激光塔'],
+      },
+      {
+        theme: 'theme-harbor',
+        sector: 'SECTOR 05 · 铁锈货运港',
+        diffLabel: '★★★★☆ 巷战迷宫',
+        sprites: ['prop_container', 'prop_forklift', 'zombie_miniboss'],
+        tags: ['集装箱巷战', '重型叉车阵', '连环油桶区'],
+      },
+      {
+        theme: 'theme-subway',
+        sector: 'SECTOR 06 · 地下轨道网',
+        diffLabel: '★★★★☆ 幽暗枢纽',
+        sprites: ['prop_subway_car', 'prop_radar_console', 'zombie_miniboss'],
+        tags: ['超宽双轨月台', '脱轨地铁车厢', '高压电弧塔'],
+      },
+      {
+        theme: 'theme-airbase',
+        sector: 'SECTOR 07 · 战略空军港',
+        diffLabel: '★★★★★ 铁血防区',
+        sprites: ['prop_military_truck', 'prop_radar_console', 'zombie_boss'],
+        tags: ['巨型运输机库', '双联激光阵', '导弹挂载库'],
+      },
+      {
+        theme: 'theme-bunker',
+        sector: 'SECTOR 08 · 零号核地堡',
+        diffLabel: '★★★★★ 终局死斗',
+        sprites: ['prop_missile_pod', 'prop_helicopter', 'zombie_boss'],
+        tags: ['双洲际导弹井', '核指控中心', '终极尸王压境'],
       },
     ];
 
@@ -1357,8 +1392,13 @@ export class UIManager {
   public showSettlementModal(victory: boolean, s: RunSnapshot): void {
     this.armoryOpen = false;
     this.pauseOpen = false;
-    const baseGold = Math.round(25 + s.wave * 14 + Math.min(220, s.kills * 0.45) + (victory ? 110 : 0));
-    const baseXp = Math.round(30 + s.wave * 16 + Math.min(260, s.kills * 0.65) + (victory ? 100 : 0));
+    const stageTierBonus = (s.stage.index - 1) * 20;
+    const baseGold = Math.round(
+      25 + stageTierBonus + s.wave * 14 + Math.min(220, s.kills * 0.45) + (victory ? 110 : 0)
+    );
+    const baseXp = Math.round(
+      30 + stageTierBonus + s.wave * 16 + Math.min(260, s.kills * 0.65) + (victory ? 100 : 0)
+    );
     const zones = [2, 3, 5, 3, 2];
 
     this.modalRoot.innerHTML = `

@@ -445,11 +445,17 @@ button {
   text-shadow: 0 1px 2px #000000;
 }
 
-/* 三大战区主题插画卡片 */
+/* 八大战区主题插画卡片 */
 .stage-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+}
+
+@media (max-width: 1100px) {
+  .stage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .stage-card {
@@ -496,6 +502,36 @@ button {
     radial-gradient(circle at 80% 30%, rgba(52, 211, 153, 0.45), transparent 60%),
     radial-gradient(circle at 22% 80%, rgba(168, 85, 247, 0.38), transparent 55%),
     linear-gradient(135deg, #064e3b, #0f172a);
+}
+.stage-visual-strip.theme-hospital {
+  background:
+    radial-gradient(circle at 82% 28%, rgba(45, 212, 191, 0.45), transparent 60%),
+    radial-gradient(circle at 18% 82%, rgba(244, 63, 94, 0.38), transparent 55%),
+    linear-gradient(135deg, #0f292e, #115e59);
+}
+.stage-visual-strip.theme-harbor {
+  background:
+    radial-gradient(circle at 80% 26%, rgba(251, 146, 60, 0.44), transparent 60%),
+    radial-gradient(circle at 20% 80%, rgba(56, 189, 248, 0.32), transparent 55%),
+    linear-gradient(135deg, #1e293b, #334155);
+}
+.stage-visual-strip.theme-subway {
+  background:
+    radial-gradient(circle at 78% 28%, rgba(250, 204, 21, 0.42), transparent 60%),
+    radial-gradient(circle at 22% 82%, rgba(99, 102, 241, 0.42), transparent 55%),
+    linear-gradient(135deg, #17153b, #312e81);
+}
+.stage-visual-strip.theme-airbase {
+  background:
+    radial-gradient(circle at 80% 30%, rgba(163, 230, 53, 0.36), transparent 60%),
+    radial-gradient(circle at 20% 80%, rgba(234, 179, 8, 0.34), transparent 55%),
+    linear-gradient(135deg, #1a2e1a, #365314);
+}
+.stage-visual-strip.theme-bunker {
+  background:
+    radial-gradient(circle at 82% 26%, rgba(239, 68, 68, 0.52), transparent 60%),
+    radial-gradient(circle at 20% 82%, rgba(245, 158, 11, 0.42), transparent 55%),
+    linear-gradient(135deg, #2a0a18, #450a0a);
 }
 
 .stage-vis-top {
