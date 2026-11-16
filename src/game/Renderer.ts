@@ -309,18 +309,6 @@ export class CartoonRenderer {
 
         // 顶部战术吊灯柔和暖白/冷白光池 + 互动设施地面环境反光
         this.bakeRoomTacticalLighting(mctx, room, state);
-
-        // 低调蚀刻地面战术区域编号与名称水印
-        mctx.font = '900 17px system-ui, sans-serif';
-        mctx.textAlign = 'center';
-        mctx.textBaseline = 'middle';
-        mctx.fillStyle = 'rgba(2, 6, 23, 0.34)';
-        mctx.fillText(room.name, room.labelPos.x + 1, room.labelPos.y + 1.5);
-        mctx.fillStyle =
-          room.floorTheme === 'lobby'
-            ? 'rgba(15, 23, 42, 0.24)'
-            : 'rgba(226, 232, 240, 0.16)';
-        mctx.fillText(room.name, room.labelPos.x, room.labelPos.y);
       } else {
         // 未解锁区域：深邃战术蓝图迷雾 + 扫描斜纹 + 锁定徽章
         mctx.fillStyle = 'rgba(7, 11, 22, 0.84)';
@@ -990,23 +978,7 @@ export class CartoonRenderer {
     mctx.lineWidth = 1.8;
     mctx.strokeRect(r.x + 18, r.y + 18, Math.max(0, r.w - 36), Math.max(0, r.h - 36));
 
-    if (theme === 'lobby' && r.w >= 300 && r.h >= 240) {
-      // 接待大厅中央深蓝战术防尘地毯 + 暗金徽章内环
-      const rw = Math.min(280, r.w * 0.44);
-      const rh = Math.min(170, r.h * 0.38);
-      const rx = r.x + (r.w - rw) / 2;
-      const ry = r.y + (r.h - rh) / 2;
-      mctx.fillStyle = 'rgba(15, 25, 44, 0.28)';
-      mctx.beginPath();
-      mctx.roundRect(rx, ry, rw, rh, 6);
-      mctx.fill();
-      mctx.strokeStyle = 'rgba(234, 179, 8, 0.22)';
-      mctx.lineWidth = 1.6;
-      mctx.strokeRect(rx + 6, ry + 6, rw - 12, rh - 12);
-      mctx.beginPath();
-      mctx.arc(rx + rw / 2, ry + rh / 2, Math.min(rw, rh) * 0.28, 0, Math.PI * 2);
-      mctx.stroke();
-    } else if (theme === 'mall' && r.w >= 320 && r.h >= 260) {
+    if (theme === 'mall' && r.w >= 320 && r.h >= 260) {
       // 商场中庭柔和同心暗纹（低饱和不抢眼）
       const cx = r.x + r.w / 2;
       const cy = r.y + r.h / 2;
@@ -1070,52 +1042,8 @@ export class CartoonRenderer {
     const r0 = room.rects[0];
     if (!r0) return;
 
-    // 1. 所有房门与窗户内侧自动铺设防滑重型橡胶迎宾/除菌地垫
-    for (const d of state.doors) {
-      if (d.roomA !== room.id && d.roomB !== room.id) continue;
-      const dcx = d.x + d.w / 2;
-      const dcy = d.y + d.h / 2;
-      for (const offset of [-32, 32]) {
-        const mx = d.orientation === 'vertical' ? dcx + offset : dcx;
-        const my = d.orientation === 'horizontal' ? dcy + offset : dcy;
-        if (pointInAnyRect(mx, my, room.rects, -12)) {
-          mctx.save();
-          mctx.translate(mx, my);
-          if (d.orientation === 'vertical') mctx.rotate(Math.PI / 2);
-          mctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
-          mctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
-          mctx.lineWidth = 1.4;
-          mctx.fillRect(-38, -12, 76, 24);
-          mctx.strokeRect(-38, -12, 76, 24);
-          mctx.restore();
-        }
-      }
-    }
-
-    // 2. 各关卡专属房间叙事暗纹层（克制低对比度，护眼且突出敌人与弹道）
-    if (room.id === 'diner') {
-      // 快餐长廊：沉稳深灰防滑走道地垫与柔粉暗边（告别刺眼黑白棋盘格）
-      const runnerX = r0.x + 34;
-      const runnerY = r0.y + 38;
-      const runnerH = Math.max(40, r0.h - 76);
-      mctx.fillStyle = 'rgba(15, 23, 42, 0.32)';
-      mctx.strokeStyle = 'rgba(244, 114, 182, 0.16)';
-      mctx.lineWidth = 1.6;
-      mctx.beginPath();
-      mctx.roundRect(runnerX, runnerY, 68, runnerH, 8);
-      mctx.fill();
-      mctx.stroke();
-    } else if (room.id === 'arcade') {
-      // 星际电玩城：深紫暗绒地毯收边
-      const pad = 42;
-      mctx.fillStyle = 'rgba(30, 14, 68, 0.24)';
-      mctx.strokeStyle = 'rgba(192, 132, 252, 0.18)';
-      mctx.lineWidth = 1.8;
-      mctx.beginPath();
-      mctx.roundRect(r0.x + pad, r0.y + pad, Math.max(40, r0.w - pad * 2), Math.max(40, r0.h - pad * 2), 12);
-      mctx.fill();
-      mctx.stroke();
-    } else if (room.id === 'cells') {
+    // 各关卡专属房间叙事暗纹层（克制低对比度，护眼且突出敌人与弹道）
+    if (room.id === 'cells') {
       // 拘留羁押室：柔和暗金隔间线与编号水印 (CELL-01 / CELL-02)
       mctx.save();
       mctx.strokeStyle = 'rgba(250, 204, 21, 0.16)';
