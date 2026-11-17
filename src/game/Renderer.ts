@@ -1569,26 +1569,25 @@ export class CartoonRenderer {
       if (!this.inView(dc.x, dc.y, dc.radius + 36)) continue;
       ctx.save();
       if (dc.isScorch) {
-        const alpha = Math.min(0.92, dc.life / 3.2);
+        // 放射状焦黑烟尘残迹（纯透明星芒焦痕贴图，彻底告别生硬灰圆饼！）
+        const alpha = Math.min(0.64, dc.life / 2.8);
         ctx.globalAlpha = alpha;
         ctx.translate(dc.x, dc.y);
         ctx.rotate(dc.seed);
-        const sz = dc.radius * 2.24;
+        const sz = dc.radius * 2.4;
         if (scorchImg) {
           ctx.drawImage(scorchImg, -sz / 2, -sz / 2, sz, sz);
-        } else {
-          ctx.fillStyle = 'rgba(2, 6, 23, 0.78)';
-          ctx.beginPath();
-          ctx.arc(0, 0, dc.radius, 0, Math.PI * 2);
-          ctx.fill();
         }
 
-        const fresh = Math.max(0, 1 - (dc.maxLife - dc.life) / 2.4);
+        const fresh = Math.max(0, 1 - (dc.maxLife - dc.life) / 1.4);
         if (fresh > 0) {
-          ctx.fillStyle = `rgba(251, 146, 60, ${0.36 * fresh})`;
-          ctx.beginPath();
-          ctx.arc(0, 0, dc.radius * 0.3, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.globalAlpha = fresh * 0.85;
+          for (let k = 0; k < 5; k++) {
+            const ea = dc.seed + k * 1.28;
+            const er = dc.radius * (0.14 + (k % 3) * 0.14);
+            ctx.fillStyle = k % 2 === 0 ? '#fb923c' : '#fde047';
+            ctx.fillRect(Math.cos(ea) * er - 1.5, Math.sin(ea) * er - 1.5, 3, 3);
+          }
         }
       } else {
         ctx.globalAlpha = Math.min(0.88, dc.life / 3.5);
@@ -2677,7 +2676,17 @@ export class CartoonRenderer {
     ctx.fillStyle = 'rgba(2, 6, 23, 0.48)';
     ctx.fill();
 
-    // 2. 防弹护甲微光环 & 无敌 / Fever 狂热光环
+    // 2. 防弹护甲微光环 & 寒霜减速提示环 & 无敌 / Fever 狂热光环
+    if (p.chillTimer > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, p.radius + 9, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(103, 232, 249, 0.85)';
+      ctx.lineWidth = 2.4;
+      ctx.setLineDash([5, 5]);
+      ctx.stroke();
+      ctx.restore();
+    }
     if (p.armor > 0) {
       ctx.beginPath();
       ctx.arc(0, 0, p.radius + 5.5, 0, Math.PI * 2);
@@ -3315,23 +3324,25 @@ export class CartoonRenderer {
       const urgent = g.fuse < 0.36;
 
       ctx.save();
-      // 1. 地面战术爆炸杀伤范围预警圈（随引信倒计时收缩聚能，临爆高频红光警示！）
-      ctx.beginPath();
-      ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
-      ctx.fillStyle = urgent ? 'rgba(239, 68, 68, 0.12)' : 'rgba(239, 68, 68, 0.05)';
-      ctx.fill();
-      ctx.lineWidth = urgent ? 2.2 : 1.4;
-      ctx.strokeStyle = urgent ? 'rgba(248, 113, 113, 0.62)' : 'rgba(248, 113, 113, 0.28)';
-      ctx.setLineDash([10, 8]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // 内圈充能扩散进度环
-      ctx.beginPath();
-      ctx.arc(g.x, g.y, Math.max(8, g.radius * progress), 0, Math.PI * 2);
-      ctx.strokeStyle = urgent ? 'rgba(254, 240, 138, 0.55)' : 'rgba(251, 146, 60, 0.28)';
-      ctx.lineWidth = 1.8;
-      ctx.stroke();
+      // 1. 紧凑四段式战术准星预警括弧（取代生硬的全屏大红圆底，清爽且极具战术感！）
+      const bracketR = 26 + (1 - progress) * 14;
+      ctx.strokeStyle = urgent ? 'rgba(248, 113, 113, 0.85)' : 'rgba(251, 191, 36, 0.5)';
+      ctx.lineWidth = urgent ? 2.4 : 1.6;
+      for (let q = 0; q < 4; q++) {
+        const qa = (q * Math.PI) / 2 + progress * 1.4;
+        ctx.beginPath();
+        ctx.arc(g.x, g.y, bracketR, qa - 0.28, qa + 0.28);
+        ctx.stroke();
+      }
+      if (urgent) {
+        ctx.beginPath();
+        ctx.arc(g.x, g.y, g.radius * 0.86, 0, Math.PI * 2);
+        ctx.lineWidth = 1.3;
+        ctx.strokeStyle = 'rgba(248, 113, 113, 0.34)';
+        ctx.setLineDash([7, 13]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
       // 2. 随抛物线高度动态缩放的真实地面投影
       const shadowScale = Math.max(0.45, 1 - g.z / 120);
@@ -3375,33 +3386,33 @@ export class CartoonRenderer {
   private drawBulletsAndFX(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const now = performance.now();
 
-    // 0. 多层立体高爆火球 + 超音速冲击波扩散光环（彻底告别简陋小圆点爆炸！）
+    // 0. 美漫街机级不规则多团烈焰翻涌爆炸特效（fx_explosion + 错峰子火团 + 锋利破风残弧，彻底告别单调大圆！）
+    const expImg = Assets.getSprite('fx_explosion');
+    const expFlash = Assets.getWhiteFlash('fx_explosion');
+    const expBioSil = Assets.getTintedSilhouette('fx_explosion', '#84cc16');
+
     for (const ex of state.explosions) {
-      if (!this.inView(ex.x, ex.y, ex.radius + 45)) continue;
-      const t = 1 - ex.life / ex.maxLife; // 0 -> 1
-      const shockR = ex.radius * (0.22 + 0.88 * Math.pow(t, 0.55));
-      const fireR = ex.radius * (t < 0.32 ? (t / 0.32) * 0.78 : 0.78 * (1 - (t - 0.32) * 0.45));
-      const alpha = Math.max(0, 1 - Math.pow(t, 1.35));
+      if (!this.inView(ex.x, ex.y, ex.radius + 60)) continue;
+      const t = Math.max(0, Math.min(1, 1 - ex.life / ex.maxLife)); // 0 -> 1
+      const pop = 1 - Math.pow(1 - Math.min(1, t / 0.26), 3); // 急速爆发张开
+      const fade = t < 0.42 ? 1 : Math.max(0, 1 - (t - 0.42) / 0.58);
 
       ctx.save();
       ctx.translate(ex.x, ex.y);
 
-      // 外层超音速空气折射冲击波环
-      ctx.beginPath();
-      ctx.arc(0, 0, shockR, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(254, 243, 199, ${alpha * 0.78})`;
-      ctx.lineWidth = Math.max(2, (1 - t) * 10);
-      ctx.stroke();
-
-      // 初爆瞬间锋利爆裂星芒尖刺
-      if (t < 0.38) {
-        const spikeAlpha = (1 - t / 0.38) * 0.85;
-        ctx.fillStyle = `rgba(254, 240, 138, ${spikeAlpha})`;
+      // A. 初爆不规则锯齿闪光锐刺（前 26% 帧闪烁高热星芒）
+      if (t < 0.28) {
+        const flashAlpha = (1 - t / 0.28) * 0.92;
+        ctx.fillStyle = ex.isBio ? `rgba(217, 249, 157, ${flashAlpha})` : `rgba(254, 249, 195, ${flashAlpha})`;
         ctx.beginPath();
-        const spikes = 9;
-        for (let i = 0; i < spikes * 2; i++) {
-          const ang = (i / (spikes * 2)) * Math.PI * 2 + ex.seed;
-          const rad = i % 2 === 0 ? ex.radius * 0.85 * (0.5 + t) : ex.radius * 0.28;
+        const rays = 11;
+        for (let i = 0; i < rays * 2; i++) {
+          const ang = (i / (rays * 2)) * Math.PI * 2 + ex.seed;
+          const jitter = 0.68 + 0.45 * Math.abs(Math.sin(i * 2.3 + ex.seed));
+          const rad =
+            i % 2 === 0
+              ? ex.radius * (0.52 + t * 1.45) * jitter
+              : ex.radius * 0.16;
           if (i === 0) ctx.moveTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
           else ctx.lineTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
         }
@@ -3409,18 +3420,62 @@ export class CartoonRenderer {
         ctx.fill();
       }
 
-      // 立体炽白→烈焰橙→暗红滚滚火球核心
-      if (fireR > 4) {
-        const fg = ctx.createRadialGradient(0, 0, fireR * 0.08, 0, 0, fireR);
-        fg.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
-        fg.addColorStop(0.28, `rgba(254, 240, 138, ${alpha * 0.95})`);
-        fg.addColorStop(0.62, `rgba(249, 115, 22, ${alpha * 0.82})`);
-        fg.addColorStop(0.88, `rgba(185, 28, 28, ${alpha * 0.45})`);
-        fg.addColorStop(1, 'rgba(30, 41, 59, 0)');
-        ctx.fillStyle = fg;
-        ctx.beginPath();
-        ctx.arc(0, 0, fireR, 0, Math.PI * 2);
-        ctx.fill();
+      // B. 三段撕裂式气浪残弧（绝不画封闭整圆！）
+      if (t < 0.36) {
+        const waveRatio = t / 0.36;
+        const waveR = ex.radius * (0.34 + waveRatio * 0.72);
+        ctx.strokeStyle = ex.isBio
+          ? `rgba(190, 242, 100, ${(1 - waveRatio) * 0.72})`
+          : `rgba(254, 240, 138, ${(1 - waveRatio) * 0.72})`;
+        ctx.lineWidth = Math.max(1.2, (1 - waveRatio) * 3.8);
+        ctx.lineCap = 'round';
+        for (let w = 0; w < 3; w++) {
+          const wa = ex.seed * 1.7 + w * ((Math.PI * 2) / 3) + waveRatio * 0.35;
+          ctx.beginPath();
+          ctx.arc(0, 0, waveR * (0.92 + (w % 2) * 0.12), wa, wa + 0.62);
+          ctx.stroke();
+        }
+      }
+
+      // C. 主体与外围错峰翻滚烈焰云团贴图（多角度叠化呈现真实翻腾立体感）
+      if (expImg) {
+        const mainSize = ex.radius * (0.78 + pop * 0.76);
+        // 4 团外围不对称爆散子火云
+        for (let pIdx = 0; pIdx < 4; pIdx++) {
+          const pDelay = pIdx * 0.05;
+          if (t < pDelay) continue;
+          const pt = Math.min(1, (t - pDelay) / (1 - pDelay));
+          const pAlpha = fade * (1 - pt * 0.55) * 0.86;
+          if (pAlpha <= 0.03) continue;
+          const pAng = ex.seed + pIdx * 1.58 + (pIdx % 2 === 0 ? 0.22 : -0.18);
+          const pDist = ex.radius * (0.14 + pt * 0.36) * (0.8 + (pIdx % 3) * 0.18);
+          const subSz = mainSize * (0.54 - pt * 0.12);
+          ctx.save();
+          ctx.globalAlpha = pAlpha;
+          ctx.translate(Math.cos(pAng) * pDist, Math.sin(pAng) * pDist);
+          ctx.rotate(pAng + pt * (pIdx % 2 === 0 ? 0.45 : -0.45));
+          ctx.drawImage(expImg, -subSz / 2, -subSz / 2, subSz, subSz);
+          if (ex.isBio && expBioSil) {
+            ctx.globalAlpha = pAlpha * 0.62;
+            ctx.drawImage(expBioSil, -subSz / 2, -subSz / 2, subSz, subSz);
+          }
+          ctx.restore();
+        }
+
+        // 中心主烈焰云团 + 首帧炽白高光冲击帧
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, fade * 1.08);
+        ctx.rotate(ex.seed + t * 0.24);
+        ctx.drawImage(expImg, -mainSize / 2, -mainSize / 2, mainSize, mainSize);
+        if (ex.isBio && expBioSil) {
+          ctx.globalAlpha = fade * 0.65;
+          ctx.drawImage(expBioSil, -mainSize / 2, -mainSize / 2, mainSize, mainSize);
+        }
+        if (t < 0.12 && expFlash) {
+          ctx.globalAlpha = (1 - t / 0.12) * 0.78;
+          ctx.drawImage(expFlash, -mainSize * 0.46, -mainSize * 0.46, mainSize * 0.92, mainSize * 0.92);
+        }
+        ctx.restore();
       }
 
       ctx.restore();
@@ -3575,15 +3630,29 @@ export class CartoonRenderer {
         ctx.fillStyle = '#fef3c7';
         ctx.fillRect(-2.5, -1, 4, 1);
       } else if (pt.isShard) {
-        // 爆炸高热破片流光棱刺
+        // 爆炸高热火星飞溅流光拖尾
         ctx.translate(pt.x, pt.y);
         ctx.rotate(Math.atan2(pt.vy, pt.vx));
+        ctx.strokeStyle = pt.color;
+        ctx.lineWidth = Math.max(1.6, pt.size * 0.52);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-pt.size * 3.1, 0);
+        ctx.lineTo(pt.size * 1.1, 0);
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(pt.size * 0.8, 0, pt.size * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (pt.isSmoke) {
+        // 轻薄双瓣翻卷硝烟缕（杜绝大圆灰块遮挡视线）
+        ctx.globalAlpha = lifeRatio * 0.46;
+        ctx.translate(pt.x, pt.y);
+        ctx.rotate((pt.angle || 0) + (1 - lifeRatio) * 1.2);
         ctx.fillStyle = pt.color;
         ctx.beginPath();
-        ctx.moveTo(pt.size * 1.8, 0);
-        ctx.lineTo(-pt.size * 1.4, -pt.size * 0.55);
-        ctx.lineTo(-pt.size * 1.4, pt.size * 0.55);
-        ctx.closePath();
+        ctx.ellipse(-pt.size * 0.3, 0, pt.size * 0.72, pt.size * 0.45, 0.3, 0, Math.PI * 2);
+        ctx.ellipse(pt.size * 0.32, -pt.size * 0.18, pt.size * 0.56, pt.size * 0.38, -0.4, 0, Math.PI * 2);
         ctx.fill();
       } else {
         ctx.fillStyle = pt.color;

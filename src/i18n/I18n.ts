@@ -177,6 +177,11 @@ const UI_TEXT: Record<LangCode, DictMap> = {
     evolveBtn: '${cost} Evolve',
     arsenalKeepHint:
       '🎒 All purchased weapons stay in your inventory (Owned: <strong>{n}</strong> · Free instant switch anytime via Shop, Q, Wheel, or Switch button)',
+    autoAmmoTitle: '🔄 Auto-Refill When Empty',
+    autoAmmoDesc: 'Automatically spend cash to refill your primary gun when ammo hits 0',
+    autoAmmoOn: '✅ Auto-Refill: ON',
+    autoAmmoOff: '⚪ Auto-Refill: OFF',
+    ftAutoAmmoBought: '🔄 Auto-Refilled [{name}] -${cost}',
     buyBtn: '${cost} Buy',
     needDoors: '🔒 Open {n} Door(s)',
     freeSwitch: 'Equip Free',
@@ -490,6 +495,11 @@ const UI_TEXT: Record<LangCode, DictMap> = {
     evolveBtn: '${cost} 进化',
     arsenalKeepHint:
       '🎒 本局已购枪械全部保留（当前持有 <strong>{n}</strong> 把 · 已拥有枪械可随时免费切换，或按 Q / 滚轮 / 右下切枪键轮换）',
+    autoAmmoTitle: '🔄 弹尽自动花钱补弹',
+    autoAmmoDesc: '主武器打空时若钞票充足，自动扣费补满弹药继续开火（不切回手枪）',
+    autoAmmoOn: '✅ 自动补弹：已开启',
+    autoAmmoOff: '⚪ 自动补弹：已关闭',
+    ftAutoAmmoBought: '🔄 自动补满【{name}】-${cost}',
     buyBtn: '${cost} 购买',
     needDoors: '🔒 需开 {n} 扇门',
     freeSwitch: '免费切换',

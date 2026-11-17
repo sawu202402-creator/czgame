@@ -230,6 +230,7 @@ export class GameEngine {
       feverTimer: 0,
       electricFortifyWaves: 0,
       repairsPaidThisWave: 0,
+      medkitsDroppedThisWave: 0,
       powerUpTimers: {
         overdrive: 0,
         nuke: 0,
@@ -291,6 +292,7 @@ export class GameEngine {
         vampCounter: 0,
         killHealCounter: 0,
         chillTimer: 0,
+        chillImmuneTimer: 0,
       },
       mapRevision: 1,
       modifiers: {
@@ -1165,6 +1167,7 @@ export class GameEngine {
     p.spectating = false;
     p.bleedoutTimer = 0;
     p.reviveProgress = 0;
+    p.chillTimer = 0;
     p.hp = Math.max(Math.round(p.maxHp * 0.55), p.hp);
     p.invulnTimer = 3.2;
     SoundFX.fanfare();
@@ -1186,6 +1189,7 @@ export class GameEngine {
     s.wave = wave;
     s.waveState = 'fighting';
     s.repairsPaidThisWave = 0;
+    s.medkitsDroppedThisWave = 0;
 
     if (s.isCoop) {
       this.reviveLocalPlayerFromWaveOrTeammate();
@@ -1860,7 +1864,7 @@ export class GameEngine {
       color = ZOMBIE_COLOR_BY_KIND.riot;
     } else if (kind === 'frost') {
       hp = Math.round(78 * hpScale);
-      speed = 166 + Math.min(78, s.wave * 6.5);
+      speed = 138 + Math.min(58, s.wave * 5.0);
       radius = ZOMBIE_RADIUS_BY_KIND.frost;
       damage = Math.round(16 * dmgScale);
       cash = Math.max(9, Math.round(17 * cashTaper));
@@ -1981,6 +1985,7 @@ export class GameEngine {
     if (p.recoilOffset > 0) p.recoilOffset = Math.max(0, p.recoilOffset - dt * 42);
     if (p.weaponSwapTimer > 0) p.weaponSwapTimer = Math.max(0, p.weaponSwapTimer - dt);
     if (p.chillTimer > 0) p.chillTimer = Math.max(0, p.chillTimer - dt);
+    if (p.chillImmuneTimer > 0) p.chillImmuneTimer = Math.max(0, p.chillImmuneTimer - dt);
     if (p.footDustCd > 0) p.footDustCd -= dt;
 
     this.localPlayerVx = 0;
@@ -2051,8 +2056,8 @@ export class GameEngine {
       1.05 *
       s.modifiers.moveSpeedMult *
       def.moveSpeedMult *
-      (inAcid ? 0.72 : 1) *
-      (p.chillTimer > 0 ? 0.76 : 1);
+      (inAcid ? 0.78 : 1) *
+      (p.chillTimer > 0 ? 0.86 : 1);
     if (s.feverTimer > 0 || s.powerUpTimers.overdrive > 0) speed *= 1.24;
 
     const oldX = p.x;
@@ -2202,6 +2207,34 @@ export class GameEngine {
     return best;
   }
 
+  private tryAutoRefillEmptyWeapon(wep: RunSnapshot['player']['weapons'][number]): boolean {
+    const s = this.state!;
+    const p = s.player;
+    const def = WEAPONS[wep.defId];
+    if (def.maxReserve <= 0) return false;
+    if (!SaveManager.get().autoBuyAmmo) return false;
+    const ammoCost = this.getEffectiveAmmoCost(def.id);
+    if (s.cash < ammoCost) return false;
+
+    s.cash -= ammoCost;
+    wep.mag = this.getMaxMag(def.id, wep.evolved);
+    wep.reserve = this.getMaxReserve(def.id, wep.evolved);
+    s.lastPrimaryWeaponId = def.id;
+    p.reloadTimer = 0;
+    p.reloadDuration = 0;
+    p.weaponSwapTimer = 0.2;
+    SoundFX.reloadDone();
+    const wLabel = wep.evolved ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name);
+    this.spawnFloatingText(
+      p.x,
+      p.y - 38,
+      I18n.t('ftAutoAmmoBought', { name: wLabel, cost: ammoCost }),
+      '#38bdf8',
+      1.18
+    );
+    return true;
+  }
+
   private tryFirePlayerWeapon(): void {
     const s = this.state!;
     const p = s.player;
@@ -2212,13 +2245,16 @@ export class GameEngine {
     if (!overdrive && p.reloadTimer > 0) return;
     if (!overdrive && wep.mag <= 0) {
       if (wep.reserve === 0) {
-        if (p.activeSlot !== 0) {
-          this.notifyAndFallbackFromEmptyWeapon(wep);
+        if (!this.tryAutoRefillEmptyWeapon(wep)) {
+          if (p.activeSlot !== 0) {
+            this.notifyAndFallbackFromEmptyWeapon(wep);
+          }
+          return;
         }
       } else {
         this.startReload();
+        return;
       }
-      return;
     }
     if (p.fireCooldown > 0) return;
 
@@ -2231,8 +2267,12 @@ export class GameEngine {
 
     if (!overdrive) {
       wep.mag -= 1;
-      if (wep.mag <= 0 && (wep.reserve > 0 || wep.reserve < 0)) {
-        this.startReload();
+      if (wep.mag <= 0) {
+        if (wep.reserve > 0 || wep.reserve < 0) {
+          this.startReload();
+        } else if (wep.reserve === 0) {
+          this.tryAutoRefillEmptyWeapon(wep);
+        }
       }
     }
 
@@ -3407,29 +3447,33 @@ export class GameEngine {
       25
     );
 
-    // 战地急救包掉落：精英/首领必掉，普通/特殊感染者在队员受伤时按概率掉落！
+    // 战地急救包掉落（严格控量保持硬核紧张感：仅在生命低于 72% 且场上无血包、单波至多 2 个时低概率掉落！）
     const anyInjured =
-      s.player.hp < s.player.maxHp * 0.94 ||
-      s.remotePlayers.some((rp) => !rp.downed && !rp.spectating && rp.hp < rp.maxHp * 0.94);
+      s.player.hp < s.player.maxHp * 0.72 ||
+      s.remotePlayers.some((rp) => !rp.downed && !rp.spectating && rp.hp < rp.maxHp * 0.72);
     const medOnGround = s.drops.filter((dr) => dr.kind === 'heal').length;
     const isSpecialKind =
       z.kind === 'boomer' || z.kind === 'riot' || z.kind === 'frost' || z.kind === 'necro' || z.kind === 'spitter';
-    const medChance =
-      isBoss || z.kind === 'miniboss'
-        ? 1.0
-        : anyInjured && medOnGround < 3
+    const medChance = isBoss
+      ? 1.0
+      : z.kind === 'miniboss'
+        ? anyInjured && medOnGround < 1
+          ? 0.35
+          : 0
+        : anyInjured && medOnGround < 1 && s.medkitsDroppedThisWave < 2
           ? isSpecialKind
-            ? 0.13
-            : 0.06
+            ? 0.045
+            : 0.018
           : 0;
     if (medChance > 0 && Math.random() < medChance) {
+      s.medkitsDroppedThisWave += 1;
       s.drops.push({
         id: this.nextEntityId++,
         kind: 'heal',
-        value: 18,
+        value: 15,
         x: dropPt.x + (Math.random() - 0.5) * 24,
         y: dropPt.y + (Math.random() - 0.5) * 24,
-        life: 24,
+        life: 22,
         bobPhase: Math.random() * 6,
       });
     }
@@ -3471,12 +3515,11 @@ export class GameEngine {
     const s = this.state!;
     this.explosionDepth += 1;
     try {
-      this.spawnExplosionVisuals(x, y, 112);
-      this.spawnHitSparks(x, y, '#a3e635', 10);
+      this.spawnExplosionVisuals(x, y, 118, true);
+      this.spawnHitSparks(x, y, '#a3e635', 12);
       this.spawnFloatingText(x, y - 22, I18n.t('ftBoomerBlast'), '#fb923c', 1.1);
-      SoundFX.explosion();
       if (s.isCoop && CoopManager.role === 'host' && !CoopManager.isCongested()) {
-        CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'explode', x, y, radius: 112 });
+        CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'explode', x, y, radius: 118 });
       }
       const zBlast = Math.round(135 * (1 + (s.stage.index - 1) * 0.2));
       const snap = [...s.zombies];
@@ -3498,64 +3541,74 @@ export class GameEngine {
     }
   }
 
-  private spawnExplosionVisuals(x: number, y: number, radius: number): void {
+  private spawnExplosionVisuals(x: number, y: number, radius: number, isBio = false): void {
     const s = this.state!;
     SoundFX.explosion();
-    s.camera.shake = Math.max(s.camera.shake, 0.95);
+    s.camera.shake = Math.max(s.camera.shake, 0.92);
 
     if (s.explosions.length >= 10) s.explosions.shift();
     s.explosions.push({
       x,
       y,
       radius,
-      life: 0.46,
-      maxLife: 0.46,
+      life: 0.38,
+      maxLife: 0.38,
       seed: Math.random() * 10,
+      isBio,
     });
 
     if (s.decals.length > 52) s.decals.shift();
     s.decals.push({
       x,
       y,
-      radius: Math.min(76, radius * 0.46),
-      color: 'rgba(9, 13, 22, 0.68)',
-      life: 13,
-      maxLife: 13,
+      radius: Math.min(62, radius * 0.38),
+      color: isBio ? 'rgba(132, 204, 22, 0.44)' : 'rgba(9, 13, 22, 0.58)',
+      life: 7.5,
+      maxLife: 7.5,
       seed: Math.random() * 10,
-      isScorch: true,
+      isScorch: !isBio,
     });
 
-    const shardCount = Math.min(18, Math.max(4, 145 - s.particles.length));
+    const shardCount = Math.min(20, Math.max(6, 150 - s.particles.length));
     for (let i = 0; i < shardCount; i++) {
-      const ang = (i / shardCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.35;
-      const spd = 130 + Math.random() * 240;
+      const ang = (i / shardCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.42;
+      const spd = 155 + Math.random() * 285;
       s.particles.push({
-        x,
-        y,
+        x: x + Math.cos(ang) * 8,
+        y: y + Math.sin(ang) * 8,
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
-        size: 3.8 + Math.random() * 3.8,
-        color: i % 3 === 0 ? '#fef08a' : i % 3 === 1 ? '#f97316' : '#ef4444',
-        life: 0.28 + Math.random() * 0.22,
-        maxLife: 0.5,
+        size: 3.4 + Math.random() * 3.8,
+        color: isBio
+          ? i % 2 === 0
+            ? '#bef264'
+            : '#f97316'
+          : i % 3 === 0
+            ? '#fef9c3'
+            : i % 3 === 1
+              ? '#fb923c'
+              : '#ef4444',
+        life: 0.22 + Math.random() * 0.2,
+        maxLife: 0.42,
         isShard: true,
         angle: ang,
       });
     }
-    const smokeCount = Math.min(10, Math.max(2, 150 - s.particles.length));
+    const smokeCount = Math.min(8, Math.max(2, 155 - s.particles.length));
     for (let i = 0; i < smokeCount; i++) {
-      const ang = (i / smokeCount) * Math.PI * 2 + Math.random() * 0.5;
-      const spd = 35 + Math.random() * 85;
+      const ang = (i / smokeCount) * Math.PI * 2 + Math.random() * 0.6;
+      const spd = 48 + Math.random() * 92;
       s.particles.push({
-        x: x + Math.cos(ang) * 12,
-        y: y + Math.sin(ang) * 12,
+        x: x + Math.cos(ang) * 14,
+        y: y + Math.sin(ang) * 14,
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
-        size: 11 + Math.random() * 9,
-        color: i % 2 === 0 ? 'rgba(30, 41, 59, 0.65)' : 'rgba(51, 65, 85, 0.55)',
-        life: 0.52 + Math.random() * 0.25,
-        maxLife: 0.77,
+        size: 6.5 + Math.random() * 5,
+        color: isBio ? 'rgba(63, 98, 18, 0.42)' : 'rgba(15, 23, 42, 0.42)',
+        life: 0.36 + Math.random() * 0.2,
+        maxLife: 0.56,
         isSmoke: true,
+        angle: Math.random() * Math.PI * 2,
       });
     }
   }
@@ -4027,8 +4080,9 @@ export class GameEngine {
                     6
                   );
                   if (targetP.isLocal) {
-                    if (z.kind === 'frost' || z.kind === 'boss_cryo') {
-                      p.chillTimer = Math.max(p.chillTimer, 2.0);
+                    if ((z.kind === 'frost' || z.kind === 'boss_cryo') && p.chillImmuneTimer <= 0) {
+                      p.chillTimer = 0.85;
+                      p.chillImmuneTimer = 3.2;
                     }
                     p.x += Math.cos(hitAng) * 18;
                     p.y += Math.sin(hitAng) * 18;
@@ -4542,8 +4596,9 @@ export class GameEngine {
               6
             );
           }
-          if (pk === 'cryo' && c.isLocal) {
-            s.player.chillTimer = Math.max(s.player.chillTimer, 2.2);
+          if (pk === 'cryo' && c.isLocal && s.player.chillImmuneTimer <= 0) {
+            s.player.chillTimer = 0.85;
+            s.player.chillImmuneTimer = 3.2;
           }
           s.spits.splice(i, 1);
           this.inflictDamageOnCombatant(c.id, sp.damage);
@@ -4657,7 +4712,7 @@ export class GameEngine {
       }
     } else if (d.kind === 'heal') {
       const pStats = SaveManager.getEffectivePlayerStats();
-      const myRatio = pickerId === CoopManager.myPeerId || pickerId === 'dog' ? 0.18 * pStats.medDropHealMult : 0.1;
+      const myRatio = pickerId === CoopManager.myPeerId || pickerId === 'dog' ? 0.15 * pStats.medDropHealMult : 0.08;
       if (!s.player.downed && !s.player.spectating) {
         const healAmt = Math.max(8, Math.round(s.player.maxHp * myRatio));
         s.player.hp = Math.min(s.player.maxHp, s.player.hp + healAmt);
@@ -4666,7 +4721,7 @@ export class GameEngine {
       SoundFX.fanfare();
       if (s.isCoop && CoopManager.role === 'host') {
         for (const rp of s.remotePlayers) {
-          const rRatio = rp.peerId === pickerId ? 0.18 : 0.1;
+          const rRatio = rp.peerId === pickerId ? 0.15 : 0.08;
           CoopManager.sendToClient(rp.peerId, {
             type: 'evt_team_reward',
             targetId: rp.peerId,
@@ -4689,15 +4744,7 @@ export class GameEngine {
       }
       if (d.powerUp === 'nuke') {
         s.camera.shake = 1.25;
-        SoundFX.explosion();
-        s.explosions.push({
-          x: d.x,
-          y: d.y,
-          radius: 340,
-          life: 0.62,
-          maxLife: 0.62,
-          seed: Math.random() * 10,
-        });
+        this.spawnExplosionVisuals(d.x, d.y, 260);
         const snapshot = [...s.zombies];
         for (const z of snapshot) {
           if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) continue;
@@ -4723,16 +4770,17 @@ export class GameEngine {
     const s = this.state;
     if (!s) return;
     const pStats = SaveManager.getEffectivePlayerStats();
+    s.player.chillTimer = 0;
     if (!s.player.downed && !s.player.spectating) {
       if (s.player.hp < s.player.maxHp) {
-        const waveHeal = Math.max(8, Math.round(s.player.maxHp * 0.12));
+        const waveHeal = Math.max(5, Math.round(s.player.maxHp * 0.06));
         s.player.hp = Math.min(s.player.maxHp, s.player.hp + waveHeal);
         this.spawnFloatingText(
           s.player.x,
           s.player.y - 36,
           I18n.t('ftWaveHeal', { n: waveHeal }),
           '#4ade80',
-          1.1
+          1.05
         );
       }
       if (pStats.waveArmorRegen > 0) {
@@ -5563,6 +5611,13 @@ export class GameEngine {
       sp.y += sp.vy * dt;
       if (sp.life <= 0 || this.findBulletBlocker(sp.x, sp.y, sp.radius)) {
         s.spits.splice(i, 1);
+      }
+    }
+
+    for (let i = s.acidPools.length - 1; i >= 0; i--) {
+      s.acidPools[i].life -= dt;
+      if (s.acidPools[i].life <= 0) {
+        s.acidPools.splice(i, 1);
       }
     }
   }

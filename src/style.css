@@ -1897,6 +1897,36 @@ button {
   font-weight: 700;
 }
 
+.auto-ammo-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #f8fafc;
+  border: 1.8px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 6px 11px;
+  margin-bottom: 6px;
+}
+.auto-ammo-strip.active {
+  background: #ecfdf5;
+  border-color: #34d399;
+}
+.auto-ammo-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.auto-ammo-copy strong {
+  font-size: 12.5px;
+  color: #0f172a;
+}
+.auto-ammo-copy span {
+  font-size: 11px;
+  color: #475569;
+  font-weight: 600;
+}
+
 .armory-gun-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));

@@ -263,6 +263,7 @@ export interface SaveData {
   totalRuns: number;
   freeStarterUsedCount: number;
   freeHqSupportUsed: boolean;
+  autoBuyAmmo: boolean;
   daily: DailyState;
   coopRivals: CoopRivalRecord[];
 }

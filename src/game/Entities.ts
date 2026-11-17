@@ -122,6 +122,7 @@ export interface ExplosionFX {
   life: number;
   maxLife: number;
   seed: number;
+  isBio?: boolean;
 }
 
 export interface AcidSpitEntity {
@@ -259,6 +260,7 @@ export interface RunSnapshot {
   feverTimer: number;
   electricFortifyWaves: number;
   repairsPaidThisWave: number;
+  medkitsDroppedThisWave: number;
   powerUpTimers: Record<PowerUpType, number>;
   isCoop: boolean;
   localSlot: number;
@@ -307,6 +309,7 @@ export interface RunSnapshot {
     vampCounter: number;
     killHealCounter: number;
     chillTimer: number;
+    chillImmuneTimer: number;
   };
   mapRevision: number;
   modifiers: RunModifiers;

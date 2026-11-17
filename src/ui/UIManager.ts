@@ -1722,8 +1722,20 @@ export class UIManager {
         `;
       }).join('');
 
+      const autoAmmoOn = Boolean(save.autoBuyAmmo);
+      const autoAmmoStrip = `
+        <div class="auto-ammo-strip ${autoAmmoOn ? 'active' : ''}">
+          <div class="auto-ammo-copy">
+            <strong>${I18n.t('autoAmmoTitle')}</strong>
+            <span>${I18n.t('autoAmmoDesc')}</span>
+          </div>
+          <button class="btn-cartoon btn-mini ${autoAmmoOn ? 'btn-green' : 'btn-gray'}" id="btn-toggle-auto-ammo" type="button">
+            ${autoAmmoOn ? I18n.t('autoAmmoOn') : I18n.t('autoAmmoOff')}
+          </button>
+        </div>
+      `;
       const arsenalHint = `<div class="arsenal-keep-bar">${I18n.t('arsenalKeepHint', { n: s.player.weapons.length })}</div>`;
-      contentHtml = `${evolveStrip}${arsenalHint}<div class="armory-gun-grid">${gunCards}</div>`;
+      contentHtml = `${evolveStrip}${autoAmmoStrip}${arsenalHint}<div class="armory-gun-grid">${gunCards}</div>`;
     } else {
       const turretSupportText =
         s.hqSupportCooldown > 0
@@ -1855,6 +1867,15 @@ export class UIManager {
       evolveBtn.onclick = () => {
         const res = this.engine.evolveActiveWeaponInShop(1850);
         this.renderArmoryShop(res.msg);
+      };
+    }
+
+    const autoAmmoBtn = this.modalRoot.querySelector('#btn-toggle-auto-ammo') as HTMLButtonElement | null;
+    if (autoAmmoBtn) {
+      autoAmmoBtn.onclick = () => {
+        const enabled = SaveManager.toggleAutoBuyAmmo();
+        SoundFX.reloadDone();
+        this.renderArmoryShop(enabled ? I18n.t('autoAmmoOn') : I18n.t('autoAmmoOff'));
       };
     }
 

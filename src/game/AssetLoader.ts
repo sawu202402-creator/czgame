@@ -1,5 +1,5 @@
 declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'web';
-const ASSET_VER_SUFFIX = __BUILD_PLATFORM__ === 'web' ? '?v=bright2' : '';
+const ASSET_VER_SUFFIX = __BUILD_PLATFORM__ === 'web' ? '?v=fx3' : '';
 
 export type SpriteKey =
   | 'player_hero'
@@ -52,6 +52,7 @@ export type SpriteKey =
   | 'drop_xp'
   | 'proj_sawblade'
   | 'fx_claw_slash'
+  | 'fx_explosion'
   | 'item_armor'
   | 'item_medkit'
   | 'item_emp_grid'
@@ -174,6 +175,7 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   drop_xp: './assets/drop_xp.png',
   proj_sawblade: './assets/proj_sawblade.png',
   fx_claw_slash: './assets/fx_claw_slash.png',
+  fx_explosion: './assets/fx_explosion.png',
   item_armor: './assets/item_armor.png',
   item_medkit: './assets/item_medkit.png',
   item_emp_grid: './assets/item_emp_grid.png',

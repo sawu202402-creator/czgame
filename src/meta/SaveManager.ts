@@ -36,6 +36,7 @@ const DEFAULT_SAVE: SaveData = {
   totalRuns: 0,
   freeStarterUsedCount: 0,
   freeHqSupportUsed: false,
+  autoBuyAmmo: false,
   daily: {
     dateKey: '',
     lastSignDate: '',
@@ -307,6 +308,12 @@ class SaveService {
       }
     }
     return this.canClaimDailyGrandChest();
+  }
+
+  public toggleAutoBuyAmmo(): boolean {
+    this.data.autoBuyAmmo = !this.data.autoBuyAmmo;
+    this.save();
+    return this.data.autoBuyAmmo;
   }
 
   public unlockOrSelectClass(classId: AgentClassId): boolean {
