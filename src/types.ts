@@ -187,6 +187,8 @@ export interface StationConfig {
 export interface StageDef {
   id: string;
   index: number;
+  isTutorial?: boolean;
+  totalWaves?: number;
   name: string;
   subtitle: string;
   wallColor: string;
@@ -261,6 +263,7 @@ export interface SaveData {
   clearedStages: string[];
   endlessBestWave: Record<string, number>;
   totalRuns: number;
+  tutorialDone?: boolean;
   freeStarterUsedCount: number;
   freeHqSupportUsed: boolean;
   autoBuyAmmo: boolean;

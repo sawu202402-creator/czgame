@@ -1,7 +1,7 @@
 import { SoundFX } from '../audio/SoundFX';
 import { getBossProfile, isBossKind } from '../data/enemies';
 import { POWERUP_META, RELICS } from '../data/perksAndRelics';
-import { STAGES } from '../data/stages';
+import { STAGES, TUTORIAL_STAGE } from '../data/stages';
 import { WEAPON_LIST, WEAPONS } from '../data/weapons';
 import { RunSnapshot } from '../game/Entities';
 import { GameEngine } from '../game/GameEngine';
@@ -174,12 +174,12 @@ export class UIManager {
     const save = SaveManager.get();
     if (
       this.hubTab !== 'coop' &&
-      save.totalRuns === 0 &&
+      !save.tutorialDone &&
       !CoopManager.lobby &&
       !PlatformSDK.hasPendingInviteUrl() &&
       !PlatformSDK.isInstantMultiplayerRequested()
     ) {
-      this.startStageRun(STAGES[0], 'standard', true);
+      this.startStageRun(TUTORIAL_STAGE, 'standard', true);
       return;
     }
     this.showHomeHub();
@@ -333,6 +333,16 @@ export class UIManager {
         this.showHomeHub();
       };
     });
+
+    const tutBtn = this.modalRoot.querySelector('#btn-hub-tutorial') as HTMLButtonElement | null;
+    if (tutBtn) {
+      tutBtn.onclick = () => {
+        if (CoopManager.role !== 'offline') {
+          CoopManager.disconnect();
+        }
+        this.startStageRun(TUTORIAL_STAGE, 'standard', true);
+      };
+    }
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-stage-go]').forEach((btn) => {
       btn.onclick = async () => {
@@ -611,6 +621,7 @@ export class UIManager {
               <button class="seg-btn ${this.selectedMode === 'standard' ? 'active' : ''}" data-mode-pick="standard">${I18n.t('modeStandard')}</button>
               <button class="seg-btn ${this.selectedMode === 'endless' ? 'active' : ''}" data-mode-pick="endless">${I18n.t('modeEndless')}</button>
             </div>
+            <button class="btn-cartoon btn-mini btn-blue" id="btn-hub-tutorial" type="button">${I18n.t('tutReplayBtn')}</button>
             <span class="hero-mode-desc">${modeDesc}</span>
           </div>
         </div>
@@ -1236,8 +1247,7 @@ export class UIManager {
     this.engine.startRun(stage, mode);
 
     const s = this.engine.state;
-    if (isFirstTutorial && s && !s.isCoop) {
-      s.cash += 120;
+    if ((isFirstTutorial || stage.isTutorial) && s && !s.isCoop) {
       this.ftue = {
         active: true,
         startX: s.player.x,
@@ -1422,6 +1432,11 @@ export class UIManager {
 
     const ftueSkip = hud.querySelector('#btn-ftue-skip') as HTMLButtonElement;
     ftueSkip.onclick = () => {
+      if (this.engine.state?.stage.isTutorial) {
+        SaveManager.markTutorialDone();
+        this.showHomeHub();
+        return;
+      }
       if (this.ftue) {
         this.ftue.active = false;
       }
@@ -1747,6 +1762,7 @@ export class UIManager {
 
     (this.modalRoot.querySelector('#btn-quit-hub') as HTMLButtonElement).onclick = () => {
       this.pauseOpen = false;
+      SaveManager.markTutorialDone();
       PlatformSDK.gameplayStop();
       if (CoopManager.role !== 'offline') {
         CoopManager.disconnect();
@@ -1800,13 +1816,15 @@ export class UIManager {
 
     let contentHtml = '';
     if (this.armoryTab === 'guns') {
-      const canEvolve = !activeWep.evolved && s.cash >= 1850;
+      const isTut = Boolean(s.stage.isTutorial);
+      const evoCost = isTut ? 0 : 1850;
+      const canEvolve = !activeWep.evolved && s.cash >= evoCost;
       const evolveStrip = activeWep.evolved
         ? `<div class="evolve-strip done">${I18n.t('evolvedDone', { name: activeSupName })}</div>`
         : `<div class="evolve-strip">
             <span>${I18n.t('evolvePrompt', { base: activeBaseName, sup: activeSupName })}</span>
             <button class="btn-cartoon btn-mini ${canEvolve ? 'btn-purple' : 'btn-disabled'}" id="btn-shop-evolve">
-              ${I18n.t('evolveBtn', { cost: 1850 })}
+              ${isTut ? I18n.t('tutFreeEvoBtn') : I18n.t('evolveBtn', { cost: evoCost })}
             </button>
           </div>`;
 
@@ -1814,12 +1832,12 @@ export class UIManager {
         const owned = s.player.weapons.find((inst) => inst.defId === w.id);
         const isPermanent = !!owned && owned.tempWavesLeft === undefined;
         const isEquipped = activeWep.defId === w.id;
-        const locked = unlockedRooms < w.unlockRoomsRequired && !owned;
+        const locked = !isTut && unlockedRooms < w.unlockRoomsRequired && !owned;
         const wTitle = owned?.evolved ? `⚡${I18n.wSuperName(w.id, w.superName)}` : I18n.wName(w.id, w.name);
 
         const gunCost = this.engine.getEffectiveGunCost(w.id);
         const ammoCost = this.engine.getEffectiveAmmoCost(w.id);
-        let btnLabel = I18n.t('buyBtn', { cost: gunCost });
+        let btnLabel = isTut ? I18n.t('tutFreeGunBtn') : I18n.t('buyBtn', { cost: gunCost });
         let btnClass = s.cash >= gunCost ? 'btn-green' : 'btn-disabled';
         let refillBtnHtml = '';
 
@@ -2577,6 +2595,7 @@ export class UIManager {
       return;
     }
 
+    const isTut = Boolean(s.stage.isTutorial);
     const p = s.player;
     if (!ft.moved && Math.hypot(p.x - ft.startX, p.y - ft.startY) > 72) {
       ft.moved = true;
@@ -2586,7 +2605,13 @@ export class UIManager {
       ft.shot = true;
       SoundFX.coin();
     }
-    if (!ft.geared && (this.armoryOpen || p.weapons.length >= 2 || s.cash < ft.initialCash)) {
+    if (
+      !ft.geared &&
+      (this.armoryOpen ||
+        p.weapons.length >= (isTut ? 3 : 2) ||
+        p.weapons.some((w) => w.evolved) ||
+        s.cash < ft.initialCash)
+    ) {
       ft.geared = true;
       SoundFX.coin();
     }
@@ -2599,7 +2624,7 @@ export class UIManager {
     }
 
     const allDone = ft.moved && ft.shot && ft.geared && ft.tactical;
-    if ((allDone || s.wave >= 3) && ft.completedAt === 0) {
+    if ((allDone || (!isTut && s.wave >= 3)) && ft.completedAt === 0) {
       ft.completedAt = performance.now();
       if (allDone) {
         s.cash += 150;
@@ -2609,18 +2634,26 @@ export class UIManager {
       }
     }
 
-    if (ft.completedAt > 0 && performance.now() - ft.completedAt > 1500) {
+    // 独立教学靶场内保留顶部快捷“跳过教学/去联机”入口，方便想直接联机的新玩家随时一键回大厅！
+    if (!isTut && ft.completedAt > 0 && performance.now() - ft.completedAt > 1500) {
       ft.active = false;
       card.style.display = 'none';
       return;
     }
 
-    const sig = `${I18n.lang}:${usingTouch ? 1 : 0}:${ft.moved ? 1 : 0}${ft.shot ? 1 : 0}${ft.geared ? 1 : 0}${ft.tactical ? 1 : 0}:${ft.completedAt > 0 ? 1 : 0}`;
+    const hideStepsInTut = isTut && ft.completedAt > 0 && performance.now() - ft.completedAt > 1800;
+    const sig = `${I18n.lang}:${isTut ? 1 : 0}:${usingTouch ? 1 : 0}:${ft.moved ? 1 : 0}${ft.shot ? 1 : 0}${ft.geared ? 1 : 0}${ft.tactical ? 1 : 0}:${ft.completedAt > 0 ? 1 : 0}:${hideStepsInTut ? 1 : 0}`;
     setIfChanged('ftueCard', sig, () => {
       card.style.display = 'flex';
       card.classList.toggle('all-done', ft.completedAt > 0);
-      (card.querySelector('#ftue-title') as HTMLElement).textContent = I18n.t('ftueTitle');
-      (card.querySelector('#btn-ftue-skip') as HTMLElement).textContent = I18n.t('ftueSkip');
+      (card.querySelector('#ftue-title') as HTMLElement).textContent = I18n.t(
+        isTut ? 'tutTitle' : 'ftueTitle'
+      );
+      (card.querySelector('#btn-ftue-skip') as HTMLElement).textContent = I18n.t(
+        isTut ? 'tutSkipToHub' : 'ftueSkip'
+      );
+      const stepsEl = card.querySelector('.ftue-steps') as HTMLElement;
+      stepsEl.style.display = hideStepsInTut ? 'none' : 'flex';
 
       const applyStep = (id: string, done: boolean, html: string) => {
         const row = card.querySelector(`#ftue-step-${id}`) as HTMLElement;
@@ -2633,7 +2666,11 @@ export class UIManager {
 
       applyStep('move', ft.moved, I18n.t(usingTouch ? 'ftueMoveTouch' : 'ftueMovePc'));
       applyStep('shoot', ft.shot, I18n.t(usingTouch ? 'ftueShootTouch' : 'ftueShootPc'));
-      applyStep('gear', ft.geared, I18n.t(usingTouch ? 'ftueGearTouch' : 'ftueGearPc'));
+      applyStep(
+        'gear',
+        ft.geared,
+        I18n.t(isTut ? (usingTouch ? 'tutGearTouch' : 'tutGearPc') : usingTouch ? 'ftueGearTouch' : 'ftueGearPc')
+      );
       applyStep('skill', ft.tactical, I18n.t(usingTouch ? 'ftueSkillTouch' : 'ftueSkillPc'));
     });
   }
@@ -2758,19 +2795,25 @@ export class UIManager {
     this.clearPerkKeyHandler();
     this.armoryOpen = false;
     this.pauseOpen = false;
+    const isTut = Boolean(s.stage.isTutorial);
+    if (isTut) {
+      SaveManager.markTutorialDone();
+    }
     const stageTierBonus = (s.stage.index - 1) * 20;
-    const baseGold = Math.round(
+    const rawGold = Math.round(
       25 + stageTierBonus + s.wave * 14 + Math.min(220, s.kills * 0.45) + (victory ? 110 : 0)
     );
-    const baseXp = Math.round(
+    const rawXp = Math.round(
       30 + stageTierBonus + s.wave * 16 + Math.min(260, s.kills * 0.65) + (victory ? 100 : 0)
     );
+    const baseGold = isTut && victory ? Math.max(180, rawGold) : rawGold;
+    const baseXp = isTut && victory ? Math.max(85, rawXp) : rawXp;
     const zones = [2, 3, 5, 3, 2];
 
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop">
         <div class="popup-box compact-modal">
-          <h2>${victory ? I18n.t('victoryTitle') : I18n.t('settleTitle')}</h2>
+          <h2>${victory ? I18n.t(isTut ? 'tutVictoryTitle' : 'victoryTitle') : I18n.t('settleTitle')}</h2>
           <p class="popup-sub">${I18n.t('downedSub', { w: s.wave, k: s.kills })}</p>
 
           <div class="reward-preview">
@@ -2848,7 +2891,7 @@ export class UIManager {
       stopped = true;
       cancelAnimationFrame(this.needleAnimId);
       SaveManager.addRewards(baseGold, baseXp);
-      if (CoopManager.role === 'offline') {
+      if (CoopManager.role === 'offline' && !isTut) {
         await PlatformSDK.showCommercialBreak();
       }
       if (CoopManager.role !== 'offline' && CoopManager.lobby) {

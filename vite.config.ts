@@ -19,13 +19,13 @@ export default defineConfig(() => {
             if (platform === 'crazygames') {
               return html.replace(
                 '</head>',
-                '    <!-- CrazyGames SDK v3 -->\n    <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>\n  </head>'
+                '    <!-- CrazyGames SDK v3 -->\n    <script defer src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>\n  </head>'
               );
             }
             if (platform === 'poki') {
               return html.replace(
                 '</head>',
-                '    <!-- Poki SDK v2 -->\n    <script src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>\n  </head>'
+                '    <!-- Poki SDK v2 -->\n    <script defer src="https://game-cdn.poki.com/scripts/v2/poki-sdk.js"></script>\n  </head>'
               );
             }
             return html;

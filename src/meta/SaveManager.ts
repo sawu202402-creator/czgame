@@ -34,6 +34,7 @@ const DEFAULT_SAVE: SaveData = {
   clearedStages: [],
   endlessBestWave: {},
   totalRuns: 0,
+  tutorialDone: false,
   freeStarterUsedCount: 0,
   freeHqSupportUsed: false,
   autoBuyAmmo: false,
@@ -179,6 +180,10 @@ class SaveService {
               ? parsed.unlockedClasses
               : ['vanguard'],
           careerKills: typeof parsed.careerKills === 'number' ? parsed.careerKills : 0,
+          tutorialDone:
+            typeof parsed.tutorialDone === 'boolean'
+              ? parsed.tutorialDone
+              : (parsed.totalRuns || 0) > 0,
           upgrades: {
             ...DEFAULT_SAVE.upgrades,
             ...(parsed.upgrades || {}),
@@ -401,7 +406,18 @@ class SaveService {
     return true;
   }
 
+  public markTutorialDone(): void {
+    if (!this.data.tutorialDone) {
+      this.data.tutorialDone = true;
+      this.save();
+    }
+  }
+
   public markStageCleared(stageId: string): void {
+    if (stageId === 'stage_tutorial') {
+      this.markTutorialDone();
+      return;
+    }
     if (!this.data.clearedStages.includes(stageId)) {
       this.data.clearedStages.push(stageId);
       this.save();

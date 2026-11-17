@@ -24,7 +24,7 @@ async function bootstrap() {
   const bootFill = document.getElementById('boot-bar-fill');
   const bootPct = document.getElementById('boot-pct');
 
-  await Assets.preloadAll((loaded, total) => {
+  await Assets.preloadCritical((loaded, total) => {
     const pct = Math.min(100, Math.max(8, Math.round((loaded / Math.max(1, total)) * 100)));
     if (bootFill) bootFill.style.width = `${pct}%`;
     if (bootPct) bootPct.textContent = `${pct}%`;
@@ -122,6 +122,13 @@ async function bootstrap() {
     bootLoader.classList.add('fade-out');
     setTimeout(() => bootLoader.remove(), 320);
   }
+
+  // 首屏秒开后，在后台静默分批预热全部 15 把武器与后续 8 大关卡贴图
+  setTimeout(() => {
+    Assets.preloadRemainingInBackground(() => {
+      engine.bumpMapRevision();
+    });
+  }, 60);
 
   let lastTime = performance.now();
   let hudTick = 0;

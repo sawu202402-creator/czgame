@@ -119,13 +119,25 @@ export class GameEngine {
     );
   }
 
+  public bumpMapRevision(): void {
+    if (this.state) {
+      this.state.mapRevision += 1;
+    }
+  }
+
   public startRun(stage: StageDef, mode: GameMode): void {
     const pStats = SaveManager.getEffectivePlayerStats();
     const save = SaveManager.get();
     save.totalRuns += 1;
+    if (!stage.isTutorial) {
+      save.tutorialDone = true;
+    }
     SaveManager.save();
 
     const isCoop = CoopManager.isActiveCoop();
+    if (isCoop) {
+      SaveManager.markTutorialDone();
+    }
     const lobby = CoopManager.lobby;
     const squadCount = isCoop ? CoopManager.getSquadCount() : 1;
     const scaling = getCoopScaling(squadCount);
@@ -214,14 +226,14 @@ export class GameEngine {
       stage,
       mode,
       wave: 1,
-      maxWaves: mode === 'standard' ? 10 : 9999,
+      maxWaves: mode === 'standard' ? (stage.totalWaves ?? 10) : 9999,
       waveState: 'fighting',
       intermissionTimer: 0,
       extractionProgress: 0,
       extractionTimer: 0,
       lootToast: null,
       zombiesRemainingInWave: 0,
-      cash: pStats.startCash,
+      cash: stage.isTutorial ? Math.max(600, pStats.startCash + 500) : pStats.startCash,
       battleLevel: 1,
       battleXp: 0,
       battleXpNext: 55,
@@ -264,15 +276,30 @@ export class GameEngine {
         reviveProgress: 0,
         hitFlashTimer: 0,
         invulnTimer: 1.5,
-        weapons: [
-          {
-            defId: 'pistol',
-            evolved: false,
-            mag: pistolDef.magSize,
-            reserve: -1,
-          },
-        ],
-        activeSlot: 0,
+        weapons: stage.isTutorial
+          ? [
+              {
+                defId: 'pistol',
+                evolved: false,
+                mag: pistolDef.magSize,
+                reserve: -1,
+              },
+              {
+                defId: 'smg',
+                evolved: false,
+                mag: WEAPONS.smg.magSize,
+                reserve: WEAPONS.smg.maxReserve,
+              },
+            ]
+          : [
+              {
+                defId: 'pistol',
+                evolved: false,
+                mag: pistolDef.magSize,
+                reserve: -1,
+              },
+            ],
+        activeSlot: stage.isTutorial ? 1 : 0,
         grenades: pStats.startGrenades,
         grenadeCooldown: 0,
         reloadTimer: 0,
@@ -661,12 +688,14 @@ export class GameEngine {
   }
 
   public getEffectiveGunCost(weaponId: string): number {
+    if (this.state?.stage.isTutorial) return 0;
     const def = WEAPONS[weaponId];
     if (def.shopCost <= 0) return 0;
     return Math.max(50, Math.round((def.shopCost * SaveManager.getEffectivePlayerStats().gunShopCostMult) / 5) * 5);
   }
 
   public getEffectiveAmmoCost(weaponId: string): number {
+    if (this.state?.stage.isTutorial) return 0;
     const def = WEAPONS[weaponId];
     if (def.ammoCost <= 0) return 0;
     return Math.max(20, Math.round((def.ammoCost * SaveManager.getEffectivePlayerStats().ammoCostMult) / 5) * 5);
@@ -683,7 +712,7 @@ export class GameEngine {
     if (!s) return { ok: false, msg: '' };
     const def = WEAPONS[weaponId];
     const unlockedRooms = this.getUnlockedExtraRoomsCount();
-    if (unlockedRooms < def.unlockRoomsRequired) {
+    if (!s.stage.isTutorial && unlockedRooms < def.unlockRoomsRequired) {
       return { ok: false, msg: I18n.t('msgNeedRooms', { n: def.unlockRoomsRequired }) };
     }
 
@@ -876,13 +905,14 @@ export class GameEngine {
   public evolveActiveWeaponInShop(cost = 1850): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
+    const effCost = s.stage.isTutorial ? 0 : cost;
     const wep = s.player.weapons[s.player.activeSlot];
     const def = WEAPONS[wep.defId];
     if (wep.evolved) return { ok: false, msg: I18n.t('msgAlreadyEvo') };
-    if (s.cash < cost) return { ok: false, msg: I18n.t('msgNoCash', { c: cost }) };
+    if (s.cash < effCost) return { ok: false, msg: I18n.t('msgNoCash', { c: effCost }) };
 
     const sName = I18n.wSuperName(def.id, def.superName);
-    s.cash -= cost;
+    s.cash -= effCost;
     wep.evolved = true;
     wep.mag = this.getMaxMag(wep.defId, true);
     if (def.maxReserve > 0) wep.reserve = this.getMaxReserve(wep.defId, true);
@@ -1228,6 +1258,22 @@ export class GameEngine {
         b.respawnWaves -= 1;
         if (b.respawnWaves <= 0) b.alive = true;
       }
+    }
+
+    if (s.stage.isTutorial) {
+      if (wave === 1) {
+        this.spawnQueue = Array(8).fill('walker');
+        s.zombiesRemainingInWave = this.spawnQueue.length;
+        this.spawnTimer = 0.45;
+        this.showBanner(I18n.t('tutWave1Banner'), 4.2);
+      } else {
+        this.spawnQueue = ['walker', 'walker', 'boss_warden', 'walker'];
+        s.zombiesRemainingInWave = this.spawnQueue.length;
+        this.spawnTimer = 0.45;
+        SoundFX.alarm();
+        this.showBanner(I18n.t('tutWave2Banner'), 4.2);
+      }
+      return;
     }
 
     const scaling = getCoopScaling(s.squadCount);
@@ -1665,7 +1711,9 @@ export class GameEngine {
               this.spawnZombie(kind);
               if (isBossKind(kind) || kind === 'miniboss') break;
             }
-            const baseInterval = Math.max(0.2, (1.12 - s.wave * 0.068) / scaling.spawnRateMult);
+            const baseInterval = s.stage.isTutorial
+              ? 0.58
+              : Math.max(0.2, (1.12 - s.wave * 0.068) / scaling.spawnRateMult);
             this.spawnTimer = baseInterval * (0.72 + Math.random() * 0.45);
           }
         }
@@ -1719,7 +1767,7 @@ export class GameEngine {
           }
         } else {
           s.waveState = 'intermission';
-          s.intermissionTimer = 5.0;
+          s.intermissionTimer = s.stage.isTutorial ? 2.5 : 5.0;
         }
       }
       s.zombiesRemainingInWave = this.spawnQueue.length + s.zombies.length;
@@ -1745,7 +1793,8 @@ export class GameEngine {
       if (onPadCount > 0) {
         const ratio = onPadCount / Math.max(1, aliveList.length);
         const speedMult = ratio >= 1 ? 1 : 0.42 + ratio * 0.45;
-        s.extractionProgress = Math.min(1, s.extractionProgress + (dt / 2.8) * speedMult);
+        const boardDur = s.stage.isTutorial ? 1.6 : 2.8;
+        s.extractionProgress = Math.min(1, s.extractionProgress + (dt / boardDur) * speedMult);
         if (s.extractionProgress >= 1) {
           s.waveState = 'ended';
           PlatformSDK.gameplayStop();
@@ -1889,14 +1938,19 @@ export class GameEngine {
       color = '#a855f7';
     } else if (isBossKind(kind)) {
       const bp = getBossProfile(kind);
-      hp = Math.round(2450 * hpScale * bp.hpMult);
+      hp = s.stage.isTutorial ? 920 : Math.round(2450 * hpScale * bp.hpMult);
       speed = bp.speedBase + Math.min(54, s.wave * 4.5);
       radius = bp.radius;
-      damage = Math.round(42 * dmgScale);
+      damage = s.stage.isTutorial ? 16 : Math.round(42 * dmgScale);
       cash = 300;
       xp = 150;
       color = bp.color;
       rangedCd = 2.2;
+    } else if (s.stage.isTutorial && kind === 'walker') {
+      hp = 56;
+      damage = 8;
+      cash = 25;
+      xp = 22;
     }
 
     // 360° 广角环城外围散点生成：按 ~150° 大扇面分布在建筑外圈与镜头视野外，彻底告别直线排队进场！

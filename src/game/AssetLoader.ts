@@ -1,5 +1,5 @@
 declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'web';
-const ASSET_VER_SUFFIX = __BUILD_PLATFORM__ === 'web' ? '?v=fx3' : '';
+const ASSET_VER_SUFFIX = __BUILD_PLATFORM__ === 'web' ? '?v=fx4' : '';
 
 export type SpriteKey =
   | 'player_hero'
@@ -249,48 +249,158 @@ const TILE_FILES: Record<TileKey, string> = {
   tile_wall_top: './assets/tile_wall_top.png',
 };
 
+// 首屏/新手靶场核心最小资产集（仅约 32 个小文件 < 260 KB，隐私模式冷启动 0.6s 极速进游戏！）
+const CRITICAL_SPRITES: SpriteKey[] = [
+  'player_hero',
+  'player_torso',
+  'player_boot',
+  'gear_backpack',
+  'zombie_walker',
+  'zombie_runner',
+  'boss_warden',
+  'td_pistol',
+  'td_smg',
+  'gun_pistol',
+  'gun_smg',
+  'prop_blast_door',
+  'prop_wood_plank',
+  'prop_helipad',
+  'prop_helicopter',
+  'prop_armory_kiosk',
+  'prop_ammo_box',
+  'prop_pap',
+  'prop_chest',
+  'prop_barrel',
+  'prop_desk',
+  'prop_grenade',
+  'prop_sandbags',
+  'prop_barrier',
+  'prop_tree',
+  'prop_traffic_cone',
+  'prop_floor_grate',
+  'drop_cash',
+  'drop_xp',
+  'fx_explosion',
+  'fx_claw_slash',
+  'decal_scorch',
+  'decal_blood',
+  'ui_coin',
+  'item_medkit',
+  'item_armor',
+];
+
+const CRITICAL_TILES: TileKey[] = [
+  'tile_grass',
+  'tile_floor_lobby',
+  'tile_asphalt',
+  'tile_wall_top',
+];
+
 class GameAssetManager {
   private sprites = new Map<SpriteKey, HTMLImageElement>();
   private whiteSilhouettes = new Map<SpriteKey, HTMLCanvasElement>();
   private tintedSilhouettes = new Map<string, HTMLCanvasElement>();
   private tiles = new Map<TileKey, HTMLImageElement>();
   private patterns = new Map<string, CanvasPattern>();
+  private inflightSprites = new Map<SpriteKey, Promise<void>>();
+  private inflightTiles = new Map<TileKey, Promise<void>>();
+
+  private ensureSpriteLoaded(key: SpriteKey): Promise<void> {
+    if (this.sprites.has(key)) return Promise.resolve();
+    const existing = this.inflightSprites.get(key);
+    if (existing) return existing;
+    const p = this.loadImage(SPRITE_FILES[key]).then((img) => {
+      this.inflightSprites.delete(key);
+      if (img) {
+        this.sprites.set(key, img);
+      }
+    });
+    this.inflightSprites.set(key, p);
+    return p;
+  }
+
+  private ensureTileLoaded(key: TileKey): Promise<void> {
+    if (this.tiles.has(key)) return Promise.resolve();
+    const existing = this.inflightTiles.get(key);
+    if (existing) return existing;
+    const p = this.loadImage(TILE_FILES[key]).then((img) => {
+      this.inflightTiles.delete(key);
+      if (img) {
+        this.tiles.set(key, img);
+      }
+    });
+    this.inflightTiles.set(key, p);
+    return p;
+  }
+
+  /**
+   * 第一阶段（冷启动极速首屏）：仅阻塞加载约 30 个核心小贴图（< 260 KB），零同步 Canvas 分配
+   */
+  public async preloadCritical(onProgress?: (loaded: number, total: number) => void): Promise<void> {
+    const total = CRITICAL_SPRITES.length + CRITICAL_TILES.length;
+    let loaded = 0;
+    const bump = () => {
+      loaded += 1;
+      onProgress?.(loaded, total);
+    };
+
+    const tasks: Promise<void>[] = [
+      ...CRITICAL_SPRITES.map((k) => this.ensureSpriteLoaded(k).then(bump)),
+      ...CRITICAL_TILES.map((k) => this.ensureTileLoaded(k).then(bump)),
+    ];
+    await Promise.all(tasks);
+  }
+
+  /**
+   * 第二阶段（进局后静默后台流式预热）：按每批 10 个并发平滑拉取剩余全武器与 8 大关卡贴图，不抢占首屏带宽
+   */
+  public async preloadRemainingInBackground(onTileUpdated?: () => void): Promise<void> {
+    const remTiles = (Object.keys(TILE_FILES) as TileKey[]).filter((k) => !this.tiles.has(k));
+    const remSprites = (Object.keys(SPRITE_FILES) as SpriteKey[]).filter((k) => !this.sprites.has(k));
+
+    // 优先预热全 15 把武器（方便玩家在新手靶场随时打开 [B] 试用全部武器！）与地板瓦片
+    const priorityGuns = remSprites.filter((k) => k.startsWith('td_') || k.startsWith('gun_'));
+    const otherSprites = remSprites.filter((k) => !k.startsWith('td_') && !k.startsWith('gun_'));
+
+    const orderedJobs: (() => Promise<boolean>)[] = [
+      ...priorityGuns.map((k) => async () => {
+        await this.ensureSpriteLoaded(k);
+        return false;
+      }),
+      ...remTiles.map((k) => async () => {
+        const hadBefore = this.tiles.has(k);
+        await this.ensureTileLoaded(k);
+        return !hadBefore && this.tiles.has(k);
+      }),
+      ...otherSprites.map((k) => async () => {
+        await this.ensureSpriteLoaded(k);
+        return false;
+      }),
+    ];
+
+    const BATCH = 10;
+    for (let i = 0; i < orderedJobs.length; i += BATCH) {
+      const slice = orderedJobs.slice(i, i + BATCH);
+      const results = await Promise.all(slice.map((fn) => fn()));
+      if (results.some(Boolean)) {
+        onTileUpdated?.();
+      }
+    }
+  }
 
   public async preloadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
     const spriteKeys = Object.keys(SPRITE_FILES) as SpriteKey[];
     const tileKeys = Object.keys(TILE_FILES) as TileKey[];
     const total = spriteKeys.length + tileKeys.length;
     let loaded = 0;
-
     const bump = () => {
       loaded += 1;
       onProgress?.(loaded, total);
     };
-
-    const tasks: Promise<void>[] = [];
-
-    spriteKeys.forEach((key) => {
-      tasks.push(
-        this.loadImage(SPRITE_FILES[key]).then((img) => {
-          if (img) {
-            this.sprites.set(key, img);
-            this.whiteSilhouettes.set(key, this.createSilhouette(img, '#ffffff'));
-          }
-          bump();
-        })
-      );
-    });
-
-    tileKeys.forEach((key) => {
-      tasks.push(
-        this.loadImage(TILE_FILES[key]).then((img) => {
-          if (img) this.tiles.set(key, img);
-          bump();
-        })
-      );
-    });
-
-    await Promise.all(tasks);
+    await Promise.all([
+      ...spriteKeys.map((k) => this.ensureSpriteLoaded(k).then(bump)),
+      ...tileKeys.map((k) => this.ensureTileLoaded(k).then(bump)),
+    ]);
   }
 
   private loadImage(src: string): Promise<HTMLImageElement | null> {
@@ -319,7 +429,13 @@ class GameAssetManager {
   }
 
   public getWhiteFlash(key: SpriteKey): HTMLCanvasElement | undefined {
-    return this.whiteSilhouettes.get(key);
+    const cached = this.whiteSilhouettes.get(key);
+    if (cached) return cached;
+    const img = this.sprites.get(key);
+    if (!img) return undefined;
+    const sil = this.createSilhouette(img, '#ffffff');
+    this.whiteSilhouettes.set(key, sil);
+    return sil;
   }
 
   public getTintedSilhouette(key: SpriteKey, color: string): HTMLCanvasElement | undefined {

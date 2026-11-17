@@ -1311,6 +1311,71 @@ const stageBunker = buildArchitecturalStage({
   ],
 });
 
+export const TUTORIAL_STAGE: StageDef = {
+  ...buildArchitecturalStage({
+    id: 'stage_tutorial',
+    index: 1,
+    name: '新兵全武器实战靶场',
+    subtitle: '2波极速教学 · 全15把武器&超武免费爽玩 · 击败尸王登机撤离',
+    wallColor: '#334155',
+    wallTopColor: '#1e293b',
+    cols: 28,
+    rows: 20,
+    playerSpawnCell: { gx: 9, gy: 10 },
+    helipadCell: { gx: 19, gy: 10 },
+    rooms: [
+      {
+        id: 'lobby',
+        name: '实战教学靶场',
+        floorTheme: 'lobby',
+        boxes: [{ gx: 5, gy: 6, gw: 9, gh: 8 }],
+        initiallyUnlocked: true,
+      },
+      {
+        id: 'courtyard',
+        name: '撤离停机坪',
+        floorTheme: 'asphalt',
+        boxes: [{ gx: 14, gy: 6, gw: 9, gh: 8 }],
+        initiallyUnlocked: false,
+      },
+    ],
+    doors: [
+      {
+        id: 'tut_d1',
+        orientation: 'vertical',
+        gx: 14,
+        gy: 9,
+        span: 3,
+        roomA: 'lobby',
+        roomB: 'courtyard',
+        unlockRoomId: 'courtyard',
+        cost: 100,
+        label: '撤离停机坪',
+      },
+    ],
+    windows: [
+      { id: 'tut_w1', roomId: 'lobby', orientation: 'horizontal', gx: 8, gy: 6, span: 3, outDir: 'N' },
+      { id: 'tut_w2', roomId: 'lobby', orientation: 'vertical', gx: 5, gy: 9, span: 3, outDir: 'W' },
+      { id: 'tut_w3', roomId: 'courtyard', orientation: 'vertical', gx: 23, gy: 9, span: 3, outDir: 'E' },
+      { id: 'tut_w4', roomId: 'courtyard', orientation: 'horizontal', gx: 17, gy: 14, span: 3, outDir: 'S' },
+    ],
+    props: [
+      { id: 'tut_p1', roomId: 'lobby', kind: 'desk', x: 10.0 * G, y: 12.4 * G, w: 96, h: 48, blocksBullets: false },
+    ],
+    stations: [
+      { id: 'tut_shop', roomId: 'lobby', type: 'armory_kiosk', x: 8.0 * G, y: 7.7 * G, cost: 0, label: '全武器免费试用 [B]' },
+      { id: 'tut_pap', roomId: 'lobby', type: 'pack_a_punch', x: 11.8 * G, y: 7.7 * G, cost: 0, label: '免费超武改造' },
+      { id: 'tut_ammo', roomId: 'lobby', type: 'ammo_box', x: 6.8 * G, y: 12.5 * G, cost: 0, label: '免费弹药箱' },
+    ],
+    barrels: [
+      { x: 12.4 * G, y: 10.2 * G, roomId: 'lobby' },
+      { x: 16.2 * G, y: 7.8 * G, roomId: 'courtyard' },
+    ],
+  }),
+  isTutorial: true,
+  totalWaves: 2,
+};
+
 export const STAGES: StageDef[] = [
   stagePolice,
   stageMall,
