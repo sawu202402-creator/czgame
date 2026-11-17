@@ -17,12 +17,20 @@ declare global {
           gameplayStop: () => void;
           happytime: () => void;
           inviteLink?: (params: Record<string, string>) => string;
-          showInviteButton?: (params: Record<string, string>) => string;
-          hideInviteButton?: () => void;
+          updateRoom?: (params: {
+            roomId?: string;
+            isJoinable: boolean;
+            inviteParams?: Record<string, string>;
+          }) => void;
+          leftRoom?: () => void;
+          inviteParams?: Record<string, string>;
+          addJoinRoomListener?: (cb: (params: Record<string, string>) => void) => void;
           getInviteParam?: (key: string) => string | null;
           isInstantMultiplayer?: boolean;
-          settings?: { muteAudio?: boolean };
-          addSettingsChangeListener?: (cb: (settings: { muteAudio?: boolean }) => void) => void;
+          settings?: { muteAudio?: boolean; disableChat?: boolean };
+          addSettingsChangeListener?: (
+            cb: (settings: { muteAudio?: boolean; disableChat?: boolean }) => void
+          ) => void;
         };
         ad?: {
           requestAd: (
@@ -287,11 +295,15 @@ class PlatformAdapter {
     return url.toString();
   }
 
-  public showInviteButton(roomCode: string): void {
+  public showInviteButton(roomCode: string, isJoinable = true): void {
     if (__BUILD_PLATFORM__ !== 'poki') {
       try {
-        if (this.sdkActive && window.CrazyGames?.SDK?.game?.showInviteButton) {
-          window.CrazyGames.SDK.game.showInviteButton({ roomId: roomCode });
+        if (this.sdkActive && window.CrazyGames?.SDK?.game?.updateRoom) {
+          window.CrazyGames.SDK.game.updateRoom({
+            roomId: roomCode,
+            isJoinable,
+            inviteParams: { roomId: roomCode },
+          });
         }
       } catch {
         // ignore
@@ -299,10 +311,34 @@ class PlatformAdapter {
     }
   }
 
-  public hideInviteButton(): void {
+  public hideInviteButton(keepRoomCode?: string): void {
     if (__BUILD_PLATFORM__ !== 'poki') {
       try {
-        window.CrazyGames?.SDK?.game?.hideInviteButton?.();
+        if (!this.sdkActive) return;
+        if (keepRoomCode && window.CrazyGames?.SDK?.game?.updateRoom) {
+          window.CrazyGames.SDK.game.updateRoom({
+            roomId: keepRoomCode,
+            isJoinable: false,
+            inviteParams: { roomId: keepRoomCode },
+          });
+        } else {
+          window.CrazyGames?.SDK?.game?.leftRoom?.();
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  public registerJoinRoomListener(onJoinRoom: (roomCode: string) => void): void {
+    if (__BUILD_PLATFORM__ !== 'poki') {
+      try {
+        window.CrazyGames?.SDK?.game?.addJoinRoomListener?.((params) => {
+          const code = params?.roomId || params?.room;
+          if (code && code.trim().length >= 4) {
+            onJoinRoom(code.trim().toUpperCase());
+          }
+        });
       } catch {
         // ignore
       }
@@ -366,9 +402,12 @@ class PlatformAdapter {
 
     if (__BUILD_PLATFORM__ !== 'poki') {
       try {
-        const cgRoom = window.CrazyGames?.SDK?.game?.getInviteParam?.('roomId');
-        if (cgRoom && cgRoom.trim().length >= 4) {
-          return cgRoom.trim().toUpperCase();
+        const initInvite =
+          window.CrazyGames?.SDK?.game?.inviteParams?.roomId ||
+          window.CrazyGames?.SDK?.game?.inviteParams?.room ||
+          window.CrazyGames?.SDK?.game?.getInviteParam?.('roomId');
+        if (initInvite && initInvite.trim().length >= 4) {
+          return initInvite.trim().toUpperCase();
         }
       } catch {
         // ignore

@@ -43,6 +43,16 @@ export class UIManager {
       }
     );
 
+    PlatformSDK.registerJoinRoomListener((joinCode) => {
+      if (this.engine.state) {
+        PlatformSDK.gameplayStop();
+        this.showHomeHub();
+      }
+      this.hubTab = 'coop';
+      CoopManager.joinRoomByCode(joinCode);
+      this.showHomeHub();
+    });
+
     const urlRoom = CoopManager.consumeUrlRoomParam();
     if (urlRoom) {
       this.hubTab = 'coop';
@@ -141,10 +151,13 @@ export class UIManager {
     this.hudRoot = null;
     this.engine.state = null;
 
-    if (this.hubTab !== 'coop' || !CoopManager.lobby) {
+    if (!CoopManager.lobby) {
       PlatformSDK.hideInviteButton();
     } else {
-      PlatformSDK.showInviteButton(CoopManager.lobby.roomCode);
+      PlatformSDK.showInviteButton(
+        CoopManager.lobby.roomCode,
+        !CoopManager.lobby.inGame && CoopManager.lobby.members.length < 4
+      );
     }
 
     const save = SaveManager.get();
@@ -838,7 +851,7 @@ export class UIManager {
     this.pauseOpen = false;
     this.armoryTab = 'guns';
     this.modalRoot.innerHTML = '';
-    PlatformSDK.hideInviteButton();
+    PlatformSDK.hideInviteButton(CoopManager.lobby?.roomCode);
     if (this.engine.input.usingTouch && this.isFullscreenActive()) {
       const orient = screen.orientation as ScreenOrientation & {
         lock?: (mode: string) => Promise<void>;

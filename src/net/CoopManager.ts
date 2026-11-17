@@ -342,7 +342,7 @@ class CoopNetworkManager {
         if (msg.type === 'start_game') {
           this.lobby = msg.lobby;
           this.lobby.inGame = true;
-          PlatformSDK.hideInviteButton();
+          PlatformSDK.hideInviteButton(this.lobby.roomCode);
           this.onMatchStartCb?.(msg.stageId, msg.mode, msg.lobby);
           return;
         }
@@ -393,7 +393,7 @@ class CoopNetworkManager {
   public launchHostMatch(): void {
     if (this.role !== 'host' || !this.lobby) return;
     this.lobby.inGame = true;
-    PlatformSDK.hideInviteButton();
+    PlatformSDK.hideInviteButton(this.lobby.roomCode);
     const pkt: CoopNetMessage = {
       type: 'start_game',
       stageId: this.lobby.stageId,
@@ -416,6 +416,10 @@ class CoopNetworkManager {
 
   public broadcastLobby(): void {
     if (this.role !== 'host' || !this.lobby) return;
+    PlatformSDK.showInviteButton(
+      this.lobby.roomCode,
+      !this.lobby.inGame && this.lobby.members.length < 4
+    );
     this.broadcastToClients({ type: 'lobby_state', lobby: this.lobby });
   }
 
