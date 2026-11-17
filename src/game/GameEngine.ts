@@ -19,6 +19,7 @@ import { GameMode, InRunPerkDef, PowerUpType, Rect, StageDef } from '../types';
 import {
   DropItem,
   RunSnapshot,
+  RuntimeRoom,
   RuntimeStation,
   ZombieEntity,
   ZombieKind,
@@ -302,6 +303,8 @@ export class GameEngine {
         ...w,
         planks: pStats.maxPlanks,
         maxPlanks: pStats.maxPlanks,
+        armorPlanks: 0,
+        fortifyProgress: 0,
         attackCooldown: 0,
       })),
       doors: stage.doors.map((d) => ({
@@ -637,6 +640,10 @@ export class GameEngine {
   public getUnlockedExtraRoomsCount(): number {
     if (!this.state) return 0;
     return Math.max(0, this.state.rooms.filter((r) => r.unlocked).length - 1);
+  }
+
+  public getSectorDamageMult(): number {
+    return 1 + this.getUnlockedExtraRoomsCount() * 0.1;
   }
 
   public getEffectiveGunCost(weaponId: string): number {
@@ -1006,7 +1013,7 @@ export class GameEngine {
       SoundFX.fanfare();
     } else {
       // demolisher: 向四周发射 4 颗集束高爆雷并震退近身丧尸
-      const gDmg = 280 * s.modifiers.damageMult * pStats.grenadeDamageMult;
+      const gDmg = 280 * s.modifiers.damageMult * pStats.grenadeDamageMult * this.getSectorDamageMult();
       for (let k = 0; k < 4; k++) {
         const ang = p.angle + (k * Math.PI) / 2;
         const gData = {
@@ -1070,7 +1077,7 @@ export class GameEngine {
       fuse: 1.05,
       maxFuse: 1.05,
       spinAngle: p.angle,
-      damage: 320 * s.modifiers.damageMult * grenMult,
+      damage: 320 * s.modifiers.damageMult * grenMult * this.getSectorDamageMult(),
       radius: 175,
     };
     s.grenadesThrown.push(gData);
@@ -2024,11 +2031,12 @@ export class GameEngine {
     if (!z.targetWindowId) return false;
     const win = this.state!.windows.find((w) => w.id === z.targetWindowId);
     if (!win) return false;
-    // 木板尚未被拆光时，自动射击与哨戒炮不会隔着封窗提前把室外破门僵尸打死！
-    if (win.planks > 0) return false;
+    const room = this.state!.rooms.find((r) => r.id === win.roomId);
+    if (!room?.unlocked) return false;
+    // 允许手机自动瞄准与哨戒炮透过已解锁房间的窗户射击洞口，主动清剿窗外逼近及扒窗的丧尸！
     const wcx = win.x + win.w / 2;
     const wcy = win.y + win.h / 2;
-    return Math.hypot(z.x - wcx, z.y - wcy) <= z.radius + 64;
+    return Math.hypot(z.x - wcx, z.y - wcy) <= z.radius + 260;
   }
 
   private findNearestTarget(x: number, y: number, maxRange: number): ZombieEntity | null {
@@ -2042,7 +2050,8 @@ export class GameEngine {
       if (Math.abs(dx) > maxRange || Math.abs(dy) > maxRange) continue;
       const d = Math.hypot(dx, dy);
       if (d > maxRange) continue;
-      const score = z.kind === 'thief' ? d * 0.55 : z.insideBuilding ? d * 0.78 : d * 1.15;
+      // 优先集火盗宝怪与已破窗入室的丧尸，室内安全时顺畅朝窗外倾泻火力
+      const score = z.kind === 'thief' ? d * 0.52 : z.insideBuilding ? d * 0.68 : d * 1.12;
       // 先判断分数是否优于当前最优目标，再执行昂贵的墙壁穿刺射线检测（减少 ~90% 射线开销！）
       if (score >= bestScore) continue;
       if (!this.isZombieTargetableForAutoAim(z)) continue;
@@ -2096,6 +2105,7 @@ export class GameEngine {
     const baseDmg =
       def.damage *
       s.modifiers.damageMult *
+      this.getSectorDamageMult() *
       lowHpMult *
       (wep.evolved ? 1.58 : 1) *
       (isCrit ? s.modifiers.critDamageMult : 1);
@@ -2359,6 +2369,13 @@ export class GameEngine {
 
     if (door.paidAmount >= door.cost) {
       door.paidAmount = door.cost;
+      const newlyUnlockedRooms: RuntimeRoom[] = [];
+      for (const rid of [door.unlockRoomId, door.roomA, door.roomB]) {
+        const rObj = s.rooms.find((r) => r.id === rid);
+        if (rObj && !rObj.unlocked && !newlyUnlockedRooms.includes(rObj)) {
+          newlyUnlockedRooms.push(rObj);
+        }
+      }
       const room = s.rooms.find((r) => r.id === door.unlockRoomId);
       if (room) room.unlocked = true;
       const roomAObj = s.rooms.find((r) => r.id === door.roomA);
@@ -2379,13 +2396,21 @@ export class GameEngine {
       s.mapRevision += 1;
       this.rebuildWalkableMask();
       this.rebuildFlowField();
+      for (const newRoom of newlyUnlockedRooms) {
+        this.spawnRoomBreachLoot(newRoom, door.cost);
+      }
       SaveManager.addDailyProgress('doors', 1);
       SoundFX.fanfare();
       PlatformSDK.happyTime();
-      const bText = I18n.t('bannerDoorOpen', { name: I18n.roomOrDoorName(door.unlockRoomId, door.label) });
-      this.showBanner(bText, 2.2);
+      const extraRooms = this.getUnlockedExtraRoomsCount();
+      const bText = I18n.t('bannerDoorBreach', {
+        name: I18n.roomOrDoorName(door.unlockRoomId, door.label),
+        dmg: extraRooms * 10,
+        bonus: extraRooms * 50,
+      });
+      this.showBanner(bText, 3.6);
       if (s.isCoop && CoopManager.role === 'host') {
-        CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bText, dur: 2.2 });
+        CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bText, dur: 3.6 });
       }
     } else {
       const left = door.cost - door.paidAmount;
@@ -2406,6 +2431,115 @@ export class GameEngine {
     }
   }
 
+  private spawnRoomBreachLoot(room: RuntimeRoom, doorCost: number): void {
+    const s = this.state!;
+    const rect0 = room.rects[0];
+    const baseCandidates = [
+      room.labelPos,
+      rect0 ? { x: rect0.x + rect0.w / 2, y: rect0.y + rect0.h / 2 } : room.labelPos,
+    ];
+    const offsets = [
+      [0, 0],
+      [0, 42],
+      [0, -42],
+      [46, 0],
+      [-46, 0],
+      [44, 40],
+      [-44, 40],
+      [44, -40],
+      [-44, -40],
+      [0, 76],
+      [76, 0],
+      [-76, 0],
+    ];
+
+    let spotX = room.labelPos.x;
+    let spotY = room.labelPos.y;
+    let found = false;
+    for (const base of baseCandidates) {
+      if (found) break;
+      for (const [ox, oy] of offsets) {
+        const cx = base.x + ox;
+        const cy = base.y + oy;
+        const inRoom = room.rects.some(
+          (r) => cx >= r.x + 36 && cx <= r.x + r.w - 36 && cy >= r.y + 36 && cy <= r.y + r.h - 36
+        );
+        if (!inRoom) continue;
+        if (this.findBlockingWallOrLockedDoor(cx, cy, 26)) continue;
+        if (s.stations.some((st) => Math.hypot(st.x - cx, st.y - cy) < 56)) continue;
+        if (s.barrels.some((b) => Math.hypot(b.x - cx, b.y - cy) < 46)) continue;
+        const hitsProp = s.props.some((pr) => {
+          const { ew, eh } = this.getEffectivePropDims(pr);
+          return this.circleIntersectsRect(cx, cy, 24, { x: pr.x - ew / 2, y: pr.y - eh / 2, w: ew, h: eh });
+        });
+        if (hitsProp) continue;
+        spotX = cx;
+        spotY = cy;
+        found = true;
+        break;
+      }
+    }
+
+    // 1. 免费破门战术遗物空投箱
+    s.chests.push({
+      id: this.nextEntityId++,
+      x: spotX,
+      y: spotY,
+      roomId: room.id,
+      progress: 0,
+      bobPhase: Math.random() * Math.PI * 2,
+    });
+
+    // 2. 破门战利品赏金返还（约返还 40% 开门资金，保底 $160）+ 高额战地经验球
+    const cashRefund = Math.max(160, Math.round((doorCost * 0.4) / 10) * 10);
+    const halfCashA = Math.round(cashRefund * 0.55);
+    const halfCashB = Math.max(20, cashRefund - halfCashA);
+    s.drops.push(
+      {
+        id: this.nextEntityId++,
+        kind: 'cash',
+        value: halfCashA,
+        x: spotX - 28,
+        y: spotY + 18,
+        life: 60,
+        bobPhase: 0.4,
+      },
+      {
+        id: this.nextEntityId++,
+        kind: 'cash',
+        value: halfCashB,
+        x: spotX + 28,
+        y: spotY + 18,
+        life: 60,
+        bobPhase: 2.1,
+      },
+      {
+        id: this.nextEntityId++,
+        kind: 'xp',
+        value: 75,
+        x: spotX,
+        y: spotY - 26,
+        life: 60,
+        bobPhase: 3.7,
+      }
+    );
+
+    this.spawnHitSparks(spotX, spotY, '#fde047', 12);
+    const lootTxt = I18n.t('ftBreachLoot');
+    this.spawnFloatingText(spotX, spotY - 34, lootTxt, '#fde047', 1.2);
+    if (s.isCoop && CoopManager.role === 'host') {
+      CoopManager.broadcastToClients({
+        type: 'evt_fx',
+        kind: 'floating',
+        x: spotX,
+        y: spotY - 34,
+        text: lootTxt,
+        color: '#fde047',
+        scale: 1.2,
+      });
+    }
+  }
+
   private updateInteractions(dt: number): void {
     const s = this.state!;
     const p = s.player;
@@ -2416,40 +2550,73 @@ export class GameEngine {
     const pStats = SaveManager.getEffectivePlayerStats();
     const maxPaidRepairs = 6 * s.squadCount;
 
-    // 1. 自动修窗（若僵尸正骑跨在空窗台上翻窗而入，需先击退/消灭再封钉木板，杜绝把僵尸卡进木板里！）
+    // 1. 自动修窗 + 满木板后可花 $80 升级【⚡合金电击装甲窗】（双倍耐久 + 1.8倍抗拆 + 扒窗高压电击反伤！）
     let repairingAny = false;
     for (const win of s.windows) {
       const room = s.rooms.find((r) => r.id === win.roomId);
-      if (!room?.unlocked || win.planks >= win.maxPlanks) continue;
+      if (!room?.unlocked) {
+        win.fortifyProgress = 0;
+        continue;
+      }
       const cx = win.x + win.w / 2;
       const cy = win.y + win.h / 2;
-      if (Math.hypot(p.x - cx, p.y - cy) <= 82) {
-        if (win.planks === 0 && this.hasZombieVaultingWindow(win)) {
-          continue;
+      const near = Math.hypot(p.x - cx, p.y - cy) <= 82;
+
+      if (win.planks < win.maxPlanks) {
+        win.fortifyProgress = 0;
+        if (near && !repairingAny) {
+          if (win.planks === 0 && win.armorPlanks <= 0 && this.hasZombieVaultingWindow(win)) {
+            continue;
+          }
+          repairingAny = true;
+          p.repairProgress += dt * 1.35 * pStats.repairSpeedMultiplier;
+          if (p.repairProgress >= 1) {
+            p.repairProgress = 0;
+            win.planks += 1;
+            this.pushOutdoorZombiesOutsidePlanks(win);
+            SoundFX.repair();
+            SaveManager.addDailyProgress('repairs', 1);
+            if (s.repairsPaidThisWave < maxPaidRepairs) {
+              s.repairsPaidThisWave += 1;
+              const cashBonus = 8;
+              s.cash += cashBonus;
+              this.spawnFloatingText(cx, cy - 16, I18n.t('ftRepairCash', { n: cashBonus }), '#fde047', 1);
+            } else {
+              this.spawnFloatingText(cx, cy - 16, I18n.t('ftRepaired'), '#cbd5e1', 0.9);
+            }
+            if (s.modifiers.repairHealRatio > 0 && s.repairsPaidThisWave <= maxPaidRepairs) {
+              const heal = Math.round(p.maxHp * s.modifiers.repairHealRatio);
+              p.hp = Math.min(p.maxHp, p.hp + heal);
+              this.spawnFloatingText(p.x, p.y - 26, `+${heal} HP`, '#4ade80', 1);
+            }
+          }
         }
-        repairingAny = true;
-        p.repairProgress += dt * 1.35 * pStats.repairSpeedMultiplier;
-        if (p.repairProgress >= 1) {
-          p.repairProgress = 0;
-          win.planks += 1;
+      } else if (win.armorPlanks <= 0 && near && !repairingAny && s.cash >= 80) {
+        win.fortifyProgress += dt * 1.15 * pStats.repairSpeedMultiplier;
+        if (win.fortifyProgress >= 1) {
+          win.fortifyProgress = 0;
+          s.cash -= 80;
+          win.armorPlanks = win.maxPlanks;
           this.pushOutdoorZombiesOutsidePlanks(win);
-          SoundFX.repair();
-          SaveManager.addDailyProgress('repairs', 1);
-          if (s.repairsPaidThisWave < maxPaidRepairs) {
-            s.repairsPaidThisWave += 1;
-            const cashBonus = 8;
-            s.cash += cashBonus;
-            this.spawnFloatingText(cx, cy - 16, I18n.t('ftRepairCash', { n: cashBonus }), '#fde047', 1);
-          } else {
-            this.spawnFloatingText(cx, cy - 16, I18n.t('ftRepaired'), '#cbd5e1', 0.9);
-          }
-          if (s.modifiers.repairHealRatio > 0 && s.repairsPaidThisWave <= maxPaidRepairs) {
-            const heal = Math.round(p.maxHp * s.modifiers.repairHealRatio);
-            p.hp = Math.min(p.maxHp, p.hp + heal);
-            this.spawnFloatingText(p.x, p.y - 26, `+${heal} HP`, '#4ade80', 1);
+          SoundFX.fanfare();
+          SaveManager.addDailyProgress('repairs', 2);
+          this.spawnHitSparks(cx, cy, '#38bdf8', 10);
+          const ftMsg = I18n.t('ftWinFortified');
+          this.spawnFloatingText(cx, cy - 20, ftMsg, '#38bdf8', 1.12);
+          if (s.isCoop && CoopManager.role === 'host') {
+            CoopManager.broadcastToClients({
+              type: 'evt_fx',
+              kind: 'floating',
+              x: cx,
+              y: cy - 20,
+              text: ftMsg,
+              color: '#38bdf8',
+              scale: 1.12,
+            });
           }
         }
-        break;
+      } else {
+        win.fortifyProgress = Math.max(0, win.fortifyProgress - dt * 2.5);
       }
     }
     if (!repairingAny) p.repairProgress = 0;
@@ -2708,7 +2875,7 @@ export class GameEngine {
         if (proj > 0 && proj < 255) {
           const perp = Math.abs(dx * -by + dy * bx);
           if (perp < z.radius + 12) {
-            this.damageZombie(z, 280 * dt, 0, 0, false, true, false);
+            this.damageZombie(z, 280 * this.getSectorDamageMult() * dt, 0, 0, false, true, false);
           }
         }
       }
@@ -2717,6 +2884,7 @@ export class GameEngine {
 
   private updateTurretsAndDog(dt: number): void {
     const s = this.state!;
+    const sectorMult = this.getSectorDamageMult();
     for (let i = s.turrets.length - 1; i >= 0; i--) {
       const t = s.turrets[i];
       t.life -= dt;
@@ -2739,7 +2907,7 @@ export class GameEngine {
             vx: Math.cos(t.angle) * 950,
             vy: Math.sin(t.angle) * 950,
             radius: 3.8,
-            damage: 25 * s.modifiers.damageMult,
+            damage: 25 * s.modifiers.damageMult * sectorMult,
             knockback: 45,
             pierceLeft: 0,
             bouncesLeft: 0,
@@ -2772,7 +2940,7 @@ export class GameEngine {
         ty = nearZombie.y;
         if (Math.hypot(nearZombie.x - d.x, nearZombie.y - d.y) <= nearZombie.radius + 22 && d.biteCd <= 0) {
           d.biteCd = 0.45;
-          this.damageZombie(nearZombie, 48 * s.modifiers.damageMult, 0, 0, false, false, true);
+          this.damageZombie(nearZombie, 48 * s.modifiers.damageMult * sectorMult, 0, 0, false, false, true);
         }
       } else if (nearDrop) {
         tx = nearDrop.x;
@@ -2839,7 +3007,7 @@ export class GameEngine {
       for (const barrel of s.barrels) {
         if (!barrel.alive) continue;
         if (Math.hypot(b.x - barrel.x, b.y - barrel.y) <= 24 + b.radius) {
-          this.explodeAt(barrel.x, barrel.y, 185, 250 * s.modifiers.damageMult);
+          this.explodeAt(barrel.x, barrel.y, 185, 250 * s.modifiers.damageMult * this.getSectorDamageMult());
           barrel.alive = false;
           barrel.respawnWaves = 2;
           s.bullets.splice(i, 1);
@@ -2868,15 +3036,10 @@ export class GameEngine {
           }
 
           const ang = Math.atan2(b.vy, b.vx);
-          const plankCover =
-            !z.insideBuilding &&
-            z.targetWindowId &&
-            (s.windows.find((w) => w.id === z.targetWindowId)?.planks ?? 0) > 0
-              ? 0.6
-              : 1;
+          // 透过窗户射击孔向外倾泻火力享受 100% 满额伤害！
           this.damageZombie(
             z,
-            b.damage * plankCover,
+            b.damage,
             Math.cos(ang) * b.knockback,
             Math.sin(ang) * b.knockback,
             b.isCrit,
@@ -3337,7 +3500,7 @@ export class GameEngine {
         const approachMult =
           outDist > 160 ? Math.min(1.58, 1 + (outDist - 160) / 360) : 1;
 
-        if (win.planks > 0) {
+        if (win.planks > 0 || win.armorPlanks > 0) {
           const tx = wf.wcx + wf.outX * standOutDist + wf.latX * slotOffset;
           const ty = wf.wcy + wf.outY * standOutDist + wf.latY * slotOffset;
           const dx = tx - z.x;
@@ -3358,7 +3521,7 @@ export class GameEngine {
               false
             );
           } else {
-            // 紧贴外窗台外侧挥爪拆木板（绝不把半截身体穿模戳进完好木板内！）
+            // 紧贴外窗台外侧挥爪拆窗（绝不把半截身体穿模戳进完好防线内！）
             z.x += dx * Math.min(1, dt * 8);
             z.y += dy * Math.min(1, dt * 8);
             z.vx = 0;
@@ -3377,44 +3540,74 @@ export class GameEngine {
                   : z.kind === 'runner' || z.kind === 'thief'
                     ? Math.max(0.36, 0.7 - s.wave * 0.03)
                     : Math.max(0.44, 0.94 - s.wave * 0.04);
-              z.attackCd = baseTearCd;
               z.attackAnim = 1.0;
               z.slashAngle = Math.atan2(wf.inY, wf.inX);
+              const tearAmt = z.kind === 'boss' ? 2 : 1;
 
-              const prevPlanks = win.planks;
-              win.planks = Math.max(0, win.planks - (z.kind === 'boss' ? 2 : 1));
-              this.spawnHitSparks(wf.wcx, wf.wcy, '#fbbf24', 4);
-
-              // 高压电击钢网：仅提供非致命麻痹减速与拆窗迟滞，绝不让僵尸撞窗暴毙！
-              if (s.electricFortifyWaves > 0) {
-                z.attackCd *= 1.85;
-                z.stunTimer = 0.42;
-                z.slowTimer = 2.8;
-                z.hitFlash = 0.1;
-                if (z.hp > z.maxHp * 0.45) {
-                  z.hp = Math.max(z.maxHp * 0.45, z.hp - z.maxHp * 0.08);
+              // 优先消耗外层 $80【⚡合金电击装甲层】：1.8倍抗拆延迟 + 真实高压电击反伤（可直接电毙残血丧尸！）
+              if (win.armorPlanks > 0) {
+                z.attackCd = baseTearCd * 1.8;
+                win.armorPlanks = Math.max(0, win.armorPlanks - tearAmt);
+                this.spawnHitSparks(wf.wcx, wf.wcy, '#38bdf8', 7);
+                const pts = [
+                  { x: wf.wcx, y: wf.wcy },
+                  {
+                    x: (wf.wcx + z.x) * 0.5 + (Math.random() - 0.5) * 16,
+                    y: (wf.wcy + z.y) * 0.5 + (Math.random() - 0.5) * 16,
+                  },
+                  { x: z.x, y: z.y },
+                ];
+                if (s.lightnings.length >= 18) s.lightnings.shift();
+                s.lightnings.push({ points: pts, color: '#38bdf8', life: 0.2 });
+                if (s.isCoop && CoopManager.role === 'host' && !CoopManager.isCongested()) {
+                  CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'lightning', points: pts, color: '#38bdf8' });
                 }
-                s.lightnings.push({
-                  points: [
-                    { x: wf.wcx, y: wf.wcy },
-                    { x: z.x, y: z.y },
-                  ],
-                  color: '#38bdf8',
-                  life: 0.18,
-                });
-              }
+                const shockDmg = Math.round((26 + s.wave * 3.5) * this.getSectorDamageMult());
+                this.damageZombie(z, shockDmg, wf.outX * 42, wf.outY * 42, false, false, false);
+                if (z.hp > 0 && !this.deadZombieIds.has(z.id)) {
+                  z.slowTimer = Math.max(z.slowTimer, 2.6);
+                  z.stunTimer = Math.max(z.stunTimer, 0.24);
+                  this.resolveOutdoorZombieObstacles(z, win, false);
+                } else {
+                  continue;
+                }
+              } else {
+                z.attackCd = baseTearCd;
+                const prevPlanks = win.planks;
+                win.planks = Math.max(0, win.planks - tearAmt);
+                this.spawnHitSparks(wf.wcx, wf.wcy, '#fbbf24', 4);
 
-              // 震荡铆钉板：仅在最后一块木板被彻底拆破时触发非致命气浪击退与眩晕！
-              if (prevPlanks > 0 && win.planks === 0 && s.relicIds.includes('explosive_planks')) {
-                this.spawnHitSparks(wf.wcx, wf.wcy, '#38bdf8', 14);
-                this.spawnFloatingText(wf.wcx, wf.wcy - 18, I18n.t('ftShockPlank'), '#38bdf8', 1.2);
-                for (const oz of s.zombies) {
-                  if (!oz.insideBuilding && Math.hypot(oz.x - wf.wcx, oz.y - wf.wcy) <= 130) {
-                    oz.x += wf.outX * 78;
-                    oz.y += wf.outY * 78;
-                    oz.stunTimer = Math.max(oz.stunTimer, 1.5);
-                    oz.slowTimer = Math.max(oz.slowTimer, 3.0);
-                    this.resolveOutdoorZombieObstacles(oz, win, true);
+                // 全图支援高压电击钢网：非致命麻痹减速与拆窗迟滞
+                if (s.electricFortifyWaves > 0) {
+                  z.attackCd *= 1.85;
+                  z.stunTimer = 0.42;
+                  z.slowTimer = 2.8;
+                  z.hitFlash = 0.1;
+                  if (z.hp > z.maxHp * 0.45) {
+                    z.hp = Math.max(z.maxHp * 0.45, z.hp - z.maxHp * 0.08);
+                  }
+                  s.lightnings.push({
+                    points: [
+                      { x: wf.wcx, y: wf.wcy },
+                      { x: z.x, y: z.y },
+                    ],
+                    color: '#38bdf8',
+                    life: 0.18,
+                  });
+                }
+
+                // 震荡铆钉板：仅在最后一块木板被彻底拆破时触发非致命气浪击退与眩晕！
+                if (prevPlanks > 0 && win.planks === 0 && s.relicIds.includes('explosive_planks')) {
+                  this.spawnHitSparks(wf.wcx, wf.wcy, '#38bdf8', 14);
+                  this.spawnFloatingText(wf.wcx, wf.wcy - 18, I18n.t('ftShockPlank'), '#38bdf8', 1.2);
+                  for (const oz of s.zombies) {
+                    if (!oz.insideBuilding && Math.hypot(oz.x - wf.wcx, oz.y - wf.wcy) <= 130) {
+                      oz.x += wf.outX * 78;
+                      oz.y += wf.outY * 78;
+                      oz.stunTimer = Math.max(oz.stunTimer, 1.5);
+                      oz.slowTimer = Math.max(oz.slowTimer, 3.0);
+                      this.resolveOutdoorZombieObstacles(oz, win, true);
+                    }
                   }
                 }
               }
@@ -4013,6 +4206,19 @@ export class GameEngine {
     if (pStats.grenadeWaveSupply && clearedWave % 2 === 0) {
       s.player.grenades += 1;
     }
+    const extraRooms = this.getUnlockedExtraRoomsCount();
+    if (extraRooms > 0 && !(s.mode === 'standard' && clearedWave >= s.maxWaves)) {
+      const stipend = extraRooms * 50;
+      s.cash += stipend;
+      SoundFX.coin();
+      this.spawnFloatingText(
+        s.player.x,
+        s.player.y - 54,
+        I18n.t('ftSectorStipend', { n: stipend }),
+        '#fde047',
+        1.22
+      );
+    }
     SaveManager.addDailyProgress('waves', 1);
     if (s.mode === 'endless' && clearedWave >= 8) {
       SaveManager.addDailyProgress('clear', 1);
@@ -4338,7 +4544,7 @@ export class GameEngine {
       if (!d.unlocked) this.pushCircleOutOfRect(z, d);
     }
     for (const win of s.windows) {
-      if (allowOpenWindowPass && win.id === targetWin.id && win.planks <= 0) {
+      if (allowOpenWindowPass && win.id === targetWin.id && win.planks <= 0 && win.armorPlanks <= 0) {
         continue;
       }
       this.pushCircleOutOfRect(z, win);
@@ -4614,29 +4820,54 @@ export class GameEngine {
     }
     const pStats = SaveManager.getEffectivePlayerStats();
 
-    // 1. 客机修窗：读条完成后向房主发送修补请求
+    // 1. 客机修窗 + $80 升级【⚡合金电击装甲窗】
     let repairingAny = false;
     for (const win of s.windows) {
       const room = s.rooms.find((r) => r.id === win.roomId);
-      if (!room?.unlocked || win.planks >= win.maxPlanks) continue;
+      if (!room?.unlocked) {
+        win.fortifyProgress = 0;
+        continue;
+      }
       const cx = win.x + win.w / 2;
       const cy = win.y + win.h / 2;
-      if (Math.hypot(p.x - cx, p.y - cy) <= 82) {
-        if (win.planks === 0 && this.hasZombieVaultingWindow(win)) continue;
-        repairingAny = true;
-        p.repairProgress += dt * 1.35 * pStats.repairSpeedMultiplier;
-        if (p.repairProgress >= 1) {
-          p.repairProgress = 0;
-          win.planks = Math.min(win.maxPlanks, win.planks + 1);
-          SoundFX.repair();
-          SaveManager.addDailyProgress('repairs', 1);
+      const near = Math.hypot(p.x - cx, p.y - cy) <= 82;
+
+      if (win.planks < win.maxPlanks) {
+        win.fortifyProgress = 0;
+        if (near && !repairingAny) {
+          if (win.planks === 0 && win.armorPlanks <= 0 && this.hasZombieVaultingWindow(win)) continue;
+          repairingAny = true;
+          p.repairProgress += dt * 1.35 * pStats.repairSpeedMultiplier;
+          if (p.repairProgress >= 1) {
+            p.repairProgress = 0;
+            win.planks = Math.min(win.maxPlanks, win.planks + 1);
+            SoundFX.repair();
+            SaveManager.addDailyProgress('repairs', 1);
+            CoopManager.sendToHost({
+              type: 'cmd_repair_win',
+              ownerId: CoopManager.myPeerId,
+              winId: win.id,
+            });
+          }
+        }
+      } else if (win.armorPlanks <= 0 && near && !repairingAny && s.cash >= 80) {
+        win.fortifyProgress += dt * 1.15 * pStats.repairSpeedMultiplier;
+        if (win.fortifyProgress >= 1) {
+          win.fortifyProgress = 0;
+          s.cash -= 80;
+          win.armorPlanks = win.maxPlanks;
+          SoundFX.fanfare();
+          SaveManager.addDailyProgress('repairs', 2);
+          this.spawnHitSparks(cx, cy, '#38bdf8', 10);
+          this.spawnFloatingText(cx, cy - 20, I18n.t('ftWinFortified'), '#38bdf8', 1.12);
           CoopManager.sendToHost({
-            type: 'cmd_repair_win',
+            type: 'cmd_fortify_win',
             ownerId: CoopManager.myPeerId,
             winId: win.id,
           });
         }
-        break;
+      } else {
+        win.fortifyProgress = Math.max(0, win.fortifyProgress - dt * 2.5);
       }
     }
     if (!repairingAny) p.repairProgress = 0;
@@ -4904,7 +5135,7 @@ export class GameEngine {
       electricFortifyWaves: s.electricFortifyWaves,
       powerUpTimers: { ...s.powerUpTimers },
       squadCount: s.squadCount,
-      wins: s.windows.map((w) => w.planks),
+      wins: s.windows.map((w) => (w.planks & 15) | ((w.armorPlanks & 15) << 4)),
       doors: s.doors.map((d) => [d.unlocked ? 1 : 0, d.paidAmount, Math.round(d.progress * 100)]),
       stations: s.stations.map((st) => [
         st.used ? 1 : 0,
@@ -5000,8 +5231,12 @@ export class GameEngine {
       }
     }
 
-    w.wins.forEach((planks, idx) => {
-      if (s.windows[idx]) s.windows[idx].planks = planks;
+    w.wins.forEach((packed, idx) => {
+      const win = s.windows[idx];
+      if (win) {
+        win.planks = packed & 15;
+        win.armorPlanks = (packed >> 4) & 15;
+      }
     });
 
     let doorOpened = false;
@@ -5387,6 +5622,35 @@ export class GameEngine {
             cashDelta: 8,
           });
         }
+      }
+      return;
+    }
+
+    if (msg.type === 'cmd_fortify_win' && CoopManager.role === 'host') {
+      const win = s.windows.find((w) => w.id === msg.winId);
+      if (win) {
+        win.planks = win.maxPlanks;
+        win.armorPlanks = win.maxPlanks;
+        win.fortifyProgress = 0;
+        this.pushOutdoorZombiesOutsidePlanks(win);
+        SoundFX.fanfare();
+        const cx = win.x + win.w / 2;
+        const cy = win.y + win.h / 2;
+        this.spawnHitSparks(cx, cy, '#38bdf8', 10);
+        const ftMsg = I18n.t('ftWinFortified');
+        this.spawnFloatingText(cx, cy - 20, ftMsg, '#38bdf8', 1.12);
+        CoopManager.broadcastToClients(
+          {
+            type: 'evt_fx',
+            kind: 'floating',
+            x: cx,
+            y: cy - 20,
+            text: ftMsg,
+            color: '#38bdf8',
+            scale: 1.12,
+          },
+          msg.ownerId
+        );
       }
       return;
     }

@@ -2011,10 +2011,74 @@ export class CartoonRenderer {
         }
       }
 
-      if (win.planks === 0) {
+      // 外层 $80【⚡合金电击装甲窗】金属电弧护栏与蓝色铆钉视觉表现
+      if (win.armorPlanks > 0) {
+        const pulse = 0.58 + Math.sin(performance.now() * 0.012) * 0.28;
+        ctx.strokeStyle = `rgba(56, 189, 248, ${pulse})`;
+        ctx.lineWidth = 2.2;
+        ctx.strokeRect(win.x + 1, win.y + 1, win.w - 2, win.h - 2);
+
+        for (let i = 0; i < win.armorPlanks; i++) {
+          const ratio = (i + 0.5) / Math.max(1, win.maxPlanks);
+          if (win.orientation === 'horizontal') {
+            const cx = win.x + win.w / 2;
+            const cy = win.y + 4 + ratio * (win.h - 8);
+            const pw = win.w - 8;
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(cx - pw / 2, cy - 3.6, pw, 7.2);
+            ctx.fillStyle = '#38bdf8';
+            ctx.fillRect(cx - pw / 2 + 1, cy - 2.2, pw - 2, 4.4);
+            ctx.fillStyle = '#e0f2fe';
+            ctx.fillRect(cx - pw / 2 + 3, cy - 1, 4, 2);
+            ctx.fillRect(cx + pw / 2 - 7, cy - 1, 4, 2);
+          } else {
+            const cx = win.x + 4 + ratio * (win.w - 8);
+            const cy = win.y + win.h / 2;
+            const plen = win.h - 8;
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(cx - 3.6, cy - plen / 2, 7.2, plen);
+            ctx.fillStyle = '#38bdf8';
+            ctx.fillRect(cx - 2.2, cy - plen / 2 + 1, 4.4, plen - 2);
+            ctx.fillStyle = '#e0f2fe';
+            ctx.fillRect(cx - 1, cy - plen / 2 + 3, 2, 4);
+            ctx.fillRect(cx - 1, cy + plen / 2 - 7, 2, 4);
+          }
+        }
+      }
+
+      if (win.planks === 0 && win.armorPlanks <= 0) {
         const blink = 0.35 + Math.sin(performance.now() * 0.01) * 0.25;
         ctx.fillStyle = `rgba(239, 68, 68, ${blink})`;
         ctx.fillRect(win.x + 3, win.y + 3, win.w - 6, win.h - 6);
+      }
+
+      const wcx = win.x + win.w / 2;
+      const wcy = win.y + win.h / 2;
+      if (
+        win.planks >= win.maxPlanks &&
+        win.armorPlanks <= 0 &&
+        !state.player.downed &&
+        !state.player.spectating &&
+        Math.hypot(state.player.x - wcx, state.player.y - wcy) <= 105
+      ) {
+        const room = state.rooms.find((r) => r.id === win.roomId);
+        if (room?.unlocked) {
+          if (win.fortifyProgress > 0) {
+            ctx.beginPath();
+            ctx.arc(wcx, wcy, 27, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * win.fortifyProgress);
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 5;
+            ctx.stroke();
+          }
+          this.drawCachedLabel(
+            ctx,
+            I18n.t('winUpgradePrompt'),
+            wcx,
+            wcy - 22,
+            state.cash >= 80 ? '#7dd3fc' : '#94a3b8',
+            10.5
+          );
+        }
       }
       ctx.restore();
     }

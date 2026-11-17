@@ -224,6 +224,7 @@ export type CoopNetMessage =
   | { type: 'cmd_fire'; ownerId: string; bullets: SerializedBullet[]; sfxKey: string; evolved: boolean }
   | { type: 'cmd_grenade'; ownerId: string; g: SerializedGrenade }
   | { type: 'cmd_repair_win'; ownerId: string; winId: string }
+  | { type: 'cmd_fortify_win'; ownerId: string; winId: string }
   | { type: 'cmd_fund_door'; ownerId: string; doorId: string; amount: number }
   | { type: 'cmd_use_station'; ownerId: string; stationId: string }
   | { type: 'cmd_open_chest'; ownerId: string; chestId: number }

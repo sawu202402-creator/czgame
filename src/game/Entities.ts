@@ -23,6 +23,8 @@ export interface RuntimeRoom extends RoomConfig {
 export interface RuntimeWindow extends WindowConfig {
   planks: number;
   maxPlanks: number;
+  armorPlanks: number;
+  fortifyProgress: number;
   attackCooldown: number;
 }
 

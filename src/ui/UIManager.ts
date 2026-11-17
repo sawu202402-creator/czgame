@@ -1215,6 +1215,7 @@ export class UIManager {
             </div>
             <span class="lv-chip" id="hud-lv-chip">Lv.1</span>
             <span class="armor-chip" id="hud-armor-chip" style="display:none"><img class="hud-mini-ico" src="./assets/item_armor.png" alt="" /><em id="hud-armor-val">0</em></span>
+            <span class="sector-chip" id="hud-sector-chip" style="display:none"></span>
           </div>
           <div class="relic-row" id="hud-relics"></div>
           <div class="hud-squad-list" id="hud-squad-list"></div>
@@ -1951,6 +1952,23 @@ export class UIManager {
         armorText.textContent = `${armorVal}`;
       } else {
         chip.style.display = 'none';
+      }
+    });
+
+    const extraRooms = this.engine.getUnlockedExtraRoomsCount();
+    const sectorKey = `${I18n.lang}:${extraRooms}`;
+    setIfChanged('sectorBuff', sectorKey, () => {
+      const sChip = this.hudRoot!.querySelector('#hud-sector-chip') as HTMLElement;
+      if (extraRooms > 0) {
+        sChip.style.display = 'inline-flex';
+        sChip.textContent = I18n.t('hudSectorBuff', { n: extraRooms, dmg: extraRooms * 10 });
+        sChip.title = I18n.t('hudSectorTip', {
+          n: extraRooms,
+          dmg: extraRooms * 10,
+          bonus: extraRooms * 50,
+        });
+      } else {
+        sChip.style.display = 'none';
       }
     });
 
