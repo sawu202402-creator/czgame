@@ -474,6 +474,15 @@ button {
 .stage-card.is-cleared {
   border-color: #15803d;
 }
+.stage-card.is-locked {
+  opacity: 0.82;
+}
+.stage-card.is-locked:hover {
+  transform: none;
+}
+.stage-card.is-locked .stage-visual-strip {
+  filter: grayscale(0.55) brightness(0.86);
+}
 
 .stage-visual-strip {
   position: relative;

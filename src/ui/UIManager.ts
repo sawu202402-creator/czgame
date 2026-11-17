@@ -266,11 +266,16 @@ export class UIManager {
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-stage-go]').forEach((btn) => {
       btn.onclick = async () => {
+        if (btn.disabled) return;
+        const idx = STAGES.findIndex((item) => item.id === btn.dataset.stageGo);
+        if (idx < 0) return;
+        const unlocked = idx === 0 || save.clearedStages.includes(STAGES[idx - 1].id);
+        if (!unlocked) return;
         if (CoopManager.role !== 'offline') {
           CoopManager.disconnect();
         }
         btn.disabled = true;
-        const st = STAGES.find((item) => item.id === btn.dataset.stageGo)!;
+        const st = STAGES[idx];
         await PlatformSDK.showCommercialBreak();
         this.startStageRun(st, this.selectedMode);
       };
@@ -370,10 +375,12 @@ export class UIManager {
         tags: baseMeta.tags,
       });
 
+      const unlocked = idx === 0 || save.clearedStages.includes(STAGES[idx - 1].id);
       const cleared = save.clearedStages.includes(st.id);
       const bestWave = save.endlessBestWave[st.id] || 0;
-      const statusText =
-        this.selectedMode === 'standard'
+      const statusText = !unlocked
+        ? I18n.t('stageLockedBadge')
+        : this.selectedMode === 'standard'
           ? cleared
             ? I18n.t('stageCleared')
             : locMeta.diffLabel
@@ -386,9 +393,19 @@ export class UIManager {
         .join('');
 
       const tagsHtml = locMeta.tags.map((tag) => `<span class="stage-tag">${tag}</span>`).join('');
+      const btnClass = !unlocked
+        ? 'btn-disabled'
+        : this.selectedMode === 'standard'
+          ? 'btn-green'
+          : 'btn-purple';
+      const btnLabel = !unlocked
+        ? I18n.t('stageLockedBtn', { n: idx })
+        : this.selectedMode === 'standard'
+          ? I18n.t('deployStandard')
+          : I18n.t('deployEndless');
 
       return `
-        <article class="stage-card ${cleared ? 'is-cleared' : ''}">
+        <article class="stage-card ${cleared ? 'is-cleared' : ''} ${!unlocked ? 'is-locked' : ''}">
           <div class="stage-visual-strip ${baseMeta.theme}">
             <div class="stage-vis-top">
               <span class="stage-sector">${locMeta.sector}</span>
@@ -403,8 +420,8 @@ export class UIManager {
             <h3>${locMeta.name}</h3>
             <p>${locMeta.subtitle}</p>
             <div class="stage-tags">${tagsHtml}</div>
-            <button class="btn-cartoon ${this.selectedMode === 'standard' ? 'btn-green' : 'btn-purple'} stage-go-btn" data-stage-go="${st.id}">
-              ${this.selectedMode === 'standard' ? I18n.t('deployStandard') : I18n.t('deployEndless')}
+            <button class="btn-cartoon ${btnClass} stage-go-btn" data-stage-go="${st.id}" ${!unlocked ? 'disabled' : ''}>
+              ${btnLabel}
             </button>
           </div>
         </article>
@@ -667,7 +684,9 @@ export class UIManager {
       `;
     }).join('');
 
-    const stageOptionsHtml = STAGES.map((st) => {
+    const hostSave = SaveManager.get();
+    const stageOptionsHtml = STAGES.map((st, idx) => {
+      const unlocked = idx === 0 || hostSave.clearedStages.includes(STAGES[idx - 1].id);
       const sTitle = I18n.stageMeta(st.id, {
         name: st.name,
         subtitle: st.subtitle,
@@ -675,7 +694,7 @@ export class UIManager {
         diffLabel: '',
         tags: [],
       }).name;
-      return `<option value="${st.id}" ${st.id === lobby.stageId ? 'selected' : ''}>${sTitle}</option>`;
+      return `<option value="${st.id}" ${st.id === lobby.stageId ? 'selected' : ''} ${!unlocked ? 'disabled' : ''}>${!unlocked ? '🔒 ' : ''}${sTitle}</option>`;
     }).join('');
 
     const hostControls = isHost
