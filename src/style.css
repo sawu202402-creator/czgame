@@ -1487,12 +1487,12 @@ button {
   transform: scale(0.91);
 }
 
-/* 弧位 1（174° 左下）：主副武器切换 */
+/* 弧位 1（181° 左下平齐）：主副武器切换 */
 .arc-pos-1 {
-  width: 50px;
-  height: 50px;
-  right: 114px;
-  bottom: 31px;
+  width: 46px;
+  height: 46px;
+  right: 123px;
+  bottom: 18px;
   border-color: rgba(125, 211, 252, 0.62);
 }
 .arc-pos-1.evolved {
@@ -1507,12 +1507,37 @@ button {
   border-color: rgba(148, 163, 184, 0.45);
 }
 
-/* 弧位 2（135° 左上）：高爆手雷技能 */
+/* 弧位 4（150° 中左）：特工职业主动技能 [F] */
+.arc-pos-4.moba-skill-btn {
+  width: 47px;
+  height: 47px;
+  right: 109px;
+  bottom: 70px;
+  border-color: #38bdf8;
+  background: radial-gradient(circle at 35% 30%, rgba(14, 116, 144, 0.94), rgba(15, 23, 42, 0.96));
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.38), 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.arc-pos-4.moba-skill-btn:disabled {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.arc-pos-4.moba-skill-btn:disabled .moba-arc-img {
+  opacity: 0.36;
+  filter: grayscale(0.6);
+}
+.arc-pos-4.moba-skill-btn:disabled .moba-arc-badge {
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+/* 弧位 2（119° 左上）：高爆手雷技能 */
 .arc-pos-2.moba-gren-btn {
-  width: 52px;
-  height: 52px;
-  right: 86px;
-  bottom: 86px;
+  width: 48px;
+  height: 48px;
+  right: 71px;
+  bottom: 109px;
   border-color: rgba(253, 186, 116, 0.78);
   background: radial-gradient(circle at 35% 30%, rgba(234, 88, 12, 0.92), rgba(124, 45, 18, 0.95));
 }
@@ -1530,12 +1555,12 @@ button {
   border-color: rgba(148, 163, 184, 0.35);
 }
 
-/* 弧位 3（96° 正上）：战术换弹 */
+/* 弧位 3（88° 正上）：战术换弹 */
 .arc-pos-3.moba-reload-btn {
-  width: 48px;
-  height: 48px;
-  right: 32px;
-  bottom: 115px;
+  width: 46px;
+  height: 46px;
+  right: 21px;
+  bottom: 123px;
   border-color: rgba(148, 163, 184, 0.52);
 }
 .arc-pos-3.moba-reload-btn.need-reload {
@@ -2334,22 +2359,28 @@ button {
     line-height: 13px;
   }
   .arc-pos-1 {
-    width: 44px;
-    height: 44px;
-    right: 98px;
-    bottom: 25px;
+    width: 41px;
+    height: 41px;
+    right: 106px;
+    bottom: 14px;
+  }
+  .arc-pos-4.moba-skill-btn {
+    width: 42px;
+    height: 42px;
+    right: 93px;
+    bottom: 60px;
   }
   .arc-pos-2.moba-gren-btn {
-    width: 46px;
-    height: 46px;
-    right: 73px;
-    bottom: 73px;
+    width: 42px;
+    height: 42px;
+    right: 60px;
+    bottom: 93px;
   }
   .arc-pos-3.moba-reload-btn {
-    width: 44px;
-    height: 44px;
-    right: 25px;
-    bottom: 98px;
+    width: 41px;
+    height: 41px;
+    right: 15px;
+    bottom: 106px;
   }
   .moba-arc-img {
     width: 24px;
@@ -2769,6 +2800,547 @@ button {
 .hub-lang-select:hover,
 .hub-lang-select:focus {
   border-color: #38bdf8;
+}
+
+.nav-dot.hot-dot {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.85);
+}
+
+.hub-sec-heading {
+  font-size: 14px;
+  font-weight: 900;
+  color: #fde047;
+  margin: 4px 2px 0 2px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.65);
+}
+
+/* ==================== 4大特工专精流派卡片 ==================== */
+.class-spec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 11px;
+}
+
+.class-spec-card {
+  background: rgba(15, 23, 42, 0.94);
+  border: 2px solid rgba(100, 116, 139, 0.48);
+  border-radius: 14px;
+  padding: 12px;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 9px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.42);
+}
+.class-spec-card.active {
+  border-color: var(--cls-accent, #4ade80);
+  box-shadow: 0 0 16px rgba(74, 222, 128, 0.25), 0 6px 16px rgba(0, 0, 0, 0.46);
+  background: linear-gradient(160deg, rgba(30, 41, 59, 0.96), rgba(9, 14, 23, 0.96));
+}
+.class-spec-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.class-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  background: rgba(9, 14, 23, 0.85);
+  border: 1.5px solid var(--cls-accent, #38bdf8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.class-icon-box img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.class-spec-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.class-spec-meta strong {
+  font-size: 14.5px;
+  color: #ffffff;
+}
+.class-passive-line {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #4ade80;
+}
+.class-skill-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(9, 14, 23, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  padding: 7px 9px;
+}
+.class-skill-box img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.class-skill-name {
+  font-size: 12px;
+  color: #fde047;
+  margin-bottom: 2px;
+}
+.class-skill-desc {
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+
+/* ==================== 七日签到与每日悬赏大厅 ==================== */
+.daily-hub-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1040px;
+  margin: 0 auto;
+  width: 100%;
+}
+.daily-panel {
+  background: rgba(15, 23, 42, 0.93);
+  border: 2px solid rgba(71, 85, 105, 0.6);
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+.daily-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.daily-panel-head h3 {
+  margin: 0;
+  font-size: 15.5px;
+  color: #fde047;
+}
+.daily-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.streak-pill {
+  background: rgba(180, 83, 9, 0.42);
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  color: #fef08a;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.signin-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 720px) {
+  .signin-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.signin-day-card {
+  position: relative;
+  background: rgba(9, 14, 23, 0.85);
+  border: 1.5px solid rgba(100, 116, 139, 0.45);
+  border-radius: 12px;
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.signin-day-card.today {
+  border-color: #fde047;
+  background: linear-gradient(180deg, rgba(161, 98, 7, 0.42), rgba(15, 23, 42, 0.95));
+  box-shadow: 0 0 14px rgba(250, 204, 21, 0.35);
+}
+.signin-day-card.done {
+  border-color: rgba(74, 222, 128, 0.55);
+  opacity: 0.78;
+}
+.signin-day-num {
+  font-size: 11px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+.signin-day-card.today .signin-day-num {
+  color: #fef08a;
+}
+.signin-day-ico {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+.signin-day-gold {
+  font-size: 13px;
+  color: #fde047;
+}
+.signin-day-xp {
+  font-size: 10.5px;
+  color: #7dd3fc;
+  font-weight: 700;
+}
+.signin-check {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  color: #4ade80;
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.daily-mission-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 9px;
+}
+.daily-mission-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(9, 14, 23, 0.82);
+  border: 1.5px solid rgba(100, 116, 139, 0.4);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.daily-mission-card.ready {
+  border-color: #fde047;
+  background: rgba(30, 41, 59, 0.92);
+}
+.daily-mission-card.claimed {
+  opacity: 0.66;
+}
+.dm-sprite {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.dm-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.dm-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+.dm-prog-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dm-prog-bar {
+  flex: 1;
+  height: 7px;
+  background: #1e293b;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.dm-prog-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #4ade80);
+  border-radius: 999px;
+}
+.dm-prog-txt {
+  font-size: 11px;
+  font-weight: 800;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+.dm-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.dm-rew-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #fde047;
+}
+.dm-rew-pills small {
+  color: #7dd3fc;
+  font-size: 11px;
+}
+
+.daily-grand-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: linear-gradient(90deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.95));
+  border: 1.5px dashed rgba(251, 191, 36, 0.55);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.daily-grand-bar.ready {
+  border-style: solid;
+  border-color: #fde047;
+  box-shadow: 0 0 16px rgba(250, 204, 21, 0.3);
+}
+.daily-grand-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.daily-grand-left img {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+}
+.daily-grand-left strong {
+  font-size: 13.5px;
+  color: #fef08a;
+}
+.daily-grand-left p {
+  margin: 2px 0 0 0;
+  font-size: 11.5px;
+  color: #cbd5e1;
+}
+.daily-grand-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.grand-rew-tag {
+  font-size: 12.5px;
+  font-weight: 900;
+  color: #fde047;
+}
+
+/* ==================== 天梯排行榜 ==================== */
+.lb-hub-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  max-width: 980px;
+  margin: 0 auto;
+  width: 100%;
+}
+.lb-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.93);
+  border: 1.5px solid rgba(56, 189, 248, 0.4);
+  border-radius: 14px;
+  padding: 10px 14px;
+  color: #f8fafc;
+}
+.lb-my-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-size: 12.5px;
+}
+.lb-my-summary strong {
+  color: #fde047;
+}
+.lb-chase-line {
+  font-size: 11.5px;
+  color: #86efac;
+}
+.lb-table-card {
+  background: rgba(15, 23, 42, 0.94);
+  border: 2px solid rgba(71, 85, 105, 0.65);
+  border-radius: 16px;
+  overflow: hidden;
+  color: #f8fafc;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.48);
+}
+.lb-head-row,
+.lb-row {
+  display: grid;
+  grid-template-columns: 64px 1.6fr 1fr 1fr 88px;
+  align-items: center;
+  padding: 8px 14px;
+  gap: 8px;
+}
+.lb-head-row {
+  background: rgba(9, 14, 23, 0.92);
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 900;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+}
+.lb-body-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.lb-row {
+  font-size: 13px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.45);
+}
+.lb-row.top-1 {
+  background: rgba(161, 98, 7, 0.2);
+}
+.lb-row.is-friend {
+  background: rgba(14, 116, 144, 0.24);
+}
+.lb-row.is-me {
+  background: linear-gradient(90deg, rgba(202, 138, 4, 0.36), rgba(21, 128, 61, 0.32));
+  border-top: 1.5px solid #fde047;
+  border-bottom: 1.5px solid #fde047;
+}
+.lb-col-rank {
+  font-weight: 900;
+  font-size: 14px;
+  color: #fde047;
+}
+.lb-col-agent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.lb-avatar {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  background: rgba(9, 14, 23, 0.75);
+  border-radius: 8px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.lb-agent-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.lb-agent-info strong {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb-badge {
+  font-size: 10.5px;
+  color: #93c5fd;
+  font-weight: 700;
+}
+.lb-col-wave {
+  font-weight: 900;
+  color: #4ade80;
+}
+.lb-col-kills {
+  font-weight: 800;
+  color: #f8fafc;
+}
+.lb-col-clear {
+  font-weight: 800;
+  color: #cbd5e1;
+}
+
+/* ==================== 单人模式战地升级肉鸽三选一弹窗 ==================== */
+.perk-modal-box {
+  max-width: 620px;
+  width: 94%;
+}
+.perk-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+@media (max-width: 580px) {
+  .perk-choice-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.perk-choice-card {
+  position: relative;
+  cursor: pointer;
+  background: linear-gradient(180deg, #1e293b, #0f172a);
+  border: 2.5px solid var(--perk-color, #38bdf8);
+  border-radius: 14px;
+  padding: 14px 10px 12px 10px;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 7px;
+  box-shadow: 0 5px 0 #020617, 0 8px 18px rgba(0, 0, 0, 0.45);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.perk-choice-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.38), 0 7px 0 #020617;
+}
+.perk-choice-card:active {
+  transform: translateY(1px);
+}
+.perk-key-badge {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 10.5px;
+  font-weight: 900;
+  color: #fde047;
+  background: rgba(9, 14, 23, 0.8);
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(253, 224, 71, 0.4);
+}
+.perk-ico-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(9, 14, 23, 0.85);
+  border: 1.5px solid var(--perk-color, #38bdf8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.perk-ico-wrap img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+.perk-card-title {
+  font-size: 14.5px;
+  color: #fde047;
+}
+.perk-card-desc {
+  margin: 0;
+  font-size: 11.5px;
+  color: #cbd5e1;
+  line-height: 1.38;
 }
 
 

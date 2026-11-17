@@ -66,6 +66,7 @@ async function bootstrap() {
     onTogglePauseMenu: () => ui.togglePauseMenu(),
     onPlayerDowned: (canRevive) => ui.showReviveModal(canRevive),
     onRunFinished: (victory, snapshot) => ui.showSettlementModal(victory, snapshot),
+    onShowPerkChoices: (choices, level, onPick) => ui.showPerkChoiceModal(choices, level, onPick),
   });
   engineRef = engine;
 

@@ -1,4 +1,5 @@
 import {
+  AgentClassId,
   DoorConfig,
   GameMode,
   InteriorPropConfig,
@@ -260,6 +261,11 @@ export interface RunSnapshot {
   squadCount: number;
   remotePlayers: RemotePlayerState[];
   lastPrimaryWeaponId: string | null;
+  classId: AgentClassId;
+  skillCooldown: number;
+  skillMaxCooldown: number;
+  lastRecordedKills: number;
+  lastRecordedWave: number;
   player: {
     x: number;
     y: number;

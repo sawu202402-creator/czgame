@@ -14,7 +14,8 @@ import {
   getCoopScaling,
 } from '../net/CoopProtocol';
 import { PlatformSDK } from '../platform/PlatformSDK';
-import { GameMode, PowerUpType, Rect, StageDef } from '../types';
+import { getAgentClassDef, getLocalizedClassText } from '../meta/ProgressionDefs';
+import { GameMode, InRunPerkDef, PowerUpType, Rect, StageDef } from '../types';
 import {
   DropItem,
   RunSnapshot,
@@ -30,6 +31,7 @@ export interface EngineCallbacks {
   onTogglePauseMenu: () => void;
   onPlayerDowned: (canRevive: boolean) => void;
   onRunFinished: (victory: boolean, snapshot: RunSnapshot) => void;
+  onShowPerkChoices: (choices: InRunPerkDef[], level: number, onPick: (perk: InRunPerkDef) => void) => void;
 }
 
 export class GameEngine {
@@ -100,6 +102,9 @@ export class GameEngine {
       },
       () => {
         this.quickBuyPrimaryAmmo();
+      },
+      () => {
+        this.useActiveClassSkill();
       }
     );
   }
@@ -226,6 +231,11 @@ export class GameEngine {
       squadCount,
       remotePlayers,
       lastPrimaryWeaponId: null,
+      classId: pStats.classId,
+      skillCooldown: 0,
+      skillMaxCooldown: pStats.skillCooldown,
+      lastRecordedKills: 0,
+      lastRecordedWave: 1,
       player: {
         x: stage.playerSpawn.x + myOff.dx,
         y: stage.playerSpawn.y + myOff.dy,
@@ -233,7 +243,7 @@ export class GameEngine {
         angle: 0,
         hp: pStats.maxHp,
         maxHp: pStats.maxHp,
-        armor: 0,
+        armor: pStats.startArmor,
         maxArmor: 100,
         downed: false,
         spectating: false,
@@ -250,7 +260,7 @@ export class GameEngine {
           },
         ],
         activeSlot: 0,
-        grenades: 2,
+        grenades: pStats.startGrenades,
         grenadeCooldown: 0,
         reloadTimer: 0,
         reloadDuration: 0,
@@ -271,14 +281,20 @@ export class GameEngine {
       mapRevision: 1,
       modifiers: {
         damageMult: pStats.agentDamageBonus,
+        fireRateMult: pStats.fireRateMultiplier,
         reloadMult: pStats.reloadMultiplier,
         magMult: 1,
         moveSpeedMult: 1,
         extraPierce: 0,
         extraPellets: 0,
-        critChance: 0.05,
-        repairHealRatio: 0,
-        cashMult: 1,
+        critChance: pStats.critChance,
+        critDamageMult: pStats.critDamageMult,
+        repairHealRatio: pStats.repairHealRatio,
+        cashMult: pStats.cashBonusMult,
+        killRefillChance: 0,
+        cryoShotChance: 0,
+        electricShotChance: 0,
+        lowHpDamageBonus: 0,
       },
       relicIds: [],
       rooms: stage.rooms.map((r) => ({ ...r, unlocked: r.initiallyUnlocked })),
@@ -623,6 +639,24 @@ export class GameEngine {
     return Math.max(0, this.state.rooms.filter((r) => r.unlocked).length - 1);
   }
 
+  public getEffectiveGunCost(weaponId: string): number {
+    const def = WEAPONS[weaponId];
+    if (def.shopCost <= 0) return 0;
+    return Math.max(50, Math.round((def.shopCost * SaveManager.getEffectivePlayerStats().gunShopCostMult) / 5) * 5);
+  }
+
+  public getEffectiveAmmoCost(weaponId: string): number {
+    const def = WEAPONS[weaponId];
+    if (def.ammoCost <= 0) return 0;
+    return Math.max(20, Math.round((def.ammoCost * SaveManager.getEffectivePlayerStats().ammoCostMult) / 5) * 5);
+  }
+
+  public getMaxReserve(weaponId: string, evolved: boolean): number {
+    const def = WEAPONS[weaponId];
+    if (def.maxReserve < 0) return -1;
+    return Math.round(def.maxReserve * (evolved ? 2 : 1) * SaveManager.getEffectivePlayerStats().reserveAmmoMult);
+  }
+
   public buyOrRefillWeaponFromShop(weaponId: string, forceRefill = false): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
@@ -632,17 +666,19 @@ export class GameEngine {
       return { ok: false, msg: I18n.t('msgNeedRooms', { n: def.unlockRoomsRequired }) };
     }
 
+    const gunCost = this.getEffectiveGunCost(weaponId);
+    const ammoCost = this.getEffectiveAmmoCost(weaponId);
     const wTitle = (evo: boolean) => (evo ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name));
 
     const ownedIdx = s.player.weapons.findIndex((w) => w.defId === weaponId);
     if (ownedIdx >= 0) {
       const w = s.player.weapons[ownedIdx];
       if (w.tempWavesLeft !== undefined && !forceRefill) {
-        if (s.cash < def.shopCost) return { ok: false, msg: I18n.t('msgNoCash', { c: def.shopCost }) };
-        s.cash -= def.shopCost;
+        if (s.cash < gunCost) return { ok: false, msg: I18n.t('msgNoCash', { c: gunCost }) };
+        s.cash -= gunCost;
         delete w.tempWavesLeft;
         w.mag = this.getMaxMag(weaponId, w.evolved);
-        if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+        if (def.maxReserve > 0) w.reserve = this.getMaxReserve(weaponId, w.evolved);
         s.player.activeSlot = ownedIdx;
         if (def.maxReserve > 0) s.lastPrimaryWeaponId = weaponId;
         s.player.reloadTimer = 0;
@@ -666,7 +702,7 @@ export class GameEngine {
         s.player.weaponSwapTimer = 0.32;
         return { ok: true, msg: I18n.t('msgInfAmmo') };
       }
-      const maxRes = def.maxReserve * (w.evolved ? 2 : 1);
+      const maxRes = this.getMaxReserve(weaponId, w.evolved);
       if (w.reserve >= maxRes && w.mag >= this.getMaxMag(weaponId, w.evolved)) {
         s.player.activeSlot = ownedIdx;
         s.lastPrimaryWeaponId = weaponId;
@@ -674,8 +710,8 @@ export class GameEngine {
         s.player.weaponSwapTimer = 0.32;
         return { ok: true, msg: I18n.t('msgAmmoFull') };
       }
-      if (s.cash < def.ammoCost) return { ok: false, msg: I18n.t('msgNoCash', { c: def.ammoCost }) };
-      s.cash -= def.ammoCost;
+      if (s.cash < ammoCost) return { ok: false, msg: I18n.t('msgNoCash', { c: ammoCost }) };
+      s.cash -= ammoCost;
       w.mag = this.getMaxMag(weaponId, w.evolved);
       w.reserve = maxRes;
       s.player.activeSlot = ownedIdx;
@@ -686,8 +722,8 @@ export class GameEngine {
       return { ok: true, msg: I18n.t('msgRefilled', { name: wTitle(w.evolved) }) };
     }
 
-    if (s.cash < def.shopCost) return { ok: false, msg: I18n.t('msgNoCash', { c: def.shopCost }) };
-    s.cash -= def.shopCost;
+    if (s.cash < gunCost) return { ok: false, msg: I18n.t('msgNoCash', { c: gunCost }) };
+    s.cash -= gunCost;
     this.giveOrRefillWeapon(weaponId, false);
     SoundFX.fanfare();
     return { ok: true, msg: I18n.t('msgBoughtGun', { name: wTitle(false) }) };
@@ -712,20 +748,21 @@ export class GameEngine {
     if (activeDef.maxReserve > 0) {
       s.lastPrimaryWeaponId = activeWep.defId;
       const maxMag = this.getMaxMag(activeWep.defId, activeWep.evolved);
-      const maxRes = activeDef.maxReserve * (activeWep.evolved ? 2 : 1);
+      const maxRes = this.getMaxReserve(activeWep.defId, activeWep.evolved);
       if (activeWep.mag >= maxMag && activeWep.reserve >= maxRes) {
         return null;
       }
       const totalCur = activeWep.mag + activeWep.reserve;
       const totalMax = maxMag + maxRes;
+      const cost = this.getEffectiveAmmoCost(activeWep.defId);
       return {
         defId: activeWep.defId,
         evolved: activeWep.evolved,
-        cost: activeDef.ammoCost,
+        cost,
         isEmpty: totalCur <= 0,
         needsReequip: false,
         urgent: activeWep.reserve <= 0 || totalCur <= Math.ceil(totalMax * 0.28),
-        canAfford: s.cash >= activeDef.ammoCost,
+        canAfford: s.cash >= cost,
       };
     }
 
@@ -749,7 +786,7 @@ export class GameEngine {
         const d = WEAPONS[w.defId];
         if (d.maxReserve > 0) {
           const maxM = this.getMaxMag(w.defId, w.evolved);
-          const maxR = d.maxReserve * (w.evolved ? 2 : 1);
+          const maxR = this.getMaxReserve(w.defId, w.evolved);
           if (w.mag < maxM || w.reserve < maxR) {
             candidate = w;
             break;
@@ -759,21 +796,21 @@ export class GameEngine {
     }
     if (!candidate) return null;
 
-    const cDef = WEAPONS[candidate.defId];
     const cMaxMag = this.getMaxMag(candidate.defId, candidate.evolved);
-    const cMaxRes = cDef.maxReserve * (candidate.evolved ? 2 : 1);
+    const cMaxRes = this.getMaxReserve(candidate.defId, candidate.evolved);
     if (candidate.mag >= cMaxMag && candidate.reserve >= cMaxRes) {
       return null;
     }
     const cTotal = candidate.mag + candidate.reserve;
+    const cCost = this.getEffectiveAmmoCost(candidate.defId);
     return {
       defId: candidate.defId,
       evolved: candidate.evolved,
-      cost: cDef.ammoCost,
+      cost: cCost,
       isEmpty: cTotal <= 0,
       needsReequip: true,
       urgent: cTotal <= 0 || candidate.reserve <= 0,
-      canAfford: s.cash >= cDef.ammoCost,
+      canAfford: s.cash >= cCost,
     };
   }
 
@@ -798,7 +835,7 @@ export class GameEngine {
 
     s.cash -= target.cost;
     w.mag = this.getMaxMag(w.defId, w.evolved);
-    w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+    w.reserve = this.getMaxReserve(w.defId, w.evolved);
     s.player.activeSlot = wIdx;
     s.lastPrimaryWeaponId = w.defId;
     s.player.reloadTimer = 0;
@@ -827,8 +864,9 @@ export class GameEngine {
     s.cash -= cost;
     wep.evolved = true;
     wep.mag = this.getMaxMag(wep.defId, true);
-    if (def.maxReserve > 0) wep.reserve = def.maxReserve * 2;
+    if (def.maxReserve > 0) wep.reserve = this.getMaxReserve(wep.defId, true);
     s.player.weaponSwapTimer = 0.35;
+    SaveManager.addDailyProgress('evolve', 1, true);
     this.spawnFloatingText(s.player.x, s.player.y - 36, `⚡ ${sName}`, def.superColor, 1.3);
     SoundFX.fanfare();
     PlatformSDK.happyTime();
@@ -840,6 +878,7 @@ export class GameEngine {
   ): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
+    const pStats = SaveManager.getEffectivePlayerStats();
     if (item === 'armor') {
       if (s.player.armor >= s.player.maxArmor) return { ok: false, msg: I18n.t('msgArmorFull') };
       if (s.cash < 380) return { ok: false, msg: I18n.t('msgNoCash', { c: 380 }) };
@@ -868,10 +907,11 @@ export class GameEngine {
       s.cash -= 650;
       const tx = s.player.x + 25;
       const ty = s.player.y;
+      const tLife = Math.round(38 * pStats.turretDurationMultiplier);
       if (s.isCoop && CoopManager.role === 'client') {
-        CoopManager.sendToHost({ type: 'cmd_deploy_turret', ownerId: CoopManager.myPeerId, x: tx, y: ty, life: 38 });
+        CoopManager.sendToHost({ type: 'cmd_deploy_turret', ownerId: CoopManager.myPeerId, x: tx, y: ty, life: tLife });
       } else {
-        s.turrets.push({ x: tx, y: ty, angle: s.player.angle, fireCd: 0, life: 38 });
+        s.turrets.push({ x: tx, y: ty, angle: s.player.angle, fireCd: 0, life: tLife });
       }
       SoundFX.fanfare();
       return { ok: true, msg: I18n.t('msgTurretDeployed') };
@@ -881,10 +921,132 @@ export class GameEngine {
     for (const w of s.player.weapons) {
       const def = WEAPONS[w.defId];
       w.mag = this.getMaxMag(w.defId, w.evolved);
-      if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+      if (def.maxReserve > 0) w.reserve = this.getMaxReserve(w.defId, w.evolved);
     }
     SoundFX.reloadDone();
     return { ok: true, msg: I18n.t('msgAllAmmoFull') };
+  }
+
+  public useActiveClassSkill(): boolean {
+    const s = this.state;
+    if (!s || this.landscapePaused || s.waveState === 'ended') return false;
+    if (!s.isCoop && (this.paused || this.modalPaused)) return false;
+    const p = s.player;
+    if (p.downed || p.spectating || s.skillCooldown > 0) return false;
+
+    const pStats = SaveManager.getEffectivePlayerStats();
+    const cls = getAgentClassDef(s.classId);
+    const clsText = getLocalizedClassText(cls);
+    s.skillCooldown = s.skillMaxCooldown;
+    SaveManager.addDailyProgress('skills', 1);
+
+    if (s.classId === 'vanguard') {
+      s.powerUpTimers.overdrive = Math.max(s.powerUpTimers.overdrive, 5.5);
+      const activeWep = p.weapons[p.activeSlot];
+      activeWep.mag = this.getMaxMag(activeWep.defId, activeWep.evolved);
+      p.reloadTimer = 0;
+      SoundFX.fanfare();
+    } else if (s.classId === 'engineer') {
+      const tx = p.x + Math.cos(p.angle) * 26;
+      const ty = p.y + Math.sin(p.angle) * 26;
+      const tLife = Math.round(26 * pStats.turretDurationMultiplier);
+      if (s.isCoop && CoopManager.role === 'client') {
+        CoopManager.sendToHost({ type: 'cmd_deploy_turret', ownerId: CoopManager.myPeerId, x: tx, y: ty, life: tLife });
+      } else {
+        s.turrets.push({ x: tx, y: ty, angle: p.angle, fireCd: 0, life: tLife });
+      }
+      for (const win of s.windows) {
+        const rm = s.rooms.find((r) => r.id === win.roomId);
+        if (!rm?.unlocked || win.planks >= win.maxPlanks) continue;
+        if (Math.hypot(p.x - (win.x + win.w / 2), p.y - (win.y + win.h / 2)) <= 220) {
+          win.planks = Math.min(win.maxPlanks, win.planks + 2);
+          this.pushOutdoorZombiesOutsidePlanks(win);
+          if (s.isCoop && CoopManager.role === 'client') {
+            CoopManager.sendToHost({ type: 'cmd_repair_win', ownerId: CoopManager.myPeerId, winId: win.id });
+          }
+          break;
+        }
+      }
+      SoundFX.fanfare();
+    } else if (s.classId === 'medic') {
+      const heal = Math.round(p.maxHp * 0.45);
+      p.hp = Math.min(p.maxHp, p.hp + heal);
+      p.armor = Math.min(p.maxArmor, p.armor + 35);
+      p.invulnTimer = Math.max(p.invulnTimer, 1.5);
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        s.particles.push({
+          x: p.x + Math.cos(a) * 18,
+          y: p.y + Math.sin(a) * 18,
+          vx: Math.cos(a) * 110,
+          vy: Math.sin(a) * 110,
+          size: 5,
+          color: '#4ade80',
+          life: 0.45,
+          maxLife: 0.45,
+        });
+      }
+      if (s.isCoop) {
+        for (const rp of s.remotePlayers) {
+          if (rp.downed && !rp.spectating && Math.hypot(rp.x - p.x, rp.y - p.y) <= 150) {
+            if (CoopManager.role === 'host') {
+              this.advanceReviveOnHost(rp.peerId, CoopManager.myPeerId, s.localCallsign, 5);
+            } else {
+              CoopManager.sendToHost({
+                type: 'cmd_revive_tick',
+                reviverId: CoopManager.myPeerId,
+                reviverName: s.localCallsign,
+                targetId: rp.peerId,
+                dt: 5,
+              });
+            }
+          }
+        }
+      }
+      SoundFX.fanfare();
+    } else {
+      // demolisher: 向四周发射 4 颗集束高爆雷并震退近身丧尸
+      const gDmg = 280 * s.modifiers.damageMult * pStats.grenadeDamageMult;
+      for (let k = 0; k < 4; k++) {
+        const ang = p.angle + (k * Math.PI) / 2;
+        const gData = {
+          x: p.x + Math.cos(ang) * 18,
+          y: p.y + Math.sin(ang) * 18,
+          vx: Math.cos(ang) * 320,
+          vy: Math.sin(ang) * 320,
+          z: 16,
+          vz: 165,
+          fuse: 0.62,
+          maxFuse: 0.62,
+          spinAngle: ang,
+          damage: gDmg,
+          radius: 165,
+        };
+        s.grenadesThrown.push(gData);
+        if (s.isCoop && CoopManager.role === 'client') {
+          CoopManager.sendToHost({ type: 'cmd_grenade', ownerId: CoopManager.myPeerId, g: gData });
+        } else if (s.isCoop && CoopManager.role === 'host') {
+          CoopManager.broadcastToClients({ type: 'cmd_grenade', ownerId: CoopManager.myPeerId, g: gData });
+        }
+      }
+      if (!s.isCoop || CoopManager.role === 'host') {
+        for (const z of s.zombies) {
+          if (Math.hypot(z.x - p.x, z.y - p.y) <= 155) {
+            z.stunTimer = Math.max(z.stunTimer, 1.2);
+          }
+        }
+      }
+      SoundFX.explosion();
+    }
+
+    this.spawnFloatingText(
+      p.x,
+      p.y - 42,
+      I18n.t('ftSkillReady', { name: clsText.skillName }),
+      cls.color,
+      1.3
+    );
+    return true;
   }
 
   public throwGrenade(): void {
@@ -896,6 +1058,8 @@ export class GameEngine {
 
     p.grenades -= 1;
     p.grenadeCooldown = 0.65;
+    SaveManager.addDailyProgress('skills', 1);
+    const grenMult = SaveManager.getEffectivePlayerStats().grenadeDamageMult;
     const gData = {
       x: p.x + Math.cos(p.angle) * 20,
       y: p.y + Math.sin(p.angle) * 20,
@@ -906,7 +1070,7 @@ export class GameEngine {
       fuse: 1.05,
       maxFuse: 1.05,
       spinAngle: p.angle,
-      damage: 320 * s.modifiers.damageMult,
+      damage: 320 * s.modifiers.damageMult * grenMult,
       radius: 175,
     };
     s.grenadesThrown.push(gData);
@@ -1082,6 +1246,7 @@ export class GameEngine {
   public switchWeapon(slotIndex?: number): void {
     const s = this.state;
     if (!s || s.player.weapons.length < 2) return;
+    if (!s.isCoop && (this.paused || this.modalPaused)) return;
     const next = slotIndex !== undefined ? slotIndex : (s.player.activeSlot + 1) % s.player.weapons.length;
     if (next !== s.player.activeSlot && s.player.weapons[next]) {
       s.player.activeSlot = next;
@@ -1143,7 +1308,7 @@ export class GameEngine {
     for (const w of s.player.weapons) {
       const def = WEAPONS[w.defId];
       w.mag = this.getMaxMag(w.defId, w.evolved);
-      if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+      if (def.maxReserve > 0) w.reserve = this.getMaxReserve(w.defId, w.evolved);
     }
     for (const win of s.windows) {
       win.planks = win.maxPlanks;
@@ -1185,7 +1350,7 @@ export class GameEngine {
     for (const w of s.player.weapons) {
       const def = WEAPONS[w.defId];
       w.mag = this.getMaxMag(w.defId, w.evolved);
-      if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+      if (def.maxReserve > 0) w.reserve = this.getMaxReserve(w.defId, w.evolved);
     }
     if (s.isCoop && CoopManager.role === 'client') {
       CoopManager.sendToHost({
@@ -1262,6 +1427,7 @@ export class GameEngine {
     }
     if (s.hqSupportCooldown > 0) s.hqSupportCooldown -= dt;
     if (s.armoryAdCooldown > 0) s.armoryAdCooldown -= dt;
+    if (s.skillCooldown > 0) s.skillCooldown = Math.max(0, s.skillCooldown - dt);
     if (s.camera.shake > 0) s.camera.shake = Math.max(0, s.camera.shake - dt * 2.8);
 
     (Object.keys(s.powerUpTimers) as PowerUpType[]).forEach((k) => {
@@ -1394,6 +1560,7 @@ export class GameEngine {
         }
       } else if (s.zombies.length === 0) {
         if (s.electricFortifyWaves > 0) s.electricFortifyWaves -= 1;
+        this.onWaveSurvivedLocal(s.wave);
 
         // 波次清空时立刻拉起所有倒地/观战队友！
         if (s.isCoop) {
@@ -1470,6 +1637,8 @@ export class GameEngine {
           PlatformSDK.gameplayStop();
           PlatformSDK.happyTime();
           SaveManager.markStageCleared(s.stage.id);
+          SaveManager.addDailyProgress('clear', 1);
+          this.flushRunTelemetry(true);
           if (s.isCoop && CoopManager.role === 'host') {
             CoopManager.broadcastToClients({ type: 'evt_run_finished', victory: true });
           }
@@ -1904,7 +2073,11 @@ export class GameEngine {
     }
     if (p.fireCooldown > 0) return;
 
-    const rateMult = (overdrive ? 1.6 : 1) * (s.feverTimer > 0 ? 1.26 : 1) * (wep.evolved ? 1.16 : 1);
+    const rateMult =
+      s.modifiers.fireRateMult *
+      (overdrive ? 1.6 : 1) *
+      (s.feverTimer > 0 ? 1.26 : 1) *
+      (wep.evolved ? 1.16 : 1);
     p.fireCooldown = 1 / (def.fireRate * rateMult);
 
     if (!overdrive) {
@@ -1918,7 +2091,14 @@ export class GameEngine {
     const extraFrac = s.modifiers.extraPellets - extraFloor;
     const totalPellets = def.pellets + extraFloor + (Math.random() < extraFrac ? 1 : 0);
     const isCrit = Math.random() < s.modifiers.critChance;
-    const baseDmg = def.damage * s.modifiers.damageMult * (wep.evolved ? 1.58 : 1) * (isCrit ? 2 : 1);
+    const lowHpMult =
+      s.modifiers.lowHpDamageBonus > 0 && p.hp <= p.maxHp * 0.55 ? 1 + s.modifiers.lowHpDamageBonus : 1;
+    const baseDmg =
+      def.damage *
+      s.modifiers.damageMult *
+      lowHpMult *
+      (wep.evolved ? 1.58 : 1) *
+      (isCrit ? s.modifiers.critDamageMult : 1);
 
     const isAkimbo = Boolean(def.akimboOnEvolve && wep.evolved);
     p.akimboAlt = !p.akimboAlt;
@@ -1976,8 +2156,12 @@ export class GameEngine {
         color: isCrit ? '#fde047' : wep.evolved ? def.superColor : def.color,
         isCrit,
         flame: Boolean(def.flame || (def.id === 'shotgun' && wep.evolved) || s.relicIds.includes('dragon_oil')),
-        cryo: Boolean(def.cryo),
-        electric: Boolean(def.electric || ((def.id === 'smg' || def.id === 'sniper') && wep.evolved)),
+        cryo: Boolean(def.cryo || (s.modifiers.cryoShotChance > 0 && Math.random() < s.modifiers.cryoShotChance)),
+        electric: Boolean(
+          def.electric ||
+            ((def.id === 'smg' || def.id === 'sniper') && wep.evolved) ||
+            (s.modifiers.electricShotChance > 0 && Math.random() < s.modifiers.electricShotChance)
+        ),
         laser: Boolean(def.laser),
         sawblade: Boolean(def.sawblade),
         life: def.flame || def.cryo ? 0.44 : def.sawblade ? 2.4 : 1.4,
@@ -2071,7 +2255,8 @@ export class GameEngine {
     p.weaponSwapTimer = 0.3;
     p.fireCooldown = Math.max(p.fireCooldown, 0.25);
     SoundFX.emptyClip();
-    this.showBanner(I18n.t('bannerOutOfAmmo', { name: wLabel, cost: def.ammoCost }), 4.0);
+    const effAmmoCost = this.getEffectiveAmmoCost(def.id);
+    this.showBanner(I18n.t('bannerOutOfAmmo', { name: wLabel, cost: effAmmoCost }), 4.0);
     this.spawnFloatingText(p.x, p.y - 38, I18n.t('ftOutOfAmmo', { name: wLabel }), '#fde047', 1.28);
   }
 
@@ -2194,6 +2379,7 @@ export class GameEngine {
       s.mapRevision += 1;
       this.rebuildWalkableMask();
       this.rebuildFlowField();
+      SaveManager.addDailyProgress('doors', 1);
       SoundFX.fanfare();
       PlatformSDK.happyTime();
       const bText = I18n.t('bannerDoorOpen', { name: I18n.roomOrDoorName(door.unlockRoomId, door.label) });
@@ -2248,6 +2434,7 @@ export class GameEngine {
           win.planks += 1;
           this.pushOutdoorZombiesOutsidePlanks(win);
           SoundFX.repair();
+          SaveManager.addDailyProgress('repairs', 1);
           if (s.repairsPaidThisWave < maxPaidRepairs) {
             s.repairsPaidThisWave += 1;
             const cashBonus = 8;
@@ -2340,7 +2527,7 @@ export class GameEngine {
     if (st.type === 'ammo_box') {
       const def = WEAPONS[activeWep.defId];
       if (def.maxReserve < 0) return false;
-      return activeWep.reserve < def.maxReserve * (activeWep.evolved ? 2 : 1);
+      return activeWep.reserve < this.getMaxReserve(activeWep.defId, activeWep.evolved);
     }
     return true;
   }
@@ -2383,9 +2570,8 @@ export class GameEngine {
 
     if (st.type === 'ammo_box') {
       const wep = p.weapons[p.activeSlot];
-      const def = WEAPONS[wep.defId];
       wep.mag = this.getMaxMag(wep.defId, wep.evolved);
-      wep.reserve = def.maxReserve * (wep.evolved ? 2 : 1);
+      wep.reserve = this.getMaxReserve(wep.defId, wep.evolved);
       SoundFX.reloadDone();
       this.spawnFloatingText(st.x, st.y - 34, I18n.t('ftAmmoFull'), '#4ade80', 1.15);
     } else if (st.type === 'pack_a_punch') {
@@ -2394,7 +2580,8 @@ export class GameEngine {
       const sName = I18n.wSuperName(def.id, def.superName);
       wep.evolved = true;
       wep.mag = this.getMaxMag(wep.defId, true);
-      if (def.maxReserve > 0) wep.reserve = def.maxReserve * 2;
+      if (def.maxReserve > 0) wep.reserve = this.getMaxReserve(wep.defId, true);
+      SaveManager.addDailyProgress('evolve', 1, true);
       SoundFX.fanfare();
       PlatformSDK.happyTime();
       this.spawnFloatingText(st.x, st.y - 36, `⚡ ${sName}`, def.superColor, 1.3);
@@ -2436,14 +2623,14 @@ export class GameEngine {
       if (evolved) w.evolved = true;
       if (tempWaves === undefined) delete w.tempWavesLeft;
       w.mag = this.getMaxMag(weaponId, w.evolved);
-      if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+      if (def.maxReserve > 0) w.reserve = this.getMaxReserve(weaponId, w.evolved);
       p.activeSlot = existingIdx;
     } else {
       const inst = {
         defId: weaponId,
         evolved,
         mag: this.getMaxMag(weaponId, evolved),
-        reserve: def.maxReserve > 0 ? def.maxReserve * (evolved ? 2 : 1) : -1,
+        reserve: def.maxReserve > 0 ? this.getMaxReserve(weaponId, evolved) : -1,
         tempWavesLeft: tempWaves,
       };
       p.weapons.push(inst);
@@ -2475,6 +2662,7 @@ export class GameEngine {
 
   private grantChestRelicInline(cx: number, cy: number): void {
     const s = this.state!;
+    SaveManager.addDailyProgress('evolve', 1);
     const pool = RELICS.filter((r) => !s.relicIds.includes(r.id));
     SoundFX.fanfare();
     if (pool.length === 0) {
@@ -2833,6 +3021,29 @@ export class GameEngine {
     }
 
     s.kills += 1;
+    SaveManager.addDailyProgress('kills', 1);
+    if (z.kind === 'boss' || z.kind === 'miniboss') {
+      SaveManager.addDailyProgress('bosses', 1);
+    }
+
+    if (s.modifiers.killRefillChance > 0 && Math.random() < s.modifiers.killRefillChance) {
+      const activeWep = s.player.weapons[s.player.activeSlot];
+      const maxMag = this.getMaxMag(activeWep.defId, activeWep.evolved);
+      if (activeWep.mag < maxMag) {
+        const addAmt = maxMag >= 20 ? 2 : 1;
+        const gained = Math.min(addAmt, maxMag - activeWep.mag);
+        activeWep.mag += gained;
+        if (s.floatingTexts.length < 14) {
+          this.spawnFloatingText(
+            s.player.x,
+            s.player.y - 28,
+            I18n.t('ftAmmoScav', { n: gained }),
+            '#4ade80',
+            0.95
+          );
+        }
+      }
+    }
     this.spawnHitSparks(z.x, z.y, z.color, 8);
     if (s.decals.length > 52) s.decals.shift();
     s.decals.push({
@@ -3594,6 +3805,7 @@ export class GameEngine {
       if (s.mode === 'endless') {
         SaveManager.recordEndlessWave(s.stage.id, s.wave);
       }
+      this.flushRunTelemetry(false);
       this.modalPaused = true;
       this.input.resetStates();
       this.callbacks.onPlayerDowned(!s.reviveUsed);
@@ -3667,7 +3879,8 @@ export class GameEngine {
   private updateDrops(dt: number): void {
     const s = this.state!;
     const aliveList = this.getAliveCombatants();
-    const magnetRange = s.powerUpTimers.overdrive > 0 ? 230 : 125;
+    const baseMagnet = s.powerUpTimers.overdrive > 0 ? 230 : 125;
+    const magnetRange = baseMagnet * SaveManager.getEffectivePlayerStats().magnetMult;
 
     for (let i = s.drops.length - 1; i >= 0; i--) {
       const d = s.drops[i];
@@ -3790,27 +4003,100 @@ export class GameEngine {
     }
   }
 
+  private onWaveSurvivedLocal(clearedWave: number): void {
+    const s = this.state;
+    if (!s) return;
+    const pStats = SaveManager.getEffectivePlayerStats();
+    if (pStats.waveArmorRegen > 0 && !s.player.downed && !s.player.spectating) {
+      s.player.armor = Math.min(s.player.maxArmor, s.player.armor + pStats.waveArmorRegen);
+    }
+    if (pStats.grenadeWaveSupply && clearedWave % 2 === 0) {
+      s.player.grenades += 1;
+    }
+    SaveManager.addDailyProgress('waves', 1);
+    if (s.mode === 'endless' && clearedWave >= 8) {
+      SaveManager.addDailyProgress('clear', 1);
+    }
+    this.flushRunTelemetry(false);
+  }
+
+  public flushRunTelemetry(_victory: boolean): void {
+    const s = this.state;
+    if (!s) return;
+    const deltaKills = Math.max(0, s.kills - s.lastRecordedKills);
+    s.lastRecordedKills = s.kills;
+    const mates = s.isCoop
+      ? s.remotePlayers.map((rp) => ({
+          callsign: rp.callsign,
+          wave: s.wave,
+          kills: Math.max(rp.kills, Math.round(s.kills / Math.max(1, s.squadCount))),
+        }))
+      : [];
+    SaveManager.recordRunTelemetry(deltaKills, mates);
+  }
+
   private triggerBattleLevelUp(): void {
     const s = this.state!;
-    const picked = IN_RUN_PERKS[Math.floor(Math.random() * IN_RUN_PERKS.length)];
-    picked.apply(s.modifiers);
-    const pMeta = I18n.perkMeta(picked.id, picked.name, picked.desc);
-    SoundFX.fanfare();
-    s.lootToast = {
-      sprite: picked.sprite,
-      badge: I18n.t('badgeBattleLv', { lv: s.battleLevel }),
-      title: pMeta.name,
-      desc: pMeta.desc,
-      color: picked.color,
-      timer: 2.8,
-    };
-    this.spawnFloatingText(
-      s.player.x,
-      s.player.y - 40,
-      `Lv.${s.battleLevel} · ${pMeta.name}`,
-      '#fde047',
-      1.22
-    );
+    const lv = s.battleLevel;
+
+    // 联机模式不暂停、不弹窗，直接自动装配强化并显示轻提示，彻底避免选卡时挨打暴毙！
+    if (s.isCoop) {
+      const picked = IN_RUN_PERKS[Math.floor(Math.random() * IN_RUN_PERKS.length)];
+      picked.apply(s.modifiers);
+      const pMeta = I18n.perkMeta(picked.id, picked.name, picked.desc);
+      SoundFX.fanfare();
+      s.lootToast = {
+        sprite: picked.sprite,
+        badge: I18n.t('badgeBattleLv', { lv }),
+        title: pMeta.name,
+        desc: pMeta.desc,
+        color: picked.color,
+        timer: 2.8,
+      };
+      this.spawnFloatingText(
+        s.player.x,
+        s.player.y - 40,
+        `Lv.${lv} · ${pMeta.name}`,
+        '#fde047',
+        1.22
+      );
+      return;
+    }
+
+    // 单人模式：暂停并弹出肉鸽三选一战术强化卡
+    const pool = [...IN_RUN_PERKS];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = pool[i];
+      pool[i] = pool[j];
+      pool[j] = tmp;
+    }
+    const choices = pool.slice(0, 3);
+
+    this.pendingModals.push(() => {
+      if (!this.state || this.state.waveState === 'ended' || this.state.player.hp <= 0) return;
+      this.modalPaused = true;
+      PlatformSDK.gameplayStop();
+      this.input.resetStates();
+      SoundFX.fanfare();
+      this.callbacks.onShowPerkChoices(choices, lv, (picked) => {
+        if (!this.state) return;
+        picked.apply(this.state.modifiers);
+        const pMeta = I18n.perkMeta(picked.id, picked.name, picked.desc);
+        this.modalPaused = false;
+        PlatformSDK.gameplayStart();
+        SoundFX.fanfare();
+        this.spawnFloatingText(
+          this.state.player.x,
+          this.state.player.y - 40,
+          `Lv.${lv} · ${pMeta.name}`,
+          picked.color,
+          1.25
+        );
+        this.flushQueuedModals();
+      });
+    });
+    this.flushQueuedModals();
   }
 
   private updateFX(dt: number): void {
@@ -4175,6 +4461,7 @@ export class GameEngine {
   private updateCoopRevive(dt: number): void {
     const s = this.state!;
     const p = s.player;
+    const revDt = dt * SaveManager.getEffectivePlayerStats().reviveSpeedMultiplier;
     let clientRevivingId = '';
 
     // 存活玩家靠近倒地队友 78px 内自动读条战地救援（约 2.2 秒扶起）
@@ -4183,7 +4470,7 @@ export class GameEngine {
         if (!rp.downed || rp.spectating) continue;
         if (Math.hypot(p.x - rp.x, p.y - rp.y) <= 78) {
           if (CoopManager.role === 'host') {
-            this.advanceReviveOnHost(rp.peerId, CoopManager.myPeerId, s.localCallsign, dt);
+            this.advanceReviveOnHost(rp.peerId, CoopManager.myPeerId, s.localCallsign, revDt);
           } else if (!clientRevivingId) {
             clientRevivingId = rp.peerId;
           }
@@ -4206,7 +4493,7 @@ export class GameEngine {
           this.reviveTickAccum = 0;
         }
         this.reviveTickTargetId = clientRevivingId;
-        this.reviveTickAccum += dt;
+        this.reviveTickAccum += revDt;
         this.reviveTickTimer -= dt;
         if (this.reviveTickTimer <= 0) {
           this.reviveTickTimer = 0.1;
@@ -4312,6 +4599,7 @@ export class GameEngine {
       if (s.mode === 'endless') {
         SaveManager.recordEndlessWave(s.stage.id, s.wave);
       }
+      this.flushRunTelemetry(false);
       CoopManager.broadcastToClients({ type: 'evt_run_finished', victory: false });
       this.callbacks.onRunFinished(false, s);
     }
@@ -4341,6 +4629,7 @@ export class GameEngine {
           p.repairProgress = 0;
           win.planks = Math.min(win.maxPlanks, win.planks + 1);
           SoundFX.repair();
+          SaveManager.addDailyProgress('repairs', 1);
           CoopManager.sendToHost({
             type: 'cmd_repair_win',
             ownerId: CoopManager.myPeerId,
@@ -4697,6 +4986,7 @@ export class GameEngine {
     s.squadCount = w.squadCount;
 
     if (w.wave > prevWave) {
+      this.onWaveSurvivedLocal(prevWave);
       // 推进临时空投武器波数寿命
       for (let i = s.player.weapons.length - 1; i >= 0; i--) {
         const pw = s.player.weapons[i];
@@ -5236,9 +5526,11 @@ export class GameEngine {
       if (msg.victory) {
         PlatformSDK.happyTime();
         SaveManager.markStageCleared(s.stage.id);
+        SaveManager.addDailyProgress('clear', 1);
       } else if (s.mode === 'endless') {
         SaveManager.recordEndlessWave(s.stage.id, s.wave);
       }
+      this.flushRunTelemetry(msg.victory);
       this.callbacks.onRunFinished(msg.victory, s);
     }
   }

@@ -73,14 +73,20 @@ export type PowerUpType = 'overdrive' | 'nuke' | 'carpenter' | 'double_cash' | '
 
 export interface RunModifiers {
   damageMult: number;
+  fireRateMult: number;
   reloadMult: number;
   magMult: number;
   moveSpeedMult: number;
   extraPierce: number;
   extraPellets: number;
   critChance: number;
+  critDamageMult: number;
   repairHealRatio: number;
   cashMult: number;
+  killRefillChance: number;
+  cryoShotChance: number;
+  electricShotChance: number;
+  lowHpDamageBonus: number;
 }
 
 export interface Rect {
@@ -202,22 +208,61 @@ export interface StageDef {
   barrels: { x: number; y: number; roomId: string }[];
 }
 
+export type AgentClassId = 'vanguard' | 'engineer' | 'medic' | 'demolisher';
+
+export type DailyMissionKind =
+  | 'kills'
+  | 'waves'
+  | 'repairs'
+  | 'doors'
+  | 'bosses'
+  | 'evolve'
+  | 'skills'
+  | 'clear';
+
+export interface DailyState {
+  dateKey: string;
+  lastSignDate: string;
+  signStreak: number;
+  missionProgress: Partial<Record<DailyMissionKind, number>>;
+  claimedIds: string[];
+  grandChestClaimed: boolean;
+}
+
+export interface CoopRivalRecord {
+  callsign: string;
+  bestWave: number;
+  totalKills: number;
+  classId?: AgentClassId;
+  updatedAt: number;
+}
+
 export interface AgentUpgradeLevels {
   hp: number;
   reload: number;
   speed: number;
   repair: number;
   startCash: number;
+  crit: number;
+  armor: number;
+  magnet: number;
+  ammo: number;
+  ordnance: number;
 }
 
 export interface SaveData {
   agentLevel: number;
   agentXp: number;
   gold: number;
+  selectedClass: AgentClassId;
+  unlockedClasses: AgentClassId[];
+  careerKills: number;
   upgrades: AgentUpgradeLevels;
   clearedStages: string[];
   endlessBestWave: Record<string, number>;
   totalRuns: number;
   freeStarterUsedCount: number;
   freeHqSupportUsed: boolean;
+  daily: DailyState;
+  coopRivals: CoopRivalRecord[];
 }

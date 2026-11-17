@@ -90,6 +90,51 @@ export const IN_RUN_PERKS: InRunPerkDef[] = [
       m.cashMult *= 1.22;
     },
   },
+  {
+    id: 'ammo_scavenger',
+    name: '嗜血回弹',
+    desc: '击杀僵尸有 36% 概率直接向当前弹夹回填子弹，火力不断档',
+    icon: '🔄',
+    sprite: './assets/gear_backpack.png',
+    color: '#22c55e',
+    apply: (m) => {
+      m.killRefillChance = Math.min(0.85, m.killRefillChance + 0.36);
+    },
+  },
+  {
+    id: 'cryo_coating',
+    name: '极寒弹头',
+    desc: '射击有 28% 概率发射液氮冰冻弹，大幅减速冻结尸潮与尸王',
+    icon: '❄️',
+    sprite: './assets/gun_cryogun.png',
+    color: '#06b6d4',
+    apply: (m) => {
+      m.cryoShotChance = Math.min(0.85, m.cryoShotChance + 0.28);
+    },
+  },
+  {
+    id: 'arc_overload',
+    name: '高压电弧',
+    desc: '射击有 24% 概率触发连锁闪电弹射周围尸群',
+    icon: '⚡',
+    sprite: './assets/gun_tesla.png',
+    color: '#38bdf8',
+    apply: (m) => {
+      m.electricShotChance = Math.min(0.8, m.electricShotChance + 0.24);
+    },
+  },
+  {
+    id: 'berserk_blood',
+    name: '狂战血怒',
+    desc: '全武器射速提升 +14%，生命值低于 55% 时伤害额外暴涨 +30%',
+    icon: '🔥',
+    sprite: './assets/gun_minigun.png',
+    color: '#f97316',
+    apply: (m) => {
+      m.fireRateMult *= 1.14;
+      m.lowHpDamageBonus += 0.3;
+    },
+  },
 ];
 
 export const RELICS: RelicDef[] = [

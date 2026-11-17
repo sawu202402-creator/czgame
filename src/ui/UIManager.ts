@@ -6,10 +6,19 @@ import { RunSnapshot } from '../game/Entities';
 import { GameEngine } from '../game/GameEngine';
 import { I18n, LANG_OPTIONS, LangCode } from '../i18n/I18n';
 import { SaveManager, UPGRADE_TRACKS } from '../meta/SaveManager';
+import {
+  AGENT_CLASSES,
+  DAILY_CHECKIN_REWARDS,
+  DAILY_GRAND_BONUS,
+  buildLeaderboardRows,
+  getAgentClassDef,
+  getDailyMissionsForDate,
+  getLocalizedClassText,
+} from '../meta/ProgressionDefs';
 import { CoopManager } from '../net/CoopManager';
 import { SQUAD_SLOTS, getCoopScaling } from '../net/CoopProtocol';
 import { PlatformSDK } from '../platform/PlatformSDK';
-import { GameMode, PowerUpType, StageDef } from '../types';
+import { AgentClassId, GameMode, InRunPerkDef, PowerUpType, StageDef } from '../types';
 
 export class UIManager {
   private hudRoot: HTMLElement | null = null;
@@ -18,10 +27,12 @@ export class UIManager {
   private armoryOpen = false;
   private pauseOpen = false;
   private selectedMode: GameMode = 'standard';
-  private hubTab: 'stages' | 'upgrades' | 'coop' = 'stages';
+  private hubTab: 'stages' | 'upgrades' | 'coop' | 'daily' | 'rank' = 'stages';
+  private rankSort: 'endless' | 'kills' = 'endless';
   private armoryTab: 'guns' | 'supplies' = 'guns';
   private hudCache: Record<string, string> = {};
   private coopToast = '';
+  private perkKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
     private uiLayer: HTMLElement,
@@ -140,7 +151,15 @@ export class UIManager {
 
   // ==================== 特工战术指挥大厅 ====================
 
+  private clearPerkKeyHandler(): void {
+    if (this.perkKeyHandler) {
+      window.removeEventListener('keydown', this.perkKeyHandler);
+      this.perkKeyHandler = null;
+    }
+  }
+
   public showHomeHub(): void {
+    this.clearPerkKeyHandler();
     cancelAnimationFrame(this.needleAnimId);
     PlatformSDK.gameplayStop();
     this.armoryOpen = false;
@@ -161,9 +180,12 @@ export class UIManager {
     }
 
     const save = SaveManager.get();
-    const hasAffordableUpgrade = UPGRADE_TRACKS.some(
-      (t) => save.upgrades[t.key] < t.maxLevel && save.gold >= SaveManager.getUpgradeCost(t.key)
-    );
+    const hasAffordableUpgrade =
+      UPGRADE_TRACKS.some(
+        (t) => (save.upgrades[t.key] || 0) < t.maxLevel && save.gold >= SaveManager.getUpgradeCost(t.key)
+      ) ||
+      AGENT_CLASSES.some((c) => !save.unlockedClasses.includes(c.id) && save.gold >= c.unlockCost);
+    const hasDailyReward = SaveManager.hasUnclaimedDailyRewards();
     const muted = SoundFX.isUserMuted();
     const fsSupported = this.isFullscreenSupported();
     const fsActive = this.isFullscreenActive();
@@ -173,7 +195,11 @@ export class UIManager {
         ? this.buildStagesHubView(save)
         : this.hubTab === 'coop'
           ? this.buildCoopHubView()
-          : this.buildUpgradesHubView(save);
+          : this.hubTab === 'daily'
+            ? this.buildDailyHubView(save)
+            : this.hubTab === 'rank'
+              ? this.buildLeaderboardHubView(save)
+              : this.buildUpgradesHubView(save);
 
     const coopCountBadge =
       CoopManager.lobby && CoopManager.role !== 'offline'
@@ -205,6 +231,10 @@ export class UIManager {
             <button class="seg-btn ${this.hubTab === 'upgrades' ? 'active' : ''}" data-hub-tab="upgrades">
               ${I18n.t('tabUpgrades')}${hasAffordableUpgrade ? '<span class="nav-dot"></span>' : ''}
             </button>
+            <button class="seg-btn ${this.hubTab === 'daily' ? 'active' : ''}" data-hub-tab="daily">
+              ${I18n.t('tabDaily')}${hasDailyReward ? '<span class="nav-dot hot-dot"></span>' : ''}
+            </button>
+            <button class="seg-btn ${this.hubTab === 'rank' ? 'active' : ''}" data-hub-tab="rank">${I18n.t('tabRank')}</button>
           </div>
 
           <div class="agent-bar">
@@ -251,7 +281,7 @@ export class UIManager {
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-hub-tab]').forEach((btn) => {
       btn.onclick = () => {
-        this.hubTab = btn.dataset.hubTab as 'stages' | 'upgrades' | 'coop';
+        this.hubTab = btn.dataset.hubTab as 'stages' | 'upgrades' | 'coop' | 'daily' | 'rank';
         this.coopToast = '';
         this.showHomeHub();
       };
@@ -288,6 +318,58 @@ export class UIManager {
           SoundFX.fanfare();
           this.showHomeHub();
         }
+      };
+    });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-class-pick]').forEach((btn) => {
+      btn.onclick = () => {
+        const cid = btn.dataset.classPick as AgentClassId;
+        if (SaveManager.unlockOrSelectClass(cid)) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        } else {
+          SoundFX.emptyClip();
+        }
+      };
+    });
+
+    const signBtn = this.modalRoot.querySelector('#btn-daily-signin') as HTMLButtonElement | null;
+    if (signBtn) {
+      signBtn.onclick = () => {
+        const res = SaveManager.claimTodayCheckIn();
+        if (res.ok) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        }
+      };
+    }
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-claim-dm]').forEach((btn) => {
+      btn.onclick = () => {
+        const mid = btn.dataset.claimDm || '';
+        const res = SaveManager.claimDailyMission(mid);
+        if (res.ok) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        }
+      };
+    });
+
+    const grandBtn = this.modalRoot.querySelector('#btn-claim-grand') as HTMLButtonElement | null;
+    if (grandBtn) {
+      grandBtn.onclick = () => {
+        const res = SaveManager.claimDailyGrandChest();
+        if (res.ok) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        }
+      };
+    }
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-rank-sort]').forEach((btn) => {
+      btn.onclick = () => {
+        this.rankSort = btn.dataset.rankSort as 'endless' | 'kills';
+        this.showHomeHub();
       };
     });
 
@@ -520,16 +602,62 @@ export class UIManager {
     const xpPct = Math.min(100, Math.round((save.agentXp / Math.max(1, xpNext)) * 100));
     const rankTitle = this.getAgentRankTitle(save.agentLevel);
 
+    const classesHtml = AGENT_CLASSES.map((c) => {
+      const unlocked = save.unlockedClasses.includes(c.id);
+      const active = save.selectedClass === c.id;
+      const canUnlock = !unlocked && save.gold >= c.unlockCost;
+      const loc = getLocalizedClassText(c);
+      const btnCls = active
+        ? 'btn-green'
+        : unlocked
+          ? 'btn-blue'
+          : canUnlock
+            ? 'btn-yellow'
+            : 'btn-disabled';
+      const btnTxt = active
+        ? I18n.t('classEquipped')
+        : unlocked
+          ? I18n.t('classSelect')
+          : `<img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${c.unlockCost} ${I18n.t('classUnlock')}`;
+
+      return `
+        <div class="class-spec-card ${active ? 'active' : ''} ${!unlocked ? 'locked' : ''}" style="--cls-accent:${c.color}">
+          <div class="class-spec-top">
+            <div class="class-icon-box"><img src="${c.sprite}" alt="" /></div>
+            <div class="class-spec-meta">
+              <strong>${loc.name}</strong>
+              <span class="class-passive-line">${loc.passive}</span>
+            </div>
+          </div>
+          <div class="class-skill-box">
+            <img src="${c.skillSprite}" alt="" />
+            <div>
+              <div class="class-skill-name">${I18n.t('classSkillTag')} <strong>${loc.skillName}</strong></div>
+              <div class="class-skill-desc">${loc.skillDesc}</div>
+            </div>
+          </div>
+          <button class="btn-cartoon btn-mini ${btnCls}" data-class-pick="${c.id}" ${!unlocked && !canUnlock ? 'disabled' : ''}>
+            ${btnTxt}
+          </button>
+        </div>
+      `;
+    }).join('');
+
     const upgSpriteMap: Record<keyof typeof save.upgrades, string> = {
       hp: './assets/item_medkit.png',
       reload: './assets/prop_ammo_box.png',
       speed: './assets/player_boot.png',
       repair: './assets/prop_wood_plank.png',
       startCash: './assets/drop_cash.png',
+      crit: './assets/gun_sniper.png',
+      armor: './assets/item_armor.png',
+      magnet: './assets/relic_war_bonds.png',
+      ammo: './assets/gear_backpack.png',
+      ordnance: './assets/prop_grenade.png',
     };
 
     const upgradesHtml = UPGRADE_TRACKS.map((t) => {
-      const lvl = save.upgrades[t.key];
+      const lvl = save.upgrades[t.key] || 0;
       const isMax = lvl >= t.maxLevel;
       const cost = SaveManager.getUpgradeCost(t.key);
       const canBuy = !isMax && save.gold >= cost;
@@ -562,7 +690,7 @@ export class UIManager {
 
     return `
       <div class="upg-dossier-card">
-        <img class="upg-hero-avatar" src="./assets/player_hero.png" alt="" />
+        <img class="upg-hero-avatar" src="${getAgentClassDef(save.selectedClass).sprite}" alt="" />
         <div class="upg-dossier-body">
           <div class="upg-dossier-top">
             <strong>🎖️ Lv.${save.agentLevel} ${rankTitle}</strong>
@@ -576,7 +704,193 @@ export class UIManager {
           </div>
         </div>
       </div>
+
+      <div class="hub-sec-heading">${I18n.t('classSecTitle')}</div>
+      <div class="class-spec-grid">${classesHtml}</div>
+
+      <div class="hub-sec-heading">${I18n.t('upgSecTitle')}</div>
       <div class="upgrade-list">${upgradesHtml}</div>
+    `;
+  }
+
+  private buildDailyHubView(save: ReturnType<typeof SaveManager.get>): string {
+    const canSign = SaveManager.canClaimTodayCheckIn();
+    const curSignDay = SaveManager.getCurrentSignDisplayDay();
+    const streak = save.daily.signStreak || 0;
+
+    const signDaysHtml = DAILY_CHECKIN_REWARDS.map((r) => {
+      const isDone = !canSign ? r.day <= curSignDay : r.day < curSignDay;
+      const isToday = canSign && r.day === curSignDay;
+      return `
+        <div class="signin-day-card ${isDone ? 'done' : ''} ${isToday ? 'today' : ''}">
+          <span class="signin-day-num">${I18n.t('dailyDayLabel', { d: r.day })}</span>
+          <img class="signin-day-ico" src="${r.sprite}" alt="" />
+          <strong class="signin-day-gold">+${r.gold}</strong>
+          <small class="signin-day-xp">+${r.xp} XP</small>
+          ${isDone ? `<span class="signin-check">✓</span>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    const missions = getDailyMissionsForDate(save.daily.dateKey);
+    const missionsHtml = missions
+      .map((m) => {
+        const cur = Math.min(m.target, save.daily.missionProgress[m.kind] || 0);
+        const pct = Math.min(100, Math.round((cur / m.target) * 100));
+        const done = cur >= m.target;
+        const claimed = save.daily.claimedIds.includes(m.id);
+        const title = I18n.isZh() ? m.zhTitle : m.enTitle;
+        return `
+          <div class="daily-mission-card ${claimed ? 'claimed' : done ? 'ready' : ''}">
+            <img class="dm-sprite" src="${m.sprite}" alt="" />
+            <div class="dm-body">
+              <div class="dm-title">${title}</div>
+              <div class="dm-prog-row">
+                <div class="dm-prog-bar"><div class="dm-prog-fill" style="width:${pct}%"></div></div>
+                <span class="dm-prog-txt">${cur}/${m.target}</span>
+              </div>
+            </div>
+            <div class="dm-right">
+              <div class="dm-rew-pills">
+                <span><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> +${m.rewardGold}</span>
+                <small>+${m.rewardXp} XP</small>
+              </div>
+              <button class="btn-cartoon btn-mini ${claimed ? 'btn-gray' : done ? 'btn-yellow' : 'btn-disabled'}"
+                data-claim-dm="${m.id}" ${!done || claimed ? 'disabled' : ''}>
+                ${claimed ? I18n.t('dailyClaimed') : done ? I18n.t('dailyClaimBtn') : I18n.t('dailyGoBtn')}
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    const grandReady = SaveManager.canClaimDailyGrandChest();
+    const grandClaimed = save.daily.grandChestClaimed;
+
+    return `
+      <div class="daily-hub-wrap">
+        <section class="daily-panel">
+          <div class="daily-panel-head">
+            <h3>${I18n.t('dailySignTitle')}</h3>
+            <div class="daily-head-actions">
+              <span class="streak-pill">${I18n.t('dailyStreakBadge', { n: streak })}</span>
+              <button class="btn-cartoon btn-mini ${canSign ? 'btn-green' : 'btn-gray'}" id="btn-daily-signin" ${!canSign ? 'disabled' : ''}>
+                ${canSign ? I18n.t('dailyClaimNow') : I18n.t('dailyTomorrow')}
+              </button>
+            </div>
+          </div>
+          <div class="signin-grid">${signDaysHtml}</div>
+        </section>
+
+        <section class="daily-panel">
+          <div class="daily-panel-head">
+            <h3>${I18n.t('dailyMissionsTitle')}</h3>
+          </div>
+          <div class="daily-mission-list">${missionsHtml}</div>
+
+          <div class="daily-grand-bar ${grandReady ? 'ready' : ''} ${grandClaimed ? 'claimed' : ''}">
+            <div class="daily-grand-left">
+              <img src="./assets/prop_chest.png" alt="" />
+              <div>
+                <strong>${I18n.t('dailyGrandTitle')}</strong>
+                <p>${I18n.t('dailyGrandDesc')}</p>
+              </div>
+            </div>
+            <div class="daily-grand-right">
+              <span class="grand-rew-tag"><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> +${DAILY_GRAND_BONUS.gold} · +${DAILY_GRAND_BONUS.xp} XP</span>
+              <button class="btn-cartoon btn-mini ${grandClaimed ? 'btn-gray' : grandReady ? 'btn-yellow' : 'btn-disabled'}"
+                id="btn-claim-grand" ${!grandReady || grandClaimed ? 'disabled' : ''}>
+                ${grandClaimed ? I18n.t('dailyClaimed') : I18n.t('dailyClaimBtn')}
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  private buildLeaderboardHubView(save: ReturnType<typeof SaveManager.get>): string {
+    const myCallsign = CoopManager.getCallsign();
+    const myRankTitle = this.getAgentRankTitle(save.agentLevel);
+    const rows = buildLeaderboardRows(this.rankSort, save, myCallsign, myRankTitle);
+    const myIdx = rows.findIndex((r) => r.isMe);
+    const meRow = rows[myIdx] || rows[rows.length - 1];
+    const prevRow = myIdx > 0 ? rows[myIdx - 1] : null;
+
+    let chaseHtml = I18n.t('rankTopOneHint');
+    if (prevRow) {
+      if (this.rankSort === 'endless') {
+        const diffW = Math.max(1, prevRow.bestWave - meRow.bestWave + (prevRow.bestWave === meRow.bestWave ? 0 : 0));
+        const gapStr =
+          prevRow.bestWave > meRow.bestWave
+            ? I18n.isZh()
+              ? `${diffW} 波`
+              : `${diffW} Wave(s)`
+            : `${Math.max(1, prevRow.totalKills - meRow.totalKills + 1)} Kills`;
+        chaseHtml = I18n.t('rankChaseHint', {
+          prevRank: prevRow.rank,
+          name: prevRow.callsign,
+          gap: gapStr,
+        });
+      } else {
+        const diffK = Math.max(1, prevRow.totalKills - meRow.totalKills + 1);
+        const gapStr = I18n.isZh() ? `${diffK} 击杀` : `${diffK} Kills`;
+        chaseHtml = I18n.t('rankChaseHint', {
+          prevRank: prevRow.rank,
+          name: prevRow.callsign,
+          gap: gapStr,
+        });
+      }
+    }
+
+    const rowsHtml = rows
+      .map((r) => {
+        const cls = getAgentClassDef(r.classId);
+        const medal = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : `#${r.rank}`;
+        const waveTxt = r.bestWave > 0 ? (I18n.isZh() ? `第 ${r.bestWave} 波` : `W${r.bestWave}`) : '—';
+        return `
+          <div class="lb-row ${r.isMe ? 'is-me' : ''} ${r.isCoopFriend ? 'is-friend' : ''} ${r.rank <= 3 ? `top-${r.rank}` : ''}">
+            <span class="lb-col-rank">${medal}</span>
+            <div class="lb-col-agent">
+              <img class="lb-avatar" src="${cls.sprite}" alt="" />
+              <div class="lb-agent-info">
+                <strong>${r.callsign}${r.isMe ? I18n.t('meSuffix') : ''}</strong>
+                <span class="lb-badge">${r.badgeText}</span>
+              </div>
+            </div>
+            <span class="lb-col-wave">${waveTxt}</span>
+            <span class="lb-col-kills">${r.totalKills.toLocaleString()}</span>
+            <span class="lb-col-clear">${r.clearedCount}/${STAGES.length}</span>
+          </div>
+        `;
+      })
+      .join('');
+
+    return `
+      <div class="lb-hub-wrap">
+        <div class="lb-top-bar">
+          <div class="seg-group dark">
+            <button class="seg-btn ${this.rankSort === 'endless' ? 'active' : ''}" data-rank-sort="endless">${I18n.t('rankTitleEndless')}</button>
+            <button class="seg-btn ${this.rankSort === 'kills' ? 'active' : ''}" data-rank-sort="kills">${I18n.t('rankTitleKills')}</button>
+          </div>
+          <div class="lb-my-summary">
+            <div>${I18n.t('rankMySummary', { rank: meRow.rank, w: meRow.bestWave, k: meRow.totalKills })}</div>
+            <div class="lb-chase-line">${chaseHtml}</div>
+          </div>
+        </div>
+
+        <div class="lb-table-card">
+          <div class="lb-head-row">
+            <span>${I18n.t('rankColRank')}</span>
+            <span>${I18n.t('rankColAgent')}</span>
+            <span>${I18n.t('rankColWave')}</span>
+            <span>${I18n.t('rankColKills')}</span>
+            <span>${I18n.t('rankColCleared')}</span>
+          </div>
+          <div class="lb-body-list">${rowsHtml}</div>
+        </div>
+      </div>
     `;
   }
 
@@ -954,6 +1268,11 @@ export class UIManager {
           <span class="moba-arc-badge" id="arc-switch-badge">${I18n.t('subWepBadge')}</span>
         </button>
 
+        <button class="moba-arc-btn arc-pos-4 moba-skill-btn" id="btn-arc-skill" type="button">
+          <img class="moba-arc-img" id="arc-skill-icon" src="./assets/prop_ammo_box.png" alt="" />
+          <span class="moba-arc-badge" id="arc-skill-badge">F</span>
+        </button>
+
         <button class="moba-arc-btn arc-pos-2 moba-gren-btn" id="btn-grenade" type="button">
           <img class="moba-arc-img" src="./assets/prop_grenade.png" alt="" />
           <span class="moba-arc-badge" id="hud-gren-count">2</span>
@@ -1019,6 +1338,10 @@ export class UIManager {
         this.toggleArmoryShop();
       }
     };
+
+    this.bindCombatTap(hud.querySelector('#btn-arc-skill') as HTMLButtonElement, () => {
+      this.engine.useActiveClassSkill();
+    });
 
     this.bindCombatTap(hud.querySelector('#btn-grenade') as HTMLButtonElement, () => {
       this.engine.throwGrenade();
@@ -1329,8 +1652,10 @@ export class UIManager {
         const locked = unlockedRooms < w.unlockRoomsRequired && !owned;
         const wTitle = owned?.evolved ? `⚡${I18n.wSuperName(w.id, w.superName)}` : I18n.wName(w.id, w.name);
 
-        let btnLabel = I18n.t('buyBtn', { cost: w.shopCost });
-        let btnClass = s.cash >= w.shopCost ? 'btn-green' : 'btn-disabled';
+        const gunCost = this.engine.getEffectiveGunCost(w.id);
+        const ammoCost = this.engine.getEffectiveAmmoCost(w.id);
+        let btnLabel = I18n.t('buyBtn', { cost: gunCost });
+        let btnClass = s.cash >= gunCost ? 'btn-green' : 'btn-disabled';
         let refillBtnHtml = '';
 
         if (locked) {
@@ -1341,11 +1666,11 @@ export class UIManager {
             btnLabel = I18n.t('freeSwitch');
             btnClass = 'btn-blue';
           } else {
-            btnLabel = I18n.t('buyPermanent', { cost: w.shopCost });
-            btnClass = s.cash >= w.shopCost ? 'btn-green' : 'btn-disabled';
+            btnLabel = I18n.t('buyPermanent', { cost: gunCost });
+            btnClass = s.cash >= gunCost ? 'btn-green' : 'btn-disabled';
           }
         } else if (owned) {
-          const maxRes = w.maxReserve * (owned.evolved ? 2 : 1);
+          const maxRes = this.engine.getMaxReserve(w.id, owned.evolved);
           const full =
             w.maxReserve < 0 ||
             (owned.reserve >= maxRes && owned.mag >= this.engine.getMaxMag(w.id, owned.evolved));
@@ -1353,15 +1678,15 @@ export class UIManager {
             btnLabel = I18n.t('equipNow');
             btnClass = 'btn-blue';
             if (!full) {
-              const canRefill = s.cash >= w.ammoCost;
-              refillBtnHtml = `<button class="btn-cartoon btn-mini ${canRefill ? 'btn-yellow' : 'btn-disabled'}" data-refill-gun="${w.id}">${I18n.t('refillBtn', { cost: w.ammoCost })}</button>`;
+              const canRefill = s.cash >= ammoCost;
+              refillBtnHtml = `<button class="btn-cartoon btn-mini ${canRefill ? 'btn-yellow' : 'btn-disabled'}" data-refill-gun="${w.id}">${I18n.t('refillBtn', { cost: ammoCost })}</button>`;
             }
           } else if (full) {
             btnLabel = w.maxReserve < 0 ? I18n.t('equippedTag') : I18n.t('equippedFull');
             btnClass = 'btn-gray';
           } else {
-            btnLabel = I18n.t('refillMainBtn', { cost: w.ammoCost });
-            btnClass = s.cash >= w.ammoCost ? 'btn-yellow' : 'btn-disabled';
+            btnLabel = I18n.t('refillMainBtn', { cost: ammoCost });
+            btnClass = s.cash >= ammoCost ? 'btn-yellow' : 'btn-disabled';
           }
         }
 
@@ -1876,6 +2201,21 @@ export class UIManager {
       }
     });
 
+    const clsDef = getAgentClassDef(s.classId);
+    const skillCdSec = s.skillCooldown > 0 ? Math.ceil(s.skillCooldown) : 0;
+    const skillKey = `${clsDef.id}:${skillCdSec}:${this.engine.input.usingTouch ? 1 : 0}`;
+    setIfChanged('arcSkill', skillKey, () => {
+      const skBtn = this.hudRoot!.querySelector('#btn-arc-skill') as HTMLButtonElement;
+      const skIcon = this.hudRoot!.querySelector('#arc-skill-icon') as HTMLImageElement;
+      const skBadge = this.hudRoot!.querySelector('#arc-skill-badge') as HTMLElement;
+      if (skIcon.getAttribute('src') !== clsDef.skillSprite) {
+        skIcon.setAttribute('src', clsDef.skillSprite);
+      }
+      skBtn.disabled = skillCdSec > 0;
+      skBtn.style.borderColor = skillCdSec > 0 ? '' : clsDef.color;
+      skBadge.textContent = skillCdSec > 0 ? `${skillCdSec}s` : this.engine.input.usingTouch ? '⚡' : 'F';
+    });
+
     const canReload =
       !isReloading &&
       activeWep.mag < maxMag &&
@@ -1889,9 +2229,75 @@ export class UIManager {
     });
   }
 
+  // ==================== 单人模式战地升级肉鸽三选一卡片 ====================
+
+  public showPerkChoiceModal(
+    choices: InRunPerkDef[],
+    level: number,
+    onPick: (perk: InRunPerkDef) => void
+  ): void {
+    this.clearPerkKeyHandler();
+    this.armoryOpen = false;
+    this.pauseOpen = false;
+
+    const cardsHtml = choices
+      .map((c, idx) => {
+        const meta = I18n.perkMeta(c.id, c.name, c.desc);
+        return `
+          <button class="perk-choice-card" type="button" data-perk-idx="${idx}" style="--perk-color:${c.color}">
+            <span class="perk-key-badge">[${idx + 1}]</span>
+            <div class="perk-ico-wrap"><img src="${c.sprite}" alt="" /></div>
+            <strong class="perk-card-title">${meta.name}</strong>
+            <p class="perk-card-desc">${meta.desc}</p>
+          </button>
+        `;
+      })
+      .join('');
+
+    this.modalRoot.innerHTML = `
+      <div class="popup-backdrop">
+        <div class="popup-box perk-modal-box">
+          <h2>${I18n.t('perkPickTitle', { lv: level })}</h2>
+          <p class="popup-sub">${I18n.t('perkPickHint')}</p>
+          <div class="perk-choice-grid">${cardsHtml}</div>
+        </div>
+      </div>
+    `;
+
+    let chosen = false;
+    const commitPick = (idx: number) => {
+      if (chosen || !choices[idx]) return;
+      chosen = true;
+      this.clearPerkKeyHandler();
+      this.modalRoot.innerHTML = '';
+      onPick(choices[idx]);
+    };
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-perk-idx]').forEach((btn) => {
+      this.bindModalTap(btn, () => {
+        commitPick(Number(btn.dataset.perkIdx));
+      });
+    });
+
+    this.perkKeyHandler = (e: KeyboardEvent) => {
+      if (e.code === 'Digit1' || e.code === 'Numpad1') {
+        e.preventDefault();
+        commitPick(0);
+      } else if (e.code === 'Digit2' || e.code === 'Numpad2') {
+        e.preventDefault();
+        commitPick(1);
+      } else if (e.code === 'Digit3' || e.code === 'Numpad3') {
+        e.preventDefault();
+        commitPick(2);
+      }
+    };
+    window.addEventListener('keydown', this.perkKeyHandler);
+  }
+
   // ==================== 复活与结算简洁弹窗 ====================
 
   public showReviveModal(canRevive: boolean): void {
+    this.clearPerkKeyHandler();
     this.armoryOpen = false;
     this.pauseOpen = false;
     const s = this.engine.state!;
@@ -1940,6 +2346,7 @@ export class UIManager {
   }
 
   public showSettlementModal(victory: boolean, s: RunSnapshot): void {
+    this.clearPerkKeyHandler();
     this.armoryOpen = false;
     this.pauseOpen = false;
     const stageTierBonus = (s.stage.index - 1) * 20;
