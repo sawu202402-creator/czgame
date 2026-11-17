@@ -81,7 +81,7 @@ export interface RunModifiers {
   extraPellets: number;
   critChance: number;
   critDamageMult: number;
-  repairHealRatio: number;
+  killHealRatio: number;
   cashMult: number;
   killRefillChance: number;
   cryoShotChance: number;

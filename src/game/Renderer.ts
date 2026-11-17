@@ -1,20 +1,12 @@
+import { ZOMBIE_SPRITE_BY_KIND, getBossProfile, isBossKind } from '../data/enemies';
 import { POWERUP_META } from '../data/perksAndRelics';
 import { WEAPONS } from '../data/weapons';
 import { I18n } from '../i18n/I18n';
 import { SaveManager } from '../meta/SaveManager';
 import { FloorTheme, PropKind, Rect } from '../types';
 import { Assets, SpriteKey, TileKey } from './AssetLoader';
-import { RunSnapshot, ZombieKind } from './Entities';
+import { RunSnapshot } from './Entities';
 import { InputManager } from './InputManager';
-
-const ZOMBIE_SPRITE_MAP: Record<ZombieKind, SpriteKey> = {
-  walker: 'zombie_walker',
-  runner: 'zombie_runner',
-  spitter: 'zombie_spitter',
-  thief: 'zombie_thief',
-  miniboss: 'zombie_miniboss',
-  boss: 'zombie_boss',
-};
 
 const FLOOR_THEME_TILE: Record<FloorTheme, TileKey> = {
   lobby: 'tile_floor_lobby',
@@ -2051,35 +2043,6 @@ export class CartoonRenderer {
         ctx.fillStyle = `rgba(239, 68, 68, ${blink})`;
         ctx.fillRect(win.x + 3, win.y + 3, win.w - 6, win.h - 6);
       }
-
-      const wcx = win.x + win.w / 2;
-      const wcy = win.y + win.h / 2;
-      if (
-        win.planks >= win.maxPlanks &&
-        win.armorPlanks <= 0 &&
-        !state.player.downed &&
-        !state.player.spectating &&
-        Math.hypot(state.player.x - wcx, state.player.y - wcy) <= 105
-      ) {
-        const room = state.rooms.find((r) => r.id === win.roomId);
-        if (room?.unlocked) {
-          if (win.fortifyProgress > 0) {
-            ctx.beginPath();
-            ctx.arc(wcx, wcy, 27, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * win.fortifyProgress);
-            ctx.strokeStyle = '#38bdf8';
-            ctx.lineWidth = 5;
-            ctx.stroke();
-          }
-          this.drawCachedLabel(
-            ctx,
-            I18n.t('winUpgradePrompt'),
-            wcx,
-            wcy - 22,
-            state.cash >= 80 ? '#7dd3fc' : '#94a3b8',
-            10.5
-          );
-        }
-      }
       ctx.restore();
     }
 
@@ -2231,6 +2194,15 @@ export class CartoonRenderer {
         ctx.ellipse(2, 7 - bob * 0.4, 13, 7, 0, 0, Math.PI * 2);
         ctx.fill();
         this.drawCenteredSprite(ctx, 'drop_cash', 0, 0, 34, -0.1);
+      } else if (d.kind === 'heal') {
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.3)';
+        ctx.beginPath();
+        ctx.arc(0, 1, 16 + Math.sin(now * 2.2) * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#4ade80';
+        ctx.lineWidth = 1.8;
+        ctx.stroke();
+        this.drawCenteredSprite(ctx, 'item_medkit', 0, 0, 32, 0);
       } else if (d.kind === 'xp') {
         ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
         ctx.beginPath();
@@ -2324,7 +2296,7 @@ export class CartoonRenderer {
     const frozen = state.powerUpTimers.freeze > 0;
     for (const z of state.zombies) {
       if (z.hp <= 0 || !this.inView(z.x, z.y, 115)) continue;
-      const spKey = ZOMBIE_SPRITE_MAP[z.kind];
+      const spKey = ZOMBIE_SPRITE_BY_KIND[z.kind] || 'zombie_walker';
       const sway = Math.sin(z.wobblePhase) * 0.12;
       let scaleX = 1 + Math.sin(z.wobblePhase * 2) * 0.05;
       let scaleY = 2 - scaleX;
@@ -2370,6 +2342,17 @@ export class CartoonRenderer {
         ctx.beginPath();
         ctx.arc(0, 0, z.radius + 7, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(249, 115, 22, 0.38)';
+        ctx.fill();
+      } else if (z.frenzyTimer && z.frenzyTimer > 0) {
+        ctx.beginPath();
+        ctx.arc(0, 0, z.radius + 7, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(192, 132, 252, 0.34)';
+        ctx.fill();
+      } else if (z.kind === 'boomer') {
+        const pulse = 0.16 + Math.sin(performance.now() * 0.012 + z.wobblePhase) * 0.08;
+        ctx.beginPath();
+        ctx.arc(0, 0, z.radius + 6, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(249, 115, 22, ${pulse})`;
         ctx.fill();
       }
 
@@ -2424,6 +2407,7 @@ export class CartoonRenderer {
 
       ctx.restore();
 
+      const zIsBoss = isBossKind(z.kind);
       if (z.kind === 'thief') {
         this.drawCachedLabel(
           ctx,
@@ -2433,40 +2417,77 @@ export class CartoonRenderer {
           '#fde047',
           11
         );
-      } else if (z.kind === 'boss' || z.kind === 'miniboss') {
+      } else if (zIsBoss || z.kind === 'miniboss') {
+        const bp = zIsBoss ? getBossProfile(z.kind) : null;
+        const bName = bp ? (I18n.isZh() ? bp.zhName : bp.enName) : I18n.t('bossTyrant');
         this.drawCachedLabel(
           ctx,
-          z.kind === 'boss' ? I18n.t('bossKing') : I18n.t('bossTyrant'),
+          bName,
           z.x,
           z.y - z.radius - 24,
-          '#fca5a5',
+          bp ? bp.color : '#fca5a5',
           12
         );
       }
 
-      if (z.hp < z.maxHp || z.kind === 'boss' || z.kind === 'miniboss' || z.kind === 'thief') {
+      if (z.hp < z.maxHp || zIsBoss || z.kind === 'miniboss' || z.kind === 'thief') {
         const bw = Math.max(36, z.radius * 1.9);
         const bx = z.x - bw / 2;
         const by = z.y - z.radius - 13;
         ctx.fillStyle = '#090d16';
         ctx.fillRect(bx - 1.5, by - 1.5, bw + 3, 7);
-        ctx.fillStyle = z.kind === 'thief' ? '#facc15' : '#ef4444';
+        ctx.fillStyle = z.kind === 'thief' ? '#facc15' : zIsBoss ? z.color : '#ef4444';
         ctx.fillRect(bx, by, bw * Math.max(0, z.hp / z.maxHp), 4);
       }
     }
   }
 
   private drawSpits(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    const now = performance.now();
     for (const s of state.spits) {
-      if (!this.inView(s.x, s.y, 36)) continue;
+      if (!this.inView(s.x, s.y, 38)) continue;
+      const pk = s.projKind || 'acid';
+      if (pk === 'saw') {
+        this.drawSpinningSawDisc(ctx, s.x, s.y, s.radius * 1.25, now * 0.032, '#fda4af', '#ef4444');
+        continue;
+      }
+
       const isBossOrb = s.radius >= 9;
       const ang = Math.atan2(s.vy, s.vx);
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(ang);
 
-      // 腐蚀酸液彗星尾迹与液滴
-      ctx.fillStyle = isBossOrb ? 'rgba(244, 63, 94, 0.34)' : 'rgba(163, 230, 53, 0.32)';
+      const tailCol =
+        pk === 'cryo'
+          ? 'rgba(56, 189, 248, 0.38)'
+          : pk === 'shock'
+            ? 'rgba(139, 92, 246, 0.38)'
+            : pk === 'fire'
+              ? 'rgba(249, 115, 22, 0.44)'
+              : isBossOrb
+                ? 'rgba(132, 204, 22, 0.36)'
+                : 'rgba(163, 230, 53, 0.32)';
+      const coreCol =
+        pk === 'cryo'
+          ? '#67e8f9'
+          : pk === 'shock'
+            ? '#38bdf8'
+            : pk === 'fire'
+              ? '#fb923c'
+              : '#a3e635';
+      const strokeCol =
+        pk === 'cryo'
+          ? '#0c4a6e'
+          : pk === 'shock'
+            ? '#1e1b4b'
+            : pk === 'fire'
+              ? '#7c2d12'
+              : '#1a2e05';
+      const specCol =
+        pk === 'cryo' ? '#f0f9ff' : pk === 'shock' ? '#e0e7ff' : pk === 'fire' ? '#fef08a' : '#ecfccb';
+
+      ctx.fillStyle = tailCol;
       ctx.beginPath();
       ctx.moveTo(s.radius, -s.radius * 0.85);
       ctx.lineTo(-s.radius * 2.8, 0);
@@ -2476,15 +2497,15 @@ export class CartoonRenderer {
 
       ctx.beginPath();
       ctx.ellipse(0, 0, s.radius * 1.25, s.radius * 0.92, 0, 0, Math.PI * 2);
-      ctx.fillStyle = isBossOrb ? '#fb7185' : '#a3e635';
+      ctx.fillStyle = coreCol;
       ctx.fill();
       ctx.lineWidth = 2;
-      ctx.strokeStyle = isBossOrb ? '#4c0519' : '#1a2e05';
+      ctx.strokeStyle = strokeCol;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.arc(s.radius * 0.25, -s.radius * 0.2, s.radius * 0.42, 0, Math.PI * 2);
-      ctx.fillStyle = isBossOrb ? '#ffe4e6' : '#ecfccb';
+      ctx.fillStyle = specCol;
       ctx.fill();
       ctx.restore();
     }
@@ -3649,7 +3670,7 @@ export class CartoonRenderer {
 
     ctx.fillStyle = '#ef4444';
     for (const z of state.zombies) {
-      const sz = z.kind === 'boss' ? 5 : 3.2;
+      const sz = isBossKind(z.kind) ? 5.2 : 3.2;
       ctx.fillRect(ox + z.x * scale - sz / 2, oy + z.y * scale - sz / 2, sz, sz);
     }
 
@@ -3700,7 +3721,10 @@ export class CartoonRenderer {
     }
     for (const z of state.zombies) {
       if (z.kind === 'thief') targets.push({ x: z.x, y: z.y, sp: 'zombie_thief', color: '#fde047' });
-      else if (z.kind === 'boss') targets.push({ x: z.x, y: z.y, sp: 'zombie_boss', color: '#ef4444' });
+      else if (isBossKind(z.kind)) {
+        const bp = getBossProfile(z.kind);
+        targets.push({ x: z.x, y: z.y, sp: bp.sprite, color: bp.color });
+      }
     }
     if (state.waveState === 'extraction') {
       targets.push({

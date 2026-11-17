@@ -13,8 +13,9 @@ import {
   WindowConfig,
 } from '../types';
 import { RemotePlayerState } from '../net/CoopProtocol';
+import { ZombieKind } from '../data/enemies';
 
-export type ZombieKind = 'walker' | 'runner' | 'spitter' | 'thief' | 'miniboss' | 'boss';
+export type { ZombieKind };
 
 export interface RuntimeRoom extends RoomConfig {
   unlocked: boolean;
@@ -24,7 +25,6 @@ export interface RuntimeWindow extends WindowConfig {
   planks: number;
   maxPlanks: number;
   armorPlanks: number;
-  fortifyProgress: number;
   attackCooldown: number;
 }
 
@@ -72,6 +72,7 @@ export interface ZombieEntity {
   slashAngle: number;
   recoilVx: number;
   recoilVy: number;
+  frenzyTimer?: number;
   netTx?: number;
   netTy?: number;
   extrapAge?: number;
@@ -131,6 +132,8 @@ export interface AcidSpitEntity {
   radius: number;
   damage: number;
   life: number;
+  projKind?: 'acid' | 'saw' | 'cryo' | 'shock' | 'fire';
+  bouncesLeft?: number;
 }
 
 export interface AcidPoolEntity {
@@ -144,7 +147,7 @@ export interface AcidPoolEntity {
 
 export interface DropItem {
   id: number;
-  kind: 'cash' | 'xp' | 'powerup';
+  kind: 'cash' | 'xp' | 'powerup' | 'heal';
   powerUp?: PowerUpType;
   value: number;
   x: number;
@@ -302,6 +305,8 @@ export interface RunSnapshot {
     footDustCd: number;
     distanceAccum: number;
     vampCounter: number;
+    killHealCounter: number;
+    chillTimer: number;
   };
   mapRevision: number;
   modifiers: RunModifiers;

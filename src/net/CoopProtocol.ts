@@ -206,9 +206,9 @@ export interface WorldSyncPayload {
   turrets: [x: number, y: number, angle: number, life: number][];
   mechDog: [active: number, x: number, y: number, angle: number];
   zombies: ZombieNetTuple[];
-  spits: [x: number, y: number, vx: number, vy: number, radius: number][];
+  spits: [x: number, y: number, vx: number, vy: number, radius: number, pKind?: number][];
   pools: [x: number, y: number, radius: number, life: number, isBoss: number][];
-  drops: [id: number, kind: 'cash' | 'xp' | 'powerup', powerUp: PowerUpType | '', val: number, x: number, y: number, life: number][];
+  drops: [id: number, kind: 'cash' | 'xp' | 'powerup' | 'heal', powerUp: PowerUpType | '', val: number, x: number, y: number, life: number][];
   players: PlayerSyncPayload[];
 }
 

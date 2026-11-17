@@ -8,9 +8,20 @@ export type SpriteKey =
   | 'zombie_walker'
   | 'zombie_runner'
   | 'zombie_spitter'
+  | 'zombie_boomer'
+  | 'zombie_riot'
+  | 'zombie_frost'
+  | 'zombie_necro'
   | 'zombie_thief'
   | 'zombie_miniboss'
   | 'zombie_boss'
+  | 'boss_warden'
+  | 'boss_chainsaw'
+  | 'boss_venom'
+  | 'boss_surgeon'
+  | 'boss_kraken'
+  | 'boss_tesla'
+  | 'boss_cryo'
   | 'prop_chest'
   | 'prop_barrel'
   | 'prop_turret'
@@ -119,9 +130,20 @@ const SPRITE_FILES: Record<SpriteKey, string> = {
   zombie_walker: './assets/zombie_walker.png',
   zombie_runner: './assets/zombie_runner.png',
   zombie_spitter: './assets/zombie_spitter.png',
+  zombie_boomer: './assets/zombie_boomer.png',
+  zombie_riot: './assets/zombie_riot.png',
+  zombie_frost: './assets/zombie_frost.png',
+  zombie_necro: './assets/zombie_necro.png',
   zombie_thief: './assets/zombie_thief.png',
   zombie_miniboss: './assets/zombie_miniboss.png',
   zombie_boss: './assets/zombie_boss.png',
+  boss_warden: './assets/boss_warden.png',
+  boss_chainsaw: './assets/boss_chainsaw.png',
+  boss_venom: './assets/boss_venom.png',
+  boss_surgeon: './assets/boss_surgeon.png',
+  boss_kraken: './assets/boss_kraken.png',
+  boss_tesla: './assets/boss_tesla.png',
+  boss_cryo: './assets/boss_cryo.png',
   prop_chest: './assets/prop_chest.png',
   prop_barrel: './assets/prop_barrel.png',
   prop_turret: './assets/prop_turret.png',

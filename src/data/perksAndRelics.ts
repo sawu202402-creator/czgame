@@ -70,13 +70,13 @@ export const IN_RUN_PERKS: InRunPerkDef[] = [
   },
   {
     id: 'combat_medic',
-    name: '战地工兵',
-    desc: '每次修好一块防线木板回复 8% 生命值',
-    icon: '🩹',
-    sprite: './assets/prop_wood_plank.png',
-    color: '#14b8a6',
+    name: '嗜血虹吸',
+    desc: '每击杀 10 只僵尸立即回复 8% 最大生命值（可叠加）',
+    icon: '💉',
+    sprite: './assets/item_medkit.png',
+    color: '#10b981',
     apply: (m) => {
-      m.repairHealRatio += 0.08;
+      m.killHealRatio += 0.08;
     },
   },
   {

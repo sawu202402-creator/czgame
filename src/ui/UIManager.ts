@@ -1,4 +1,5 @@
 import { SoundFX } from '../audio/SoundFX';
+import { getBossProfile, isBossKind } from '../data/enemies';
 import { POWERUP_META, RELICS } from '../data/perksAndRelics';
 import { STAGES } from '../data/stages';
 import { WEAPON_LIST, WEAPONS } from '../data/weapons';
@@ -1738,9 +1739,17 @@ export class UIManager {
         s.armoryAdCooldown > 0
           ? I18n.t('supCooldown', { s: s.armoryAdCooldown.toFixed(0) })
           : I18n.t('supCashBtn');
+      const alloyWin = this.engine.getAlloyWindowsStatus();
+      const canBuyAlloyWin = alloyWin.total > 0 && alloyWin.done < alloyWin.total && s.cash >= 180;
+      const alloyWinFull = alloyWin.total > 0 && alloyWin.done >= alloyWin.total;
 
       contentHtml = `
         <div class="supply-grid">
+          <div class="supply-card">
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> ${I18n.t('supAlloyWinName')}</div>
+            <div class="sup-meta">${I18n.t('supAlloyWinMeta', { done: alloyWin.done, total: alloyWin.total })}</div>
+            <button class="btn-cartoon btn-mini ${alloyWinFull ? 'btn-gray' : canBuyAlloyWin ? 'btn-blue' : 'btn-disabled'}" data-tac="alloy_windows">${alloyWinFull ? I18n.t('supAlloyWinFullBtn') : I18n.t('supAlloyWinBtn')}</button>
+          </div>
           <div class="supply-card">
             <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_armor.png" alt="" /> ${I18n.t('supArmorName')}</div>
             <div class="sup-meta">${I18n.t('supArmorMeta', { cur: Math.round(s.player.armor) })}</div>
@@ -1851,7 +1860,13 @@ export class UIManager {
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-tac]').forEach((btn) => {
       btn.onclick = () => {
-        const item = btn.dataset.tac as 'grenades' | 'medkit' | 'turret' | 'all_ammo' | 'armor';
+        const item = btn.dataset.tac as
+          | 'grenades'
+          | 'medkit'
+          | 'turret'
+          | 'all_ammo'
+          | 'armor'
+          | 'alloy_windows';
         const res = this.engine.buyShopTacticalItem(item);
         this.renderArmoryShop(res.msg);
       };
@@ -2024,7 +2039,7 @@ export class UIManager {
     });
 
     const bossTarget =
-      s.zombies.find((z) => z.kind === 'boss') || s.zombies.find((z) => z.kind === 'miniboss');
+      s.zombies.find((z) => isBossKind(z.kind)) || s.zombies.find((z) => z.kind === 'miniboss');
     const bossKey = bossTarget ? `${I18n.lang}:${bossTarget.id}:${Math.ceil(bossTarget.hp)}` : 'none';
     setIfChanged('bossHud', bossKey, () => {
       const bossBox = this.hudRoot!.querySelector('#hud-boss-box') as HTMLElement;
@@ -2032,7 +2047,8 @@ export class UIManager {
         bossBox.style.display = 'block';
         const pct = Math.max(0, (bossTarget.hp / bossTarget.maxHp) * 100);
         (this.hudRoot!.querySelector('#hud-boss-fill') as HTMLElement).style.width = `${pct}%`;
-        const title = bossTarget.kind === 'boss' ? I18n.t('bossKing') : I18n.t('bossTyrant');
+        const bp = isBossKind(bossTarget.kind) ? getBossProfile(bossTarget.kind) : null;
+        const title = bp ? (I18n.isZh() ? bp.zhName : bp.enName) : I18n.t('bossTyrant');
         (this.hudRoot!.querySelector('#hud-boss-text') as HTMLElement).textContent =
           `${title} ${Math.ceil(bossTarget.hp)}`;
       } else {
