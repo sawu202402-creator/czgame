@@ -4,13 +4,14 @@ class SoundFXManager {
   private noiseBufferLong: AudioBuffer | null = null;
   private muted = false;
   private userMuted = false;
+  private platformMuted = false;
   private lastShootAt = 0;
   private lastPickupAt = 0;
   private lastExplosionAt = 0;
   private lastRepairAt = 0;
 
   private ensureCtx(): AudioContext | null {
-    if (this.muted || this.userMuted) return null;
+    if (this.muted || this.userMuted || this.platformMuted) return null;
     if (!this.ctx) {
       const AudioCtx =
         window.AudioContext ||
@@ -44,6 +45,13 @@ class SoundFXManager {
 
   public setAdMuted(adMuted: boolean): void {
     this.muted = adMuted;
+  }
+
+  public setPlatformMuted(pm: boolean): void {
+    this.platformMuted = pm;
+    if (pm && this.ctx && this.ctx.state === 'running') {
+      this.ctx.suspend().catch(() => {});
+    }
   }
 
   public toggleUserMute(): boolean {

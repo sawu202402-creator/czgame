@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import zipfile
 
@@ -63,6 +64,13 @@ def pack_target(target_key: str) -> None:
 
     size_mb = os.path.getsize(out_zip) / (1024 * 1024)
     print(f"[{target_key.upper()}] Created {out_zip} ({size_mb:.2f} MB) — SDK audit PASSED.")
+
+    if target_key == "crazygames":
+        out_folder = os.path.join(ROOT_DIR, "crazygames-upload")
+        if os.path.exists(out_folder):
+            shutil.rmtree(out_folder)
+        shutil.copytree(DIST_DIR, out_folder)
+        print(f"[CRAZYGAMES] Extracted drag-and-drop folder: {out_folder}")
 
 
 if __name__ == "__main__":

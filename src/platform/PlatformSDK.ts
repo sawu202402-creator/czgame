@@ -20,6 +20,8 @@ declare global {
           showInviteButton?: (params: Record<string, string>) => string;
           hideInviteButton?: () => void;
           getInviteParam?: (key: string) => string | null;
+          settings?: { muteAudio?: boolean };
+          addSettingsChangeListener?: (cb: (settings: { muteAudio?: boolean }) => void) => void;
         };
         ad?: {
           requestAd: (
@@ -106,6 +108,14 @@ class PlatformAdapter {
           await window.CrazyGames.SDK.init();
           const env = window.CrazyGames.SDK.environment;
           this.sdkActive = env === 'crazygames' || env === 'local';
+          if (window.CrazyGames.SDK.game?.settings?.muteAudio !== undefined) {
+            SoundFX.setPlatformMuted(Boolean(window.CrazyGames.SDK.game.settings.muteAudio));
+          }
+          window.CrazyGames.SDK.game?.addSettingsChangeListener?.((newSettings) => {
+            if (newSettings && typeof newSettings.muteAudio === 'boolean') {
+              SoundFX.setPlatformMuted(newSettings.muteAudio);
+            }
+          });
         }
       } catch {
         this.sdkActive = false;
