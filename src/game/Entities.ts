@@ -71,6 +71,7 @@ export interface ZombieEntity {
   recoilVy: number;
   netTx?: number;
   netTy?: number;
+  extrapAge?: number;
 }
 
 export interface BulletEntity {

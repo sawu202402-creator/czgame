@@ -75,6 +75,10 @@ export interface RemotePlayerState {
   y: number;
   netTx: number;
   netTy: number;
+  vx: number;
+  vy: number;
+  extrapAge: number;
+  lastSeq: number;
   angle: number;
   netAngle: number;
   legAngle: number;
@@ -100,12 +104,15 @@ export interface RemotePlayerState {
 }
 
 export interface PlayerSyncPayload {
+  seq: number;
   peerId: string;
   slot: number;
   callsign: string;
   color: string;
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   angle: number;
   legAngle: number;
   walkPhase: number;
@@ -166,6 +173,8 @@ export type ZombieNetTuple = [
   kind: ZombieKind,
   x: number,
   y: number,
+  vx: number,
+  vy: number,
   hp: number,
   maxHp: number,
   facing: number,
@@ -210,6 +219,7 @@ export type CoopNetMessage =
   | { type: 'ready_toggle'; ready: boolean; callsign: string }
   | { type: 'start_game'; stageId: string; mode: GameMode; lobby: LobbyState }
   | { type: 'player_sync'; p: PlayerSyncPayload }
+  | { type: 'players_fast'; list: PlayerSyncPayload[] }
   | { type: 'world_sync'; w: WorldSyncPayload }
   | { type: 'cmd_fire'; ownerId: string; bullets: SerializedBullet[]; sfxKey: string; evolved: boolean }
   | { type: 'cmd_grenade'; ownerId: string; g: SerializedGrenade }

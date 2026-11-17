@@ -510,6 +510,9 @@ class CoopNetworkManager {
 
   public broadcastToClients(msg: CoopNetMessage, excludePeerId?: string): void {
     if (this.role !== 'host' || !this.bus) return;
+    if (excludePeerId && this.clientLastSeen.size <= 1 && this.clientLastSeen.has(excludePeerId)) {
+      return;
+    }
     this.bus.send('*', msg, excludePeerId);
   }
 
@@ -521,6 +524,10 @@ class CoopNetworkManager {
   public sendToHost(msg: CoopNetMessage): void {
     if (this.role !== 'client' || !this.bus || !this.hostPeerId) return;
     this.bus.send(this.hostPeerId, msg);
+  }
+
+  public isCongested(): boolean {
+    return this.bus ? this.bus.isCongested() : false;
   }
 
   private notifyLobby(): void {

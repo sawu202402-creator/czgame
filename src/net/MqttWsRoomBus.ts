@@ -28,7 +28,6 @@ function encodeUtf8Field(str: string): Uint8Array {
 }
 
 function buildConnectPacket(clientId: string): Uint8Array {
-  // MQTT 3.1.1 Variable Header (10 bytes): Protocol Name "MQTT" (0,4,'M','Q','T','T'), Level 4, CleanSession(0x02), KeepAlive 30s(0,30)
   const varHdr = new Uint8Array([0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x04, 0x02, 0x00, 0x1e]);
   const payload = encodeUtf8Field(clientId);
   const remLen = varHdr.length + payload.length;
@@ -81,7 +80,7 @@ class SingleMqttLink {
     private clientId: string,
     private topic: string,
     private onReady: () => void,
-    private onPayload: (text: string) => void,
+    private onBatchPayloads: (texts: string[]) => void,
     private onDisconnect: () => void
   ) {
     this.connect();
@@ -108,10 +107,9 @@ class SingleMqttLink {
       };
 
       ws.onclose = () => {
-        const wasReady = this.ready;
         this.ready = false;
         window.clearInterval(this.pingTimer);
-        if (!this.closed && wasReady) {
+        if (!this.closed) {
           this.onDisconnect();
         }
       };
@@ -130,6 +128,8 @@ class SingleMqttLink {
       this.rxBuf = merged;
     }
 
+    const batch: string[] = [];
+
     while (this.rxBuf.length >= 2) {
       const headerByte = this.rxBuf[0];
       let mult = 1;
@@ -147,7 +147,6 @@ class SingleMqttLink {
         mult *= 128;
         if ((b & 0x80) === 0) break;
         if (mult > 128 * 128 * 128) {
-          // Malformed frame
           this.rxBuf = new Uint8Array(0);
           return;
         }
@@ -162,7 +161,6 @@ class SingleMqttLink {
 
       const pktType = headerByte & 0xf0;
       if (pktType === 0x20) {
-        // CONNACK -> send SUBSCRIBE and wait for SUBACK (0x90)
         if (body.length >= 2 && body[1] === 0x00 && this.ws?.readyState === WebSocket.OPEN) {
           this.ws.send(buildSubscribePacket(this.topic, 1));
           window.clearInterval(this.pingTimer);
@@ -173,24 +171,29 @@ class SingleMqttLink {
           }, 18_000);
         }
       } else if (pktType === 0x90) {
-        // SUBACK -> subscription active on broker!
         if (!this.ready) {
           this.ready = true;
           this.onReady();
         }
       } else if (pktType === 0x30) {
-        // PUBLISH
         if (body.length < 2) continue;
         const topicLen = (body[0] << 8) | body[1];
         let pOffset = 2 + topicLen;
         const qos = (headerByte >> 1) & 0x03;
         if (qos > 0) pOffset += 2;
         if (pOffset <= body.length) {
-          const text = dec.decode(body.subarray(pOffset));
-          this.onPayload(text);
+          batch.push(dec.decode(body.subarray(pOffset)));
         }
       }
     }
+
+    if (batch.length > 0) {
+      this.onBatchPayloads(batch);
+    }
+  }
+
+  public getBufferedAmount(): number {
+    return this.ws ? this.ws.bufferedAmount : 0;
   }
 
   public publish(jsonText: string): void {
@@ -223,86 +226,138 @@ class SingleMqttLink {
 export interface RoomWireEnvelope<T> {
   id: string;
   from: string;
-  to: string; // '*' or specific peerId
+  to: string;
   exclude?: string;
   msg: T;
 }
 
 /**
- * 双全球节点 WSS 房间消息总线（同时穿透国内 4G/5G、微信浏览器、对称 NAT 与海外 VPN 网络）
+ * 单主节点低抖动 WSS 房间总线（主节点不可达时自动切换备用节点，杜绝双节点跨洲延迟差导致的位置乱跳）
  */
-export class MqttWsRoomBus<T> {
-  private links: SingleMqttLink[] = [];
+export class MqttWsRoomBus<T extends { type?: string }> {
+  private activeLink: SingleMqttLink | null = null;
   private seenIds = new Set<string>();
   private seenQueue: string[] = [];
   private seq = 0;
   private openedOnce = false;
-  private connectTimeout = 0;
+  private closed = false;
+  private failoverTimer = 0;
+  private brokerIndex = 0;
+  private topic: string;
 
   constructor(
     private myPeerId: string,
     roomCode: string,
-    onConnected: () => void,
+    private onConnected: () => void,
     private onEnvelope: (env: RoomWireEnvelope<T>) => void,
-    onAllFailed: () => void,
-    onExtraLinkReady?: () => void
+    private onAllFailed: () => void,
+    private onReconnected?: () => void
   ) {
-    const topic = `czgame/room/v2/${roomCode}`;
-
-    this.connectTimeout = window.setTimeout(() => {
-      if (!this.openedOnce) {
-        onAllFailed();
-      }
-    }, 8500);
-
-    BROKER_URLS.forEach((url, i) => {
-      const cid = `cz_${myPeerId}_${i}_${Math.floor(Math.random() * 9999)}`;
-      const link = new SingleMqttLink(
-        url,
-        cid,
-        topic,
-        () => {
-          if (!this.openedOnce) {
-            this.openedOnce = true;
-            window.clearTimeout(this.connectTimeout);
-            onConnected();
-          } else {
-            onExtraLinkReady?.();
-          }
-        },
-        (rawText) => this.handleIncoming(rawText),
-        () => {
-          if (this.openedOnce && this.links.every((l) => !l.ready)) {
-            onAllFailed();
-          }
-        }
-      );
-      this.links.push(link);
-    });
+    this.topic = `czgame/room/v2/${roomCode}`;
+    this.openBroker(0);
   }
 
-  private handleIncoming(rawText: string): void {
-    try {
-      const env = JSON.parse(rawText) as RoomWireEnvelope<T>;
-      if (!env || !env.id || !env.from || env.from === this.myPeerId) return;
-      if (env.exclude && env.exclude === this.myPeerId) return;
-      if (env.to !== '*' && env.to !== this.myPeerId) return;
-
-      if (this.seenIds.has(env.id)) return;
-      this.seenIds.add(env.id);
-      this.seenQueue.push(env.id);
-      if (this.seenQueue.length > 360) {
-        const oldest = this.seenQueue.shift()!;
-        this.seenIds.delete(oldest);
+  private openBroker(idx: number): void {
+    if (this.closed) return;
+    if (idx >= BROKER_URLS.length) {
+      if (!this.openedOnce) {
+        this.onAllFailed();
+      } else {
+        // 已建立过房间时短暂重连主节点
+        this.failoverTimer = window.setTimeout(() => this.openBroker(0), 1200);
       }
+      return;
+    }
 
+    this.brokerIndex = idx;
+    this.activeLink?.close();
+
+    const url = BROKER_URLS[idx];
+    const cid = `cz_${this.myPeerId}_${idx}_${Math.floor(Math.random() * 9999)}`;
+
+    window.clearTimeout(this.failoverTimer);
+    this.failoverTimer = window.setTimeout(() => {
+      if (!this.activeLink?.ready && !this.closed) {
+        this.openBroker(idx + 1);
+      }
+    }, 3400);
+
+    this.activeLink = new SingleMqttLink(
+      url,
+      cid,
+      this.topic,
+      () => {
+        window.clearTimeout(this.failoverTimer);
+        if (!this.openedOnce) {
+          this.openedOnce = true;
+          this.onConnected();
+        } else {
+          this.onReconnected?.();
+        }
+      },
+      (batchTexts) => this.handleBatch(batchTexts),
+      () => {
+        if (this.closed) return;
+        window.clearTimeout(this.failoverTimer);
+        this.openBroker(this.brokerIndex + 1);
+      }
+    );
+  }
+
+  private handleBatch(batchTexts: string[]): void {
+    // 同一 TCP 接收批次内如果积压了多帧高频快照（world_sync / players_fast / player_sync），只保留最新一帧，彻底消除瞬间卡顿！
+    const parsed: RoomWireEnvelope<T>[] = [];
+    let latestWorldIdx = -1;
+    let latestPlayersFastIdx = -1;
+    const latestPlayerSyncByFrom = new Map<string, number>();
+
+    for (let i = 0; i < batchTexts.length; i++) {
+      try {
+        const env = JSON.parse(batchTexts[i]) as RoomWireEnvelope<T>;
+        if (!env || !env.id || !env.from || env.from === this.myPeerId) continue;
+        if (env.exclude && env.exclude === this.myPeerId) continue;
+        if (env.to !== '*' && env.to !== this.myPeerId) continue;
+
+        if (this.seenIds.has(env.id)) continue;
+        this.seenIds.add(env.id);
+        this.seenQueue.push(env.id);
+        if (this.seenQueue.length > 360) {
+          const oldest = this.seenQueue.shift()!;
+          this.seenIds.delete(oldest);
+        }
+
+        const outIdx = parsed.length;
+        parsed.push(env);
+
+        const t = env.msg?.type;
+        if (t === 'world_sync') {
+          latestWorldIdx = outIdx;
+        } else if (t === 'players_fast') {
+          latestPlayersFastIdx = outIdx;
+        } else if (t === 'player_sync') {
+          latestPlayerSyncByFrom.set(env.from, outIdx);
+        }
+      } catch {
+        // ignore malformed payload
+      }
+    }
+
+    for (let i = 0; i < parsed.length; i++) {
+      const env = parsed[i];
+      const t = env.msg?.type;
+      if (t === 'world_sync' && i !== latestWorldIdx) continue;
+      if (t === 'players_fast' && i !== latestPlayersFastIdx) continue;
+      if (t === 'player_sync' && latestPlayerSyncByFrom.get(env.from) !== i) continue;
       this.onEnvelope(env);
-    } catch {
-      // ignore malformed payload
     }
   }
 
+  public isCongested(): boolean {
+    return !this.activeLink || !this.activeLink.ready || this.activeLink.getBufferedAmount() > 24_576;
+  }
+
   public send(to: string, msg: T, exclude?: string): void {
+    if (!this.activeLink || !this.activeLink.ready) return;
     this.seq = (this.seq + 1) % 1_000_000;
     const env: RoomWireEnvelope<T> = {
       id: `${this.myPeerId}:${this.seq.toString(36)}`,
@@ -311,17 +366,13 @@ export class MqttWsRoomBus<T> {
       ...(exclude ? { exclude } : {}),
       msg,
     };
-    const text = JSON.stringify(env);
-    for (const link of this.links) {
-      link.publish(text);
-    }
+    this.activeLink.publish(JSON.stringify(env));
   }
 
   public close(): void {
-    window.clearTimeout(this.connectTimeout);
-    for (const link of this.links) {
-      link.close();
-    }
-    this.links = [];
+    this.closed = true;
+    window.clearTimeout(this.failoverTimer);
+    this.activeLink?.close();
+    this.activeLink = null;
   }
 }

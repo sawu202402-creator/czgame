@@ -59,8 +59,20 @@ export class GameEngine {
 
   // 多人联机状态同步计时器与序列号
   private playerSyncTimer = 0;
+  private playersFastTimer = 0;
   private worldSyncTimer = 0;
+  private playerSyncSeq = 0;
   private worldSyncSeq = 0;
+  private lastAppliedWorldSeq = 0;
+  private localPlayerVx = 0;
+  private localPlayerVy = 0;
+  private pendingNetBullets: SerializedBullet[] = [];
+  private pendingFireSfx = 'rifle';
+  private pendingFireEvolved = false;
+  private fireFlushTimer = 0;
+  private reviveTickTimer = 0;
+  private reviveTickTargetId = '';
+  private reviveTickAccum = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -127,6 +139,10 @@ export class GameEngine {
                 y: sy,
                 netTx: sx,
                 netTy: sy,
+                vx: 0,
+                vy: 0,
+                extrapAge: 0,
+                lastSeq: 0,
                 angle: 0,
                 netAngle: 0,
                 legAngle: 0,
@@ -161,8 +177,18 @@ export class GameEngine {
     this.modalPaused = false;
     this.paused = false;
     this.playerSyncTimer = 0;
+    this.playersFastTimer = 0;
     this.worldSyncTimer = 0;
+    this.playerSyncSeq = 0;
     this.worldSyncSeq = 0;
+    this.lastAppliedWorldSeq = 0;
+    this.localPlayerVx = 0;
+    this.localPlayerVy = 0;
+    this.pendingNetBullets = [];
+    this.fireFlushTimer = 0;
+    this.reviveTickTimer = 0;
+    this.reviveTickTargetId = '';
+    this.reviveTickAccum = 0;
 
     this.state = {
       stage,
@@ -1127,9 +1153,10 @@ export class GameEngine {
       this.updateClientWorldVisuals(dt);
       this.updateFX(dt);
 
+      this.flushPendingNetFire(dt);
       this.playerSyncTimer -= dt;
-      if (this.playerSyncTimer <= 0) {
-        this.playerSyncTimer = 0.033;
+      if (this.playerSyncTimer <= 0 && !CoopManager.isCongested()) {
+        this.playerSyncTimer = 0.05;
         CoopManager.sendToHost({ type: 'player_sync', p: this.buildLocalPlayerSync() });
       }
     } else {
@@ -1166,11 +1193,19 @@ export class GameEngine {
       this.updateFX(dt);
 
       if (s.isCoop && CoopManager.role === 'host') {
+        this.flushPendingNetFire(dt);
         this.checkCoopSquadWipe();
         this.worldSyncTimer -= dt;
-        if (this.worldSyncTimer <= 0) {
-          this.worldSyncTimer = 0.05;
-          CoopManager.broadcastToClients({ type: 'world_sync', w: this.buildWorldSyncPayload() });
+        this.playersFastTimer -= dt;
+        if (!CoopManager.isCongested()) {
+          if (this.worldSyncTimer <= 0) {
+            this.worldSyncTimer = 0.1;
+            this.playersFastTimer = 0.05;
+            CoopManager.broadcastToClients({ type: 'world_sync', w: this.buildWorldSyncPayload() });
+          } else if (this.playersFastTimer <= 0) {
+            this.playersFastTimer = 0.05;
+            CoopManager.broadcastToClients({ type: 'players_fast', list: this.buildAllPlayersSync() });
+          }
         }
       }
     }
@@ -1500,6 +1535,9 @@ export class GameEngine {
     if (p.weaponSwapTimer > 0) p.weaponSwapTimer = Math.max(0, p.weaponSwapTimer - dt);
     if (p.footDustCd > 0) p.footDustCd -= dt;
 
+    this.localPlayerVx = 0;
+    this.localPlayerVy = 0;
+
     if (p.spectating) {
       p.isMoving = false;
       p.repairProgress = 0;
@@ -1523,6 +1561,10 @@ export class GameEngine {
       p.x += mvDown.x * crawlSpd * dt;
       p.y += mvDown.y * crawlSpd * dt;
       this.resolveEntityInsideWalls(p);
+      if (dt > 0.0005) {
+        this.localPlayerVx = (p.x - ox) / dt;
+        this.localPlayerVy = (p.y - oy) / dt;
+      }
       const crawled = Math.hypot(p.x - ox, p.y - oy);
       p.isMoving = crawled > 0.2;
       if (p.isMoving) {
@@ -1569,6 +1611,10 @@ export class GameEngine {
     p.x += mv.x * speed * dt;
     p.y += mv.y * speed * dt;
     this.resolveEntityInsideWalls(p);
+    if (dt > 0.0005) {
+      this.localPlayerVx = (p.x - oldX) / dt;
+      this.localPlayerVy = (p.y - oldY) / dt;
+    }
 
     const moved = Math.hypot(p.x - oldX, p.y - oldY);
     p.isMoving = moved > 0.35;
@@ -1769,10 +1815,10 @@ export class GameEngine {
         s.bullets.shift();
       }
       const bSpec: SerializedBullet = {
-        x: muzzleX,
-        y: muzzleY,
-        vx: Math.cos(ang) * def.bulletSpeed,
-        vy: Math.sin(ang) * def.bulletSpeed,
+        x: Math.round(muzzleX * 10) / 10,
+        y: Math.round(muzzleY * 10) / 10,
+        vx: Math.round(Math.cos(ang) * def.bulletSpeed * 10) / 10,
+        vy: Math.round(Math.sin(ang) * def.bulletSpeed * 10) / 10,
         radius:
           def.sawblade
             ? wep.evolved
@@ -1787,14 +1833,14 @@ export class GameEngine {
                   : isCrit
                     ? 5.5
                     : 4.4,
-        damage: baseDmg,
-        knockback: def.knockback,
+        damage: Math.round(baseDmg * 10) / 10,
+        knockback: Math.round(def.knockback),
         pierceLeft: def.pierce + s.modifiers.extraPierce + (wep.evolved ? 1 : 0),
         bouncesLeft:
           (def.bounces || 0) +
           (def.sawblade && wep.evolved ? 2 : 0) +
           (s.relicIds.includes('rubber_bullets') && !def.explosiveRadius ? 1 : 0),
-        explosiveRadius: def.explosiveRadius ? def.explosiveRadius * (wep.evolved ? 1.35 : 1) : 0,
+        explosiveRadius: def.explosiveRadius ? Math.round(def.explosiveRadius * (wep.evolved ? 1.35 : 1)) : 0,
         color: isCrit ? '#fde047' : wep.evolved ? def.superColor : def.color,
         isCrit,
         flame: Boolean(def.flame || (def.id === 'shotgun' && wep.evolved) || s.relicIds.includes('dragon_oil')),
@@ -1861,18 +1907,45 @@ export class GameEngine {
     SoundFX.shoot(sfxKey, wep.evolved);
 
     if (s.isCoop && netBullets.length > 0) {
-      const fireMsg: CoopNetMessage = {
-        type: 'cmd_fire',
-        ownerId: CoopManager.myPeerId,
-        bullets: netBullets,
-        sfxKey,
-        evolved: wep.evolved,
-      };
-      if (CoopManager.role === 'client') {
-        CoopManager.sendToHost(fireMsg);
-      } else if (CoopManager.role === 'host') {
-        CoopManager.broadcastToClients(fireMsg);
+      for (const nb of netBullets) {
+        if (this.pendingNetBullets.length < 36) {
+          this.pendingNetBullets.push(nb);
+        }
       }
+      this.pendingFireSfx = sfxKey;
+      this.pendingFireEvolved = wep.evolved;
+      if (this.fireFlushTimer <= 0) {
+        this.sendPendingNetFireNow();
+        this.fireFlushTimer = 0.048;
+      }
+    }
+  }
+
+  private flushPendingNetFire(dt: number): void {
+    if (this.fireFlushTimer > 0) {
+      this.fireFlushTimer -= dt;
+    }
+    if (this.fireFlushTimer <= 0 && this.pendingNetBullets.length > 0) {
+      this.sendPendingNetFireNow();
+      this.fireFlushTimer = 0.048;
+    }
+  }
+
+  private sendPendingNetFireNow(): void {
+    if (this.pendingNetBullets.length === 0) return;
+    const bullets = this.pendingNetBullets;
+    this.pendingNetBullets = [];
+    const fireMsg: CoopNetMessage = {
+      type: 'cmd_fire',
+      ownerId: CoopManager.myPeerId,
+      bullets,
+      sfxKey: this.pendingFireSfx,
+      evolved: this.pendingFireEvolved,
+    };
+    if (CoopManager.role === 'client') {
+      CoopManager.sendToHost(fireMsg);
+    } else if (CoopManager.role === 'host' && !CoopManager.isCongested()) {
+      CoopManager.broadcastToClients(fireMsg);
     }
   }
 
@@ -2859,8 +2932,13 @@ export class GameEngine {
       if (z.slowTimer > 0) z.slowTimer -= dt;
       if (z.stunTimer > 0) {
         z.stunTimer -= dt;
+        z.vx = 0;
+        z.vy = 0;
         continue;
       }
+
+      const prevZx = z.x;
+      const prevZy = z.y;
 
       const bossEnraged = z.kind === 'boss' && z.hp < z.maxHp * 0.55;
       const chargeBoost = z.insideBuilding && z.kind === 'miniboss' && z.fleeTimer > 0 ? 1.85 : 1;
@@ -3053,6 +3131,10 @@ export class GameEngine {
               z.targetWindowId = null;
               this.resolveEntityInsideWalls(z);
             }
+            if (dt > 0.0005) {
+              z.vx = (z.x - prevZx) / dt;
+              z.vy = (z.y - prevZy) / dt;
+            }
           }
         }
         continue;
@@ -3074,6 +3156,10 @@ export class GameEngine {
         z.x += z.vx * dt;
         z.y += z.vy * dt;
         this.resolveEntityInsideWalls(z);
+        if (dt > 0.0005) {
+          z.vx = (z.x - prevZx) / dt;
+          z.vy = (z.y - prevZy) / dt;
+        }
         continue;
       }
 
@@ -3202,6 +3288,10 @@ export class GameEngine {
               z.attackState = 'none';
             }
           }
+          if (dt > 0.0005) {
+            z.vx = (z.x - prevZx) / dt;
+            z.vy = (z.y - prevZy) / dt;
+          }
           continue;
         }
 
@@ -3253,6 +3343,10 @@ export class GameEngine {
         z.y += z.vy * dt;
         this.maintainZombiePlayerSeparation(z, targetP, targetP.radius + z.radius + 9);
         this.resolveEntityInsideWalls(z);
+        if (dt > 0.0005) {
+          z.vx = (z.x - prevZx) / dt;
+          z.vy = (z.y - prevZy) / dt;
+        }
 
         if (z.kind === 'spitter') {
           z.rangedCd -= dt;
@@ -3742,11 +3836,17 @@ export class GameEngine {
       }
     }
 
+    const prevOutX = z.x;
+    const prevOutY = z.y;
     const moveAng = Math.atan2(z.vy, z.vx);
     z.facingAngle = this.lerpAngle(z.facingAngle, moveAng, Math.min(1, dt * 9.5));
     z.x += z.vx * dt;
     z.y += z.vy * dt;
     this.resolveOutdoorZombieObstacles(z, win, allowOpenWindowPass);
+    if (dt > 0.0005) {
+      z.vx = (z.x - prevOutX) / dt;
+      z.vy = (z.y - prevOutY) / dt;
+    }
   }
 
   private hasZombieVaultingWindow(win: RunSnapshot['windows'][number]): boolean {
@@ -3885,9 +3985,23 @@ export class GameEngine {
 
   private interpolateRemotePlayers(dt: number): void {
     const s = this.state!;
-    const posLerp = Math.min(1, dt * 15);
     const angLerp = Math.min(1, dt * 18);
     for (const rp of s.remotePlayers) {
+      // 速度航位推测（Dead-Reckoning）：在两次快照之间平滑向前预测至多 160ms，遇到墙壁自动止步，彻底消除停顿与回拉！
+      if ((rp.vx !== 0 || rp.vy !== 0) && rp.extrapAge < 0.16 && !rp.spectating) {
+        const step = Math.min(dt, 0.16 - rp.extrapAge);
+        rp.extrapAge += step;
+        const nx = rp.netTx + rp.vx * step;
+        const ny = rp.netTy + rp.vy * step;
+        if (!this.findBlockingWallOrLockedDoor(nx, rp.netTy, 15)) {
+          rp.netTx = nx;
+        }
+        if (!this.findBlockingWallOrLockedDoor(rp.netTx, ny, 15)) {
+          rp.netTy = ny;
+        }
+      }
+      const errDist = Math.hypot(rp.netTx - rp.x, rp.netTy - rp.y);
+      const posLerp = Math.min(1, dt * (errDist > 85 ? 21 : 14));
       rp.x += (rp.netTx - rp.x) * posLerp;
       rp.y += (rp.netTy - rp.y) * posLerp;
       rp.angle = this.lerpAngle(rp.angle, rp.netAngle, angLerp);
@@ -3904,6 +4018,7 @@ export class GameEngine {
   private updateCoopRevive(dt: number): void {
     const s = this.state!;
     const p = s.player;
+    let clientRevivingId = '';
 
     // 存活玩家靠近倒地队友 78px 内自动读条战地救援（约 2.2 秒扶起）
     if (!p.downed && !p.spectating && p.hp > 0) {
@@ -3912,18 +4027,53 @@ export class GameEngine {
         if (Math.hypot(p.x - rp.x, p.y - rp.y) <= 78) {
           if (CoopManager.role === 'host') {
             this.advanceReviveOnHost(rp.peerId, CoopManager.myPeerId, s.localCallsign, dt);
-          } else {
-            CoopManager.sendToHost({
-              type: 'cmd_revive_tick',
-              reviverId: CoopManager.myPeerId,
-              reviverName: s.localCallsign,
-              targetId: rp.peerId,
-              dt,
-            });
+          } else if (!clientRevivingId) {
+            clientRevivingId = rp.peerId;
           }
         } else if (CoopManager.role === 'host') {
           rp.reviveProgress = Math.max(0, rp.reviveProgress - dt * 0.35);
         }
+      }
+    }
+
+    if (CoopManager.role === 'client') {
+      if (clientRevivingId) {
+        if (this.reviveTickTargetId && this.reviveTickTargetId !== clientRevivingId && this.reviveTickAccum > 0) {
+          CoopManager.sendToHost({
+            type: 'cmd_revive_tick',
+            reviverId: CoopManager.myPeerId,
+            reviverName: s.localCallsign,
+            targetId: this.reviveTickTargetId,
+            dt: +this.reviveTickAccum.toFixed(3),
+          });
+          this.reviveTickAccum = 0;
+        }
+        this.reviveTickTargetId = clientRevivingId;
+        this.reviveTickAccum += dt;
+        this.reviveTickTimer -= dt;
+        if (this.reviveTickTimer <= 0) {
+          this.reviveTickTimer = 0.1;
+          const sendDt = +this.reviveTickAccum.toFixed(3);
+          this.reviveTickAccum = 0;
+          CoopManager.sendToHost({
+            type: 'cmd_revive_tick',
+            reviverId: CoopManager.myPeerId,
+            reviverName: s.localCallsign,
+            targetId: clientRevivingId,
+            dt: sendDt,
+          });
+        }
+      } else if (this.reviveTickAccum > 0 && this.reviveTickTargetId) {
+        CoopManager.sendToHost({
+          type: 'cmd_revive_tick',
+          reviverId: CoopManager.myPeerId,
+          reviverName: s.localCallsign,
+          targetId: this.reviveTickTargetId,
+          dt: +this.reviveTickAccum.toFixed(3),
+        });
+        this.reviveTickAccum = 0;
+        this.reviveTickTargetId = '';
+        this.reviveTickTimer = 0;
       }
     }
 
@@ -4121,13 +4271,25 @@ export class GameEngine {
 
   private updateClientWorldVisuals(dt: number): void {
     const s = this.state!;
-    const zLerp = Math.min(1, dt * 15);
 
     for (const z of s.zombies) {
       z.wobblePhase += dt * (z.kind === 'runner' ? 11 : 7.5);
       if (z.hitFlash > 0) z.hitFlash = Math.max(0, z.hitFlash - dt);
       if (z.attackAnim > 0) z.attackAnim = Math.max(0, z.attackAnim - dt * 4.8);
       if (z.netTx !== undefined && z.netTy !== undefined) {
+        const age = z.extrapAge ?? 0;
+        if ((z.vx !== 0 || z.vy !== 0) && age < 0.15) {
+          const step = Math.min(dt, 0.15 - age);
+          z.extrapAge = age + step;
+          const nx = z.netTx + z.vx * step;
+          const ny = z.netTy + z.vy * step;
+          if (!z.insideBuilding || !this.findBlockingWallOrLockedDoor(nx, ny, z.radius * 0.65)) {
+            z.netTx = nx;
+            z.netTy = ny;
+          }
+        }
+        const err = Math.hypot(z.netTx - z.x, z.netTy - z.y);
+        const zLerp = Math.min(1, dt * (err > 75 ? 19 : 13));
         z.x += (z.netTx - z.x) * zLerp;
         z.y += (z.netTy - z.y) * zLerp;
       }
@@ -4211,12 +4373,15 @@ export class GameEngine {
     const p = s.player;
     const activeWep = p.weapons[p.activeSlot] || p.weapons[0];
     return {
+      seq: ++this.playerSyncSeq,
       peerId: CoopManager.myPeerId,
       slot: s.localSlot,
       callsign: s.localCallsign,
       color: SQUAD_SLOTS[s.localSlot]?.color || '#38bdf8',
       x: Math.round(p.x * 10) / 10,
       y: Math.round(p.y * 10) / 10,
+      vx: Math.round(this.localPlayerVx),
+      vy: Math.round(this.localPlayerVy),
       angle: +p.angle.toFixed(2),
       legAngle: +p.legAngle.toFixed(2),
       walkPhase: +p.walkPhase.toFixed(2),
@@ -4239,17 +4404,20 @@ export class GameEngine {
     };
   }
 
-  private buildWorldSyncPayload(): WorldSyncPayload {
+  private buildAllPlayersSync(): PlayerSyncPayload[] {
     const s = this.state!;
-    const allPlayers: PlayerSyncPayload[] = [
+    return [
       this.buildLocalPlayerSync(),
       ...s.remotePlayers.map((rp) => ({
+        seq: rp.lastSeq,
         peerId: rp.peerId,
         slot: rp.slot,
         callsign: rp.callsign,
         color: rp.color,
-        x: Math.round(rp.x * 10) / 10,
-        y: Math.round(rp.y * 10) / 10,
+        x: Math.round(rp.netTx * 10) / 10,
+        y: Math.round(rp.netTy * 10) / 10,
+        vx: Math.round(rp.vx),
+        vy: Math.round(rp.vy),
         angle: +rp.netAngle.toFixed(2),
         legAngle: +rp.legAngle.toFixed(2),
         walkPhase: +rp.walkPhase.toFixed(2),
@@ -4271,6 +4439,11 @@ export class GameEngine {
         kills: rp.kills,
       })),
     ];
+  }
+
+  private buildWorldSyncPayload(): WorldSyncPayload {
+    const s = this.state!;
+    const allPlayers = this.buildAllPlayersSync();
 
     return {
       seq: ++this.worldSyncSeq,
@@ -4306,17 +4479,19 @@ export class GameEngine {
         z.kind,
         Math.round(z.x),
         Math.round(z.y),
+        Math.round(z.vx),
+        Math.round(z.vy),
         Math.round(z.hp),
         Math.round(z.maxHp),
         +z.facingAngle.toFixed(2),
         z.attackState,
-        +z.attackAnim.toFixed(2),
-        +z.slashAngle.toFixed(2),
+        z.attackAnim > 0.01 ? +z.attackAnim.toFixed(2) : 0,
+        z.attackState !== 'none' || z.attackAnim > 0.01 ? +z.slashAngle.toFixed(2) : 0,
         (z.hitFlash > 0 ? 1 : 0) |
           (z.burnTimer > 0 ? 2 : 0) |
           (z.slowTimer > 0 ? 4 : 0) |
           (z.insideBuilding ? 8 : 0),
-        +z.fleeTimer.toFixed(1),
+        z.fleeTimer > 0.05 ? +z.fleeTimer.toFixed(1) : 0,
       ]),
       spits: s.spits.map((sp) => [
         Math.round(sp.x),
@@ -4348,6 +4523,8 @@ export class GameEngine {
   private applyWorldSyncPayload(w: WorldSyncPayload): void {
     const s = this.state;
     if (!s || CoopManager.role !== 'client') return;
+    if (w.seq <= this.lastAppliedWorldSeq) return;
+    this.lastAppliedWorldSeq = w.seq;
 
     const prevWave = s.wave;
     s.wave = w.wave;
@@ -4471,13 +4648,16 @@ export class GameEngine {
     const nextZombies: ZombieEntity[] = [];
     const incomingIds = new Set<number>();
     for (const tup of w.zombies) {
-      const [id, kind, zx, zy, hp, maxHp, facing, atkState, atkAnim, slashAng, flags, fleeTimer] = tup;
+      const [id, kind, zx, zy, zvx, zvy, hp, maxHp, facing, atkState, atkAnim, slashAng, flags, fleeTimer] = tup;
       incomingIds.add(id);
       const prev = existingZ.get(id);
       if (prev) {
         prev.netTx = zx;
         prev.netTy = zy;
-        if (Math.hypot(zx - prev.x, zy - prev.y) > 160) {
+        prev.vx = zvx;
+        prev.vy = zvy;
+        prev.extrapAge = 0;
+        if (Math.hypot(zx - prev.x, zy - prev.y) > 380) {
           prev.x = zx;
           prev.y = zy;
         }
@@ -4486,7 +4666,9 @@ export class GameEngine {
         prev.facingAngle = facing;
         prev.attackState = atkState;
         prev.attackAnim = Math.max(prev.attackAnim, atkAnim);
-        prev.slashAngle = slashAng;
+        if (atkState !== 'none' || atkAnim > 0.01) {
+          prev.slashAngle = slashAng;
+        }
         if (flags & 1) prev.hitFlash = 0.08;
         prev.burnTimer = flags & 2 ? 0.5 : 0;
         prev.slowTimer = flags & 4 ? 0.5 : 0;
@@ -4501,8 +4683,9 @@ export class GameEngine {
           y: zy,
           netTx: zx,
           netTy: zy,
-          vx: 0,
-          vy: 0,
+          extrapAge: 0,
+          vx: zvx,
+          vy: zvy,
           radius: radiusMap[kind],
           hp,
           maxHp,
@@ -4606,6 +4789,10 @@ export class GameEngine {
         y: ps.y,
         netTx: ps.x,
         netTy: ps.y,
+        vx: ps.vx,
+        vy: ps.vy,
+        extrapAge: 0,
+        lastSeq: ps.seq || 0,
         angle: ps.angle,
         netAngle: ps.angle,
         legAngle: ps.legAngle,
@@ -4634,16 +4821,40 @@ export class GameEngine {
       return;
     }
 
-    rp.callsign = ps.callsign;
-    rp.netTx = ps.x;
-    rp.netTy = ps.y;
-    if (Math.hypot(ps.x - rp.x, ps.y - rp.y) > 180) {
-      rp.x = ps.x;
-      rp.y = ps.y;
+    // 严格拒绝乱序旧包，彻底杜绝队友身位往返瞬移乱跳！
+    if (ps.seq && rp.lastSeq && ps.seq < rp.lastSeq) {
+      return;
     }
-    rp.netAngle = ps.angle;
-    rp.legAngle = ps.legAngle;
-    rp.isMoving = ps.isMoving;
+    if (CoopManager.role === 'host' && ps.seq && rp.lastSeq && ps.seq <= rp.lastSeq) {
+      return;
+    }
+
+    const isFreshSample = !ps.seq || ps.seq > rp.lastSeq;
+    if (ps.seq && ps.seq > rp.lastSeq) {
+      rp.lastSeq = ps.seq;
+    }
+
+    rp.callsign = ps.callsign;
+    if (isFreshSample) {
+      rp.netTx = ps.x;
+      rp.netTy = ps.y;
+      rp.vx = ps.vx;
+      rp.vy = ps.vy;
+      rp.extrapAge = 0;
+      if (Math.hypot(ps.x - rp.x, ps.y - rp.y) > 480) {
+        rp.x = ps.x;
+        rp.y = ps.y;
+      }
+      rp.netAngle = ps.angle;
+      rp.legAngle = ps.legAngle;
+      rp.isMoving = ps.isMoving;
+      rp.activeWepId = ps.activeWepId;
+      rp.evolved = ps.evolved;
+      if (ps.muzzleFlash) rp.muzzleFlashTimer = 0.07;
+      rp.recoilOffset = Math.max(rp.recoilOffset, ps.recoilOffset);
+      rp.repairProgress = ps.repairProgress;
+    }
+
     rp.hp = ps.hp;
     rp.maxHp = ps.maxHp;
     rp.armor = ps.armor;
@@ -4653,11 +4864,6 @@ export class GameEngine {
     if (CoopManager.role === 'client') {
       rp.reviveProgress = ps.reviveProgress;
     }
-    rp.activeWepId = ps.activeWepId;
-    rp.evolved = ps.evolved;
-    if (ps.muzzleFlash) rp.muzzleFlashTimer = 0.07;
-    rp.recoilOffset = Math.max(rp.recoilOffset, ps.recoilOffset);
-    rp.repairProgress = ps.repairProgress;
     rp.cash = ps.cash;
     rp.kills = ps.kills;
   }
@@ -4668,6 +4874,19 @@ export class GameEngine {
 
     if (msg.type === 'player_sync' && CoopManager.role === 'host') {
       this.upsertRemotePlayer(msg.p);
+      return;
+    }
+
+    if (msg.type === 'players_fast' && CoopManager.role === 'client') {
+      for (const ps of msg.list) {
+        if (ps.peerId === CoopManager.myPeerId) {
+          if (s.player.downed) {
+            s.player.reviveProgress = ps.reviveProgress;
+          }
+          continue;
+        }
+        this.upsertRemotePlayer(ps);
+      }
       return;
     }
 
