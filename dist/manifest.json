@@ -1,6 +1,6 @@
 {
-  "name": "僵尸防线大作战 | Zombie Room Defense",
-  "short_name": "僵尸防线",
+  "name": "Zombie Room Defense",
+  "short_name": "Zombie Defense",
   "start_url": "./index.html",
   "display": "fullscreen",
   "orientation": "landscape",

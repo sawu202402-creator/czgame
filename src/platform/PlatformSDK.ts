@@ -116,7 +116,7 @@ class PlatformAdapter {
         if (window.CrazyGames?.SDK) {
           await window.CrazyGames.SDK.init();
           const env = window.CrazyGames.SDK.environment;
-          this.sdkActive = env === 'crazygames' || env === 'local';
+          this.sdkActive = env !== 'disabled';
           if (window.CrazyGames.SDK.game?.settings?.muteAudio !== undefined) {
             SoundFX.setPlatformMuted(Boolean(window.CrazyGames.SDK.game.settings.muteAudio));
           }

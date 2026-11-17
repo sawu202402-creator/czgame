@@ -6,6 +6,9 @@ import zipfile
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 
+# Host-only files that should NOT be inside CrazyGames / Poki upload bundles
+EXCLUDED_ROOT_FILES = {".nojekyll", "_headers", "manifest.json", ".DS_Store"}
+
 TARGETS = {
     "crazygames": {
         "zip_name": "crazygames-release.zip",
@@ -58,6 +61,8 @@ def pack_target(target_key: str) -> None:
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for root, _, files in os.walk(DIST_DIR):
             for f in sorted(files):
+                if f in EXCLUDED_ROOT_FILES or f.startswith("."):
+                    continue
                 abs_p = os.path.join(root, f)
                 rel_p = os.path.relpath(abs_p, DIST_DIR)
                 zf.write(abs_p, rel_p)
@@ -69,8 +74,17 @@ def pack_target(target_key: str) -> None:
         out_folder = os.path.join(ROOT_DIR, "crazygames-upload")
         if os.path.exists(out_folder):
             shutil.rmtree(out_folder)
-        shutil.copytree(DIST_DIR, out_folder)
-        print(f"[CRAZYGAMES] Extracted drag-and-drop folder: {out_folder}")
+        os.makedirs(out_folder, exist_ok=True)
+        for root, dirs, files in os.walk(DIST_DIR):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            rel_dir = os.path.relpath(root, DIST_DIR)
+            dst_dir = out_folder if rel_dir == "." else os.path.join(out_folder, rel_dir)
+            os.makedirs(dst_dir, exist_ok=True)
+            for f in sorted(files):
+                if f in EXCLUDED_ROOT_FILES or f.startswith("."):
+                    continue
+                shutil.copy2(os.path.join(root, f), os.path.join(dst_dir, f))
+        print(f"[CRAZYGAMES] Clean drag-and-drop folder ready: {out_folder}")
 
 
 if __name__ == "__main__":
