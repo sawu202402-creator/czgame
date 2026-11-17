@@ -1,4 +1,3 @@
-import Peer, { DataConnection } from 'peerjs';
 import { I18n } from '../i18n/I18n';
 import { PlatformSDK } from '../platform/PlatformSDK';
 import { GameMode } from '../types';
@@ -8,17 +7,15 @@ import {
   LobbyState,
   SQUAD_SLOTS,
 } from './CoopProtocol';
+import { MqttWsRoomBus, RoomWireEnvelope } from './MqttWsRoomBus';
 
 const ROOM_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-const PEER_PREFIX = 'czgame-coop-v1-';
 const CALLSIGN_KEY = 'czgame_coop_callsign_v1';
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:global.stun.twilio.com:3478' },
-];
+type BusPayload =
+  | CoopNetMessage
+  | { type: '__hb' }
+  | { type: '__bye' };
 
 function randomCode(len = 5): string {
   let out = '';
@@ -35,15 +32,29 @@ class CoopNetworkManager {
   public myPeerId = 'local';
   public mySlot = 0;
   public lobby: LobbyState | null = null;
+  public lastJoinCode = '';
 
-  private peer: Peer | null = null;
-  private hostConn: DataConnection | null = null;
-  private clientConns = new Map<string, DataConnection>();
+  private bus: MqttWsRoomBus<BusPayload> | null = null;
+  private hostPeerId = '';
+  private clientLastSeen = new Map<string, number>();
+  private hostLastSeen = 0;
+  private heartbeatTimer = 0;
+  private joinRetryTimer = 0;
 
   private onLobbyChangeCb: (() => void) | null = null;
   private onMatchStartCb: ((stageId: string, mode: GameMode, lobby: LobbyState) => void) | null = null;
   private onGameMessageCb: ((msg: CoopNetMessage, fromPeerId: string) => void) | null = null;
   private onPeerLeaveCb: ((peerId: string) => void) | null = null;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => {
+        if (this.bus && this.role !== 'offline') {
+          this.bus.send('*', { type: '__bye' });
+        }
+      });
+    }
+  }
 
   public getCallsign(): string {
     try {
@@ -109,35 +120,27 @@ class CoopNetworkManager {
   }
 
   public consumeUrlRoomParam(): string | null {
-    return PlatformSDK.consumeInviteRoomCode();
+    const code = PlatformSDK.consumeInviteRoomCode();
+    if (code) {
+      this.lastJoinCode = code;
+    }
+    return code;
   }
 
   public disconnect(): void {
     PlatformSDK.hideInviteButton();
-    this.clientConns.forEach((c) => {
-      try {
-        c.close();
-      } catch {
-        // ignore
+    window.clearInterval(this.heartbeatTimer);
+    window.clearInterval(this.joinRetryTimer);
+    if (this.bus) {
+      if (this.role !== 'offline') {
+        this.bus.send('*', { type: '__bye' });
       }
-    });
-    this.clientConns.clear();
-    if (this.hostConn) {
-      try {
-        this.hostConn.close();
-      } catch {
-        // ignore
-      }
-      this.hostConn = null;
+      this.bus.close();
+      this.bus = null;
     }
-    if (this.peer) {
-      try {
-        this.peer.destroy();
-      } catch {
-        // ignore
-      }
-      this.peer = null;
-    }
+    this.clientLastSeen.clear();
+    this.hostPeerId = '';
+    this.hostLastSeen = 0;
     this.role = 'offline';
     this.status = 'idle';
     this.errorMsg = '';
@@ -153,130 +156,159 @@ class CoopNetworkManager {
     this.status = 'connecting';
     this.errorMsg = '';
     const code = randomCode(5);
-    const peerId = `${PEER_PREFIX}${code}`;
+    const hostId = `host_${code}`;
+    this.myPeerId = hostId;
+    this.hostPeerId = hostId;
     this.notifyLobby();
 
-    const peer = new Peer(peerId, {
-      config: { iceServers: ICE_SERVERS },
-    });
-    this.peer = peer;
-
-    peer.on('open', (id) => {
-      this.myPeerId = id;
-      this.mySlot = 0;
-      this.status = 'ready';
-      this.lobby = {
-        roomCode: code,
-        stageId: initialStageId,
-        mode: initialMode,
-        inGame: false,
-        members: [
-          {
-            peerId: id,
-            slot: 0,
-            callsign: this.getCallsign(),
-            color: SQUAD_SLOTS[0].color,
-            ready: true,
-            isHost: true,
-          },
-        ],
-      };
-      PlatformSDK.showInviteButton(code);
-      this.notifyLobby();
-    });
-
-    peer.on('connection', (conn) => {
-      this.setupHostIncomingConn(conn);
-    });
-
-    peer.on('error', (err: Error & { type?: string }) => {
-      if (err.type === 'unavailable-id') {
-        this.createHostRoom(initialStageId, initialMode);
-        return;
+    this.bus = new MqttWsRoomBus<BusPayload>(
+      hostId,
+      code,
+      () => {
+        if (this.role !== 'host') return;
+        this.mySlot = 0;
+        this.status = 'ready';
+        this.lobby = {
+          roomCode: code,
+          stageId: initialStageId,
+          mode: initialMode,
+          inGame: false,
+          members: [
+            {
+              peerId: hostId,
+              slot: 0,
+              callsign: this.getCallsign(),
+              color: SQUAD_SLOTS[0].color,
+              ready: true,
+              isHost: true,
+            },
+          ],
+        };
+        PlatformSDK.showInviteButton(code, true);
+        this.startHeartbeatLoop();
+        this.notifyLobby();
+      },
+      (env) => this.handleHostEnvelope(env),
+      () => {
+        if (this.role !== 'host') return;
+        this.status = 'error';
+        this.errorMsg = I18n.t('errSignal', { msg: 'Relay connection failed' });
+        this.notifyLobby();
+      },
+      () => {
+        if (this.role === 'host' && this.lobby) {
+          this.broadcastLobby();
+        }
       }
-      this.status = 'error';
-      this.errorMsg = I18n.t('errSignal', { msg: err.message || err.type || 'Network error' });
-      this.notifyLobby();
-    });
+    );
   }
 
-  private setupHostIncomingConn(conn: DataConnection): void {
-    conn.on('data', (raw) => {
-      const msg = raw as CoopNetMessage;
-      if (!msg || typeof msg !== 'object') return;
+  private handleHostEnvelope(env: RoomWireEnvelope<BusPayload>): void {
+    if (this.role !== 'host' || !this.lobby) return;
+    const fromId = env.from;
+    const msg = env.msg;
+    if (!msg || typeof msg !== 'object') return;
 
-      if (msg.type === 'join_req') {
-        if (!this.lobby) return;
-        if (this.lobby.inGame) {
-          conn.send({ type: 'join_ack', ok: false, reason: I18n.t('errRoomInGame') } satisfies CoopNetMessage);
-          setTimeout(() => conn.close(), 250);
-          return;
-        }
-        if (this.lobby.members.length >= 4) {
-          conn.send({ type: 'join_ack', ok: false, reason: I18n.t('errRoomFull') } satisfies CoopNetMessage);
-          setTimeout(() => conn.close(), 250);
-          return;
-        }
+    if (msg.type === '__bye') {
+      this.removeClientPeer(fromId);
+      return;
+    }
 
-        const usedSlots = new Set(this.lobby.members.map((m) => m.slot));
-        let slot = 1;
-        while (usedSlots.has(slot) && slot < 4) slot++;
+    if (this.clientLastSeen.has(fromId)) {
+      this.clientLastSeen.set(fromId, performance.now());
+    }
+    if (msg.type === '__hb') return;
 
-        const member: LobbyMember = {
-          peerId: conn.peer,
-          slot,
-          callsign: (msg.callsign || `P${slot + 1}`).slice(0, 10),
-          color: SQUAD_SLOTS[slot]?.color || '#4ade80',
-          ready: true,
-          isHost: false,
-        };
-        this.clientConns.set(conn.peer, conn);
-        this.lobby.members.push(member);
-        this.lobby.members.sort((a, b) => a.slot - b.slot);
-
-        conn.send({
+    if (msg.type === 'join_req') {
+      // Idempotent re-ack if client already joined (e.g. duplicate retry packet)
+      const existing = this.lobby.members.find((m) => m.peerId === fromId);
+      if (existing) {
+        this.clientLastSeen.set(fromId, performance.now());
+        this.bus?.send(fromId, {
           type: 'join_ack',
           ok: true,
-          assignedPeerId: conn.peer,
-          slot,
+          assignedPeerId: fromId,
+          slot: existing.slot,
           lobby: this.lobby,
-        } satisfies CoopNetMessage);
+        });
+        return;
+      }
+
+      if (this.lobby.inGame) {
+        this.bus?.send(fromId, {
+          type: 'join_ack',
+          ok: false,
+          reason: I18n.t('errRoomInGame'),
+        });
+        return;
+      }
+
+      if (this.lobby.members.length >= 4) {
+        this.bus?.send(fromId, {
+          type: 'join_ack',
+          ok: false,
+          reason: I18n.t('errRoomFull'),
+        });
+        return;
+      }
+
+      const usedSlots = new Set(this.lobby.members.map((m) => m.slot));
+      let slot = 1;
+      while (usedSlots.has(slot) && slot < 4) slot++;
+
+      const member: LobbyMember = {
+        peerId: fromId,
+        slot,
+        callsign: (msg.callsign || `P${slot + 1}`).slice(0, 10),
+        color: SQUAD_SLOTS[slot]?.color || '#4ade80',
+        ready: true,
+        isHost: false,
+      };
+      this.clientLastSeen.set(fromId, performance.now());
+      this.lobby.members.push(member);
+      this.lobby.members.sort((a, b) => a.slot - b.slot);
+
+      this.bus?.send(fromId, {
+        type: 'join_ack',
+        ok: true,
+        assignedPeerId: fromId,
+        slot,
+        lobby: this.lobby,
+      });
+      this.broadcastLobby();
+      this.notifyLobby();
+      return;
+    }
+
+    if (msg.type === 'ready_toggle') {
+      const mem = this.lobby.members.find((m) => m.peerId === fromId);
+      if (mem) {
+        mem.ready = msg.ready;
+        if (msg.callsign) mem.callsign = msg.callsign.slice(0, 10);
         this.broadcastLobby();
         this.notifyLobby();
-        return;
       }
+      return;
+    }
 
-      if (msg.type === 'ready_toggle' && this.lobby) {
-        const mem = this.lobby.members.find((m) => m.peerId === conn.peer);
-        if (mem) {
-          mem.ready = msg.ready;
-          if (msg.callsign) mem.callsign = msg.callsign.slice(0, 10);
-          this.broadcastLobby();
-          this.notifyLobby();
-        }
-        return;
+    if (this.clientLastSeen.has(fromId)) {
+      this.onGameMessageCb?.(msg, fromId);
+    }
+  }
+
+  private removeClientPeer(peerId: string): void {
+    const existed = this.clientLastSeen.delete(peerId);
+    if (this.lobby) {
+      const before = this.lobby.members.length;
+      this.lobby.members = this.lobby.members.filter((m) => m.peerId !== peerId);
+      if (this.lobby.members.length !== before) {
+        this.broadcastLobby();
+        this.notifyLobby();
       }
-
-      this.onGameMessageCb?.(msg, conn.peer);
-    });
-
-    const handleLeave = () => {
-      const existed = this.clientConns.delete(conn.peer);
-      if (this.lobby) {
-        const before = this.lobby.members.length;
-        this.lobby.members = this.lobby.members.filter((m) => m.peerId !== conn.peer);
-        if (this.lobby.members.length !== before) {
-          this.broadcastLobby();
-          this.notifyLobby();
-        }
-      }
-      if (existed) {
-        this.onPeerLeaveCb?.(conn.peer);
-      }
-    };
-
-    conn.on('close', handleLeave);
-    conn.on('error', handleLeave);
+    }
+    if (existed) {
+      this.onPeerLeaveCb?.(peerId);
+    }
   }
 
   public joinRoomByCode(rawCode: string): void {
@@ -288,89 +320,142 @@ class CoopNetworkManager {
       return;
     }
 
+    this.lastJoinCode = code;
     this.disconnect();
     this.role = 'client';
     this.status = 'connecting';
     this.errorMsg = '';
+    const clientId = `p_${randomCode(6).toLowerCase()}`;
+    this.myPeerId = clientId;
+    this.hostPeerId = `host_${code}`;
     this.notifyLobby();
 
-    const peer = new Peer({
-      config: { iceServers: ICE_SERVERS },
-    });
-    this.peer = peer;
-
-    peer.on('open', (myId) => {
-      this.myPeerId = myId;
-      const hostPeerId = `${PEER_PREFIX}${code}`;
-      const conn = peer.connect(hostPeerId, { reliable: true });
-      this.hostConn = conn;
-
-      conn.on('open', () => {
-        conn.send({
-          type: 'join_req',
-          callsign: this.getCallsign(),
-        } satisfies CoopNetMessage);
+    const sendJoinReq = () => {
+      if (this.role !== 'client' || this.status !== 'connecting') return;
+      this.bus?.send(this.hostPeerId, {
+        type: 'join_req',
+        callsign: this.getCallsign(),
       });
+    };
 
-      conn.on('data', (raw) => {
-        const msg = raw as CoopNetMessage;
-        if (!msg || typeof msg !== 'object') return;
-
-        if (msg.type === 'join_ack') {
-          if (!msg.ok || !msg.lobby) {
+    this.bus = new MqttWsRoomBus<BusPayload>(
+      clientId,
+      code,
+      () => {
+        if (this.role !== 'client') return;
+        let attempts = 0;
+        sendJoinReq();
+        window.clearInterval(this.joinRetryTimer);
+        this.joinRetryTimer = window.setInterval(() => {
+          if (this.role !== 'client' || this.status !== 'connecting') {
+            window.clearInterval(this.joinRetryTimer);
+            return;
+          }
+          attempts++;
+          if (attempts >= 9) {
+            window.clearInterval(this.joinRetryTimer);
             this.status = 'error';
-            this.errorMsg = msg.reason || 'Failed to join';
+            this.errorMsg = I18n.t('errRoomNotFound', { code });
             this.notifyLobby();
             return;
           }
-          this.status = 'ready';
-          this.mySlot = msg.slot ?? 1;
-          this.lobby = msg.lobby;
-          PlatformSDK.showInviteButton(this.lobby.roomCode);
-          this.notifyLobby();
-          return;
-        }
-
-        if (msg.type === 'lobby_state') {
-          this.lobby = msg.lobby;
-          const me = this.lobby.members.find((m) => m.peerId === this.myPeerId);
-          if (me) this.mySlot = me.slot;
-          this.notifyLobby();
-          return;
-        }
-
-        if (msg.type === 'start_game') {
-          this.lobby = msg.lobby;
-          this.lobby.inGame = true;
-          PlatformSDK.hideInviteButton(this.lobby.roomCode);
-          this.onMatchStartCb?.(msg.stageId, msg.mode, msg.lobby);
-          return;
-        }
-
-        this.onGameMessageCb?.(msg, hostPeerId);
-      });
-
-      const onHostDisconnected = () => {
+          sendJoinReq();
+        }, 800);
+      },
+      (env) => this.handleClientEnvelope(env),
+      () => {
         if (this.role !== 'client') return;
+        window.clearInterval(this.joinRetryTimer);
         this.status = 'error';
-        this.errorMsg = I18n.t('errHostLeft');
-        this.onPeerLeaveCb?.('host');
+        this.errorMsg = I18n.t('errSignal', { msg: 'Relay connection failed' });
         this.notifyLobby();
-      };
-
-      conn.on('close', onHostDisconnected);
-      conn.on('error', onHostDisconnected);
-    });
-
-    peer.on('error', (err: Error & { type?: string }) => {
-      this.status = 'error';
-      if (err.type === 'peer-unavailable') {
-        this.errorMsg = I18n.t('errRoomNotFound', { code });
-      } else {
-        this.errorMsg = I18n.t('errSignal', { msg: err.message || err.type || 'Network error' });
+      },
+      () => {
+        sendJoinReq();
       }
+    );
+  }
+
+  private handleClientEnvelope(env: RoomWireEnvelope<BusPayload>): void {
+    if (this.role !== 'client') return;
+    if (env.from !== this.hostPeerId) return;
+    const msg = env.msg;
+    if (!msg || typeof msg !== 'object') return;
+
+    if (msg.type === '__bye') {
+      window.clearInterval(this.joinRetryTimer);
+      window.clearInterval(this.heartbeatTimer);
+      this.status = 'error';
+      this.errorMsg = I18n.t('errHostLeft');
+      this.onPeerLeaveCb?.('host');
       this.notifyLobby();
-    });
+      return;
+    }
+
+    this.hostLastSeen = performance.now();
+    if (msg.type === '__hb') return;
+
+    if (msg.type === 'join_ack') {
+      window.clearInterval(this.joinRetryTimer);
+      if (!msg.ok || !msg.lobby) {
+        this.status = 'error';
+        this.errorMsg = msg.reason || 'Failed to join';
+        this.notifyLobby();
+        return;
+      }
+      this.status = 'ready';
+      this.mySlot = msg.slot ?? 1;
+      this.lobby = msg.lobby;
+      PlatformSDK.showInviteButton(this.lobby.roomCode, !this.lobby.inGame && this.lobby.members.length < 4);
+      this.startHeartbeatLoop();
+      this.notifyLobby();
+      return;
+    }
+
+    if (msg.type === 'lobby_state') {
+      this.lobby = msg.lobby;
+      const me = this.lobby.members.find((m) => m.peerId === this.myPeerId);
+      if (me) this.mySlot = me.slot;
+      this.notifyLobby();
+      return;
+    }
+
+    if (msg.type === 'start_game') {
+      this.lobby = msg.lobby;
+      this.lobby.inGame = true;
+      PlatformSDK.hideInviteButton(this.lobby.roomCode);
+      this.onMatchStartCb?.(msg.stageId, msg.mode, msg.lobby);
+      return;
+    }
+
+    this.onGameMessageCb?.(msg, this.hostPeerId);
+  }
+
+  private startHeartbeatLoop(): void {
+    window.clearInterval(this.heartbeatTimer);
+    this.hostLastSeen = performance.now();
+    this.heartbeatTimer = window.setInterval(() => {
+      if (!this.bus || this.role === 'offline') return;
+      const now = performance.now();
+
+      if (this.role === 'host') {
+        this.bus.send('*', { type: '__hb' });
+        for (const [pid, seenAt] of Array.from(this.clientLastSeen.entries())) {
+          if (now - seenAt > 11_500) {
+            this.removeClientPeer(pid);
+          }
+        }
+      } else if (this.role === 'client' && this.status === 'ready') {
+        this.bus.send(this.hostPeerId, { type: '__hb' });
+        if (this.hostLastSeen > 0 && now - this.hostLastSeen > 12_500) {
+          window.clearInterval(this.heartbeatTimer);
+          this.status = 'error';
+          this.errorMsg = I18n.t('errHostLeft');
+          this.onPeerLeaveCb?.('host');
+          this.notifyLobby();
+        }
+      }
+    }, 2400);
   }
 
   public setHostStageAndMode(stageId: string, mode: GameMode): void {
@@ -407,7 +492,7 @@ class CoopNetworkManager {
   public returnSquadToLobby(): void {
     if (!this.lobby) return;
     this.lobby.inGame = false;
-    PlatformSDK.showInviteButton(this.lobby.roomCode);
+    PlatformSDK.showInviteButton(this.lobby.roomCode, this.lobby.members.length < 4);
     if (this.role === 'host') {
       this.broadcastLobby();
     }
@@ -424,38 +509,18 @@ class CoopNetworkManager {
   }
 
   public broadcastToClients(msg: CoopNetMessage, excludePeerId?: string): void {
-    if (this.role !== 'host') return;
-    this.clientConns.forEach((conn, pid) => {
-      if (pid === excludePeerId) return;
-      if (conn.open) {
-        try {
-          conn.send(msg);
-        } catch {
-          // ignore
-        }
-      }
-    });
+    if (this.role !== 'host' || !this.bus) return;
+    this.bus.send('*', msg, excludePeerId);
   }
 
   public sendToClient(peerId: string, msg: CoopNetMessage): void {
-    if (this.role !== 'host') return;
-    const conn = this.clientConns.get(peerId);
-    if (conn && conn.open) {
-      try {
-        conn.send(msg);
-      } catch {
-        // ignore
-      }
-    }
+    if (this.role !== 'host' || !this.bus) return;
+    this.bus.send(peerId, msg);
   }
 
   public sendToHost(msg: CoopNetMessage): void {
-    if (this.role !== 'client' || !this.hostConn || !this.hostConn.open) return;
-    try {
-      this.hostConn.send(msg);
-    } catch {
-      // ignore
-    }
+    if (this.role !== 'client' || !this.bus || !this.hostPeerId) return;
+    this.bus.send(this.hostPeerId, msg);
   }
 
   private notifyLobby(): void {

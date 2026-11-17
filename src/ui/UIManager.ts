@@ -633,7 +633,7 @@ export class UIManager {
               <h3>${I18n.t('joinCardTitle')}</h3>
               <p>${I18n.t('joinCardDesc')}</p>
               <div class="coop-join-row">
-                <input id="coop-code-inp" class="coop-inp code-inp" type="text" maxlength="6" placeholder="${I18n.t('codePlaceholder')}" />
+                <input id="coop-code-inp" class="coop-inp code-inp" type="text" maxlength="6" value="${CoopManager.lastJoinCode}" placeholder="${I18n.t('codePlaceholder')}" />
                 <button class="btn-cartoon btn-yellow" id="btn-coop-join" ${status === 'connecting' ? 'disabled' : ''}>
                   ${I18n.t('joinRoomBtn')}
                 </button>
