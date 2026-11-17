@@ -158,10 +158,11 @@ export class CartoonRenderer {
 
     ctx.restore();
 
-    // 11. 屏幕层：雷达小地图（手机端自动避让左拇指摇杆区）、屏幕外目标箭头、触屏双摇杆
+    // 11. 屏幕层：雷达小地图（手机端自动避让左拇指摇杆区）、屏幕外目标箭头、触屏双摇杆、PC战术准星
     this.drawTacticalMinimap(ctx, viewW, viewH, state, input.usingTouch);
     this.drawOffscreenIndicators(ctx, viewW, viewH, state);
     this.drawTouchSticks(ctx, viewW, viewH, state, input);
+    this.drawPcCrosshair(ctx, viewW, viewH, state, input);
   }
 
   // ==================== 离屏高精度建筑地图烘焙（仅在开局与开门瞬间执行 1 次） ====================
@@ -3681,14 +3682,14 @@ export class CartoonRenderer {
     state: RunSnapshot,
     usingTouch: boolean
   ): void {
-    const mobileLandscape = usingTouch || viewH < 520 || viewW < 920;
-    const mapW = mobileLandscape ? 104 : 144;
-    const mapH = mobileLandscape ? 72 : 104;
-    // 全面屏横屏避开左侧刘海/挖孔安全区，并上移至左上角血条下方避开左拇指摇杆区
+    const compactView = usingTouch || viewH < 560 || viewW < 960;
+    const mapW = compactView ? 106 : 144;
+    const mapH = compactView ? 74 : 104;
+    // 触屏端避开左下角虚拟摇杆区上移至左上角；PC 桌面端（含 907×510 小窗口）固定在左下角，零遮挡左上教学卡！
     const ultraWide = viewW / Math.max(1, viewH) > 1.9;
-    const mx = mobileLandscape ? (ultraWide ? 34 : 12) : 12;
+    const mx = usingTouch ? (ultraWide ? 34 : 12) : 12;
     const hasRelics = state.relicIds.length > 0;
-    const my = mobileLandscape ? (hasRelics ? 70 : 44) : viewH - mapH - 12;
+    const my = usingTouch ? (hasRelics ? 70 : 44) : viewH - mapH - 12;
     const bb = state.stage.buildingBounds;
     const scale = Math.min((mapW - 14) / bb.w, (mapH - 14) / bb.h);
     const ox = mx + (mapW - bb.w * scale) / 2 - bb.x * scale;
@@ -3921,6 +3922,95 @@ export class CartoonRenderer {
 
       ctx.restore();
     }
+  }
+
+  private drawPcCrosshair(
+    ctx: CanvasRenderingContext2D,
+    viewW: number,
+    viewH: number,
+    state: RunSnapshot,
+    input: InputManager
+  ): void {
+    if (input.usingTouch) return;
+    const mx = input.mouseScreenX;
+    const my = input.mouseScreenY;
+    if (mx <= 1 || my <= 1 || mx >= viewW - 1 || my >= viewH - 1) return;
+
+    const p = state.player;
+    const activeWep = p.weapons[p.activeSlot];
+    const isReloading = p.reloadTimer > 0;
+    const kick =
+      (p.muzzleFlashTimer > 0 ? 4.5 : 0) +
+      Math.min(5, (p.recoilOffset || 0) * 0.65) +
+      (input.mouseDown ? 1.8 : 0);
+    const gap = 6.5 + kick;
+    const tickLen = 7.5;
+    const color = isReloading
+      ? '#fbbf24'
+      : state.feverTimer > 0
+        ? '#f97316'
+        : activeWep?.evolved
+          ? '#e879f9'
+          : '#38bdf8';
+
+    ctx.save();
+    ctx.translate(mx, my);
+
+    if (isReloading) {
+      const def = WEAPONS[activeWep.defId];
+      const totalRel = Math.max(0.25, def ? def.reloadTime : 1.4);
+      const pct = Math.max(0, Math.min(1, 1 - p.reloadTimer / totalRel));
+      ctx.beginPath();
+      ctx.arc(0, 0, 15, 0, Math.PI * 2);
+      ctx.lineWidth = 3.2;
+      ctx.strokeStyle = 'rgba(9, 14, 23, 0.72)';
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 15, -Math.PI / 2, -Math.PI / 2 + pct * Math.PI * 2);
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = '#fde047';
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(0, 0, gap + 3.5, 0, Math.PI * 2);
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = 'rgba(248, 250, 252, 0.22)';
+      ctx.stroke();
+    }
+
+    const dirs: [number, number][] = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    ctx.lineCap = 'round';
+    for (const [dx, dy] of dirs) {
+      ctx.beginPath();
+      ctx.moveTo(dx * gap, dy * gap);
+      ctx.lineTo(dx * (gap + tickLen), dy * (gap + tickLen));
+      ctx.lineWidth = 3.8;
+      ctx.strokeStyle = 'rgba(9, 14, 23, 0.9)';
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(dx * gap, dy * gap);
+      ctx.lineTo(dx * (gap + tickLen), dy * (gap + tickLen));
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = '#fde047';
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = '#090e17';
+    ctx.stroke();
+
+    ctx.restore();
   }
 
   // ==================== 精灵与缓存文字工具 ====================

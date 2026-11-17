@@ -46,6 +46,17 @@ declare global {
           getItem: (key: string) => string | null;
           setItem: (key: string, val: string) => void;
         };
+        system?: {
+          info?: {
+            countryCode?: string;
+            device?: {
+              type?: 'desktop' | 'tablet' | 'mobile';
+            };
+            os?: {
+              name?: string;
+            };
+          };
+        };
       };
     };
     PokiSDK?: {
@@ -354,6 +365,84 @@ class PlatformAdapter {
       }
     }
     return false;
+  }
+
+  /**
+   * CrazyGames 官方质量规范明确禁止游戏内自带全屏按钮（由平台外层统一提供全屏控制）
+   */
+  public isFullscreenAllowed(): boolean {
+    if (__BUILD_PLATFORM__ === 'crazygames') {
+      return false;
+    }
+    if (typeof document === 'undefined') return false;
+    const doc = document as Document & { webkitFullscreenEnabled?: boolean };
+    return Boolean(doc.fullscreenEnabled || doc.webkitFullscreenEnabled);
+  }
+
+  /**
+   * 遵循 CrazyGames 官方设备识别规范：
+   * 优先读取 CrazyGames.SDK.system.info.device.type，避免触控屏 Windows 笔记本被 maxTouchPoints 误判为手机！
+   */
+  public getDeviceType(): 'desktop' | 'tablet' | 'mobile' {
+    if (__BUILD_PLATFORM__ !== 'poki') {
+      try {
+        const cgType = window.CrazyGames?.SDK?.system?.info?.device?.type;
+        if (cgType === 'desktop' || cgType === 'tablet' || cgType === 'mobile') {
+          return cgType;
+        }
+      } catch {
+        // fallback below
+      }
+    }
+
+    if (typeof navigator !== 'undefined') {
+      const ua = navigator.userAgent || '';
+      if (/iPad|Tablet|PlayBook|Silk/i.test(ua)) return 'tablet';
+      if (/Android|iPhone|iPod|Mobile|Windows Phone/i.test(ua)) return 'mobile';
+    }
+
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      const hasCoarse = window.matchMedia('(pointer: coarse)').matches;
+      const hasFine = window.matchMedia('(pointer: fine)').matches;
+      if (hasCoarse && !hasFine) {
+        return 'mobile';
+      }
+    }
+
+    return 'desktop';
+  }
+
+  public isMobileOrTablet(): boolean {
+    return this.getDeviceType() !== 'desktop';
+  }
+
+  public hasPendingInviteUrl(): boolean {
+    if (__BUILD_PLATFORM__ !== 'crazygames') {
+      try {
+        const pokiRoom = window.PokiSDK?.getURLParam?.('room');
+        if (pokiRoom && pokiRoom.trim().length >= 4) return true;
+      } catch {
+        // ignore
+      }
+    }
+    if (__BUILD_PLATFORM__ !== 'poki') {
+      try {
+        const cgInvite =
+          window.CrazyGames?.SDK?.game?.inviteParams?.roomId ||
+          window.CrazyGames?.SDK?.game?.inviteParams?.room ||
+          window.CrazyGames?.SDK?.game?.getInviteParam?.('roomId');
+        if (cgInvite && cgInvite.trim().length >= 4) return true;
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get('room') || url.searchParams.get('roomId');
+      return Boolean(code && code.trim().length >= 4);
+    } catch {
+      return false;
+    }
   }
 
   private showAdUnavailableNotice(): void {

@@ -256,24 +256,36 @@ class GameAssetManager {
   private tiles = new Map<TileKey, HTMLImageElement>();
   private patterns = new Map<string, CanvasPattern>();
 
-  public async preloadAll(): Promise<void> {
+  public async preloadAll(onProgress?: (loaded: number, total: number) => void): Promise<void> {
+    const spriteKeys = Object.keys(SPRITE_FILES) as SpriteKey[];
+    const tileKeys = Object.keys(TILE_FILES) as TileKey[];
+    const total = spriteKeys.length + tileKeys.length;
+    let loaded = 0;
+
+    const bump = () => {
+      loaded += 1;
+      onProgress?.(loaded, total);
+    };
+
     const tasks: Promise<void>[] = [];
 
-    (Object.keys(SPRITE_FILES) as SpriteKey[]).forEach((key) => {
+    spriteKeys.forEach((key) => {
       tasks.push(
         this.loadImage(SPRITE_FILES[key]).then((img) => {
           if (img) {
             this.sprites.set(key, img);
             this.whiteSilhouettes.set(key, this.createSilhouette(img, '#ffffff'));
           }
+          bump();
         })
       );
     });
 
-    (Object.keys(TILE_FILES) as TileKey[]).forEach((key) => {
+    tileKeys.forEach((key) => {
       tasks.push(
         this.loadImage(TILE_FILES[key]).then((img) => {
           if (img) this.tiles.set(key, img);
+          bump();
         })
       );
     });

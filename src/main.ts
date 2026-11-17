@@ -19,7 +19,16 @@ async function bootstrap() {
   I18n.init((k) => PlatformSDK.getStorageItem(k));
   PlatformSDK.loadingStart();
   SaveManager.load();
-  await Assets.preloadAll();
+
+  const bootLoader = document.getElementById('boot-loader');
+  const bootFill = document.getElementById('boot-bar-fill');
+  const bootPct = document.getElementById('boot-pct');
+
+  await Assets.preloadAll((loaded, total) => {
+    const pct = Math.min(100, Math.max(8, Math.round((loaded / Math.max(1, total)) * 100)));
+    if (bootFill) bootFill.style.width = `${pct}%`;
+    if (bootPct) bootPct.textContent = `${pct}%`;
+  });
 
   const gameRoot = document.getElementById('game-root') as HTMLElement;
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
@@ -28,13 +37,9 @@ async function bootstrap() {
   const guardBtn = document.getElementById('btn-guard-landscape') as HTMLButtonElement;
   const ctx = canvas.getContext('2d', { alpha: false })!;
 
-  const isMobileTouchDevice = () =>
-    'ontouchstart' in window ||
-    navigator.maxTouchPoints > 0 ||
-    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const isMobileTouchDevice = () => PlatformSDK.isMobileOrTablet();
 
-  const docWithWebkit = document as Document & { webkitFullscreenEnabled?: boolean };
-  if (!document.fullscreenEnabled && !docWithWebkit.webkitFullscreenEnabled) {
+  if (!PlatformSDK.isFullscreenAllowed()) {
     guardBtn.style.display = 'none';
   }
 
@@ -110,8 +115,13 @@ async function bootstrap() {
   syncViewportAndOrientation();
 
   ui = new UIManager(uiLayer, engine);
-  ui.showHomeHub();
+  ui.launchInitialExperience();
   PlatformSDK.loadingStop();
+
+  if (bootLoader) {
+    bootLoader.classList.add('fade-out');
+    setTimeout(() => bootLoader.remove(), 320);
+  }
 
   let lastTime = performance.now();
   let hudTick = 0;

@@ -34,6 +34,18 @@ export class UIManager {
   private hudCache: Record<string, string> = {};
   private coopToast = '';
   private perkKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private ftue: {
+    active: boolean;
+    startX: number;
+    startY: number;
+    initialCash: number;
+    initialGrenades: number;
+    moved: boolean;
+    shot: boolean;
+    geared: boolean;
+    tactical: boolean;
+    completedAt: number;
+  } | null = null;
 
   constructor(
     private uiLayer: HTMLElement,
@@ -84,8 +96,7 @@ export class UIManager {
   }
 
   private isFullscreenSupported(): boolean {
-    const doc = document as Document & { webkitFullscreenEnabled?: boolean };
-    return Boolean(doc.fullscreenEnabled || doc.webkitFullscreenEnabled);
+    return PlatformSDK.isFullscreenAllowed();
   }
 
   private isFullscreenActive(): boolean {
@@ -159,10 +170,28 @@ export class UIManager {
     }
   }
 
+  public launchInitialExperience(): void {
+    const save = SaveManager.get();
+    if (
+      this.hubTab !== 'coop' &&
+      save.totalRuns === 0 &&
+      !CoopManager.lobby &&
+      !PlatformSDK.hasPendingInviteUrl() &&
+      !PlatformSDK.isInstantMultiplayerRequested()
+    ) {
+      this.startStageRun(STAGES[0], 'standard', true);
+      return;
+    }
+    this.showHomeHub();
+  }
+
   public showHomeHub(): void {
     this.clearPerkKeyHandler();
     cancelAnimationFrame(this.needleAnimId);
     PlatformSDK.gameplayStop();
+    SoundFX.setBgmMode('hub');
+    document.body.classList.remove('pc-combat-cursor');
+    this.ftue = null;
     this.armoryOpen = false;
     this.pauseOpen = false;
     this.engine.modalPaused = false;
@@ -188,6 +217,7 @@ export class UIManager {
       AGENT_CLASSES.some((c) => !save.unlockedClasses.includes(c.id) && save.gold >= c.unlockCost);
     const hasDailyReward = SaveManager.hasUnclaimedDailyRewards();
     const muted = SoundFX.isUserMuted();
+    const musicMuted = SoundFX.isMusicMuted();
     const fsSupported = this.isFullscreenSupported();
     const fsActive = this.isFullscreenActive();
 
@@ -241,7 +271,8 @@ export class UIManager {
           <div class="agent-bar">
             <span class="gold-pill"><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${save.gold}</span>
             <select class="hub-lang-select" id="hub-lang-sel" aria-label="Language">${langOptsHtml}</select>
-            <button class="hub-util-btn" id="btn-hub-mute" title="Sound">${muted ? '🔇' : '🔊'}</button>
+            <button class="hub-util-btn ${!musicMuted ? 'active' : ''}" id="btn-hub-music" title="${I18n.t('hubMusicTitle')}">${musicMuted ? '🔕' : '🎵'}</button>
+            <button class="hub-util-btn" id="btn-hub-mute" title="${I18n.t('hubSoundTitle')}">${muted ? '🔇' : '🔊'}</button>
             ${fsSupported ? `<button class="hub-util-btn ${fsActive ? 'active' : ''}" id="btn-hub-fs" title="Fullscreen">⛶</button>` : ''}
           </div>
         </header>
@@ -260,6 +291,14 @@ export class UIManager {
     if (langSel) {
       langSel.onchange = () => {
         I18n.setLang(langSel.value as LangCode, (k, v) => PlatformSDK.setStorageItem(k, v));
+        this.showHomeHub();
+      };
+    }
+
+    const musicBtn = this.modalRoot.querySelector('#btn-hub-music') as HTMLButtonElement | null;
+    if (musicBtn) {
+      musicBtn.onclick = () => {
+        SoundFX.toggleMusicMute();
         this.showHomeHub();
       };
     }
@@ -1180,11 +1219,12 @@ export class UIManager {
     }
   }
 
-  public startStageRun(stage: StageDef, mode: GameMode): void {
+  public startStageRun(stage: StageDef, mode: GameMode, isFirstTutorial = false): void {
     this.armoryOpen = false;
     this.pauseOpen = false;
     this.armoryTab = 'guns';
     this.modalRoot.innerHTML = '';
+    SoundFX.setBgmMode('combat');
     PlatformSDK.hideInviteButton(CoopManager.lobby?.roomCode);
     if (this.engine.input.usingTouch && this.isFullscreenActive()) {
       const orient = screen.orientation as ScreenOrientation & {
@@ -1194,6 +1234,25 @@ export class UIManager {
     }
     this.mountHUD();
     this.engine.startRun(stage, mode);
+
+    const s = this.engine.state;
+    if (isFirstTutorial && s && !s.isCoop) {
+      s.cash += 120;
+      this.ftue = {
+        active: true,
+        startX: s.player.x,
+        startY: s.player.y,
+        initialCash: s.cash,
+        initialGrenades: s.player.grenades,
+        moved: false,
+        shot: false,
+        geared: false,
+        tactical: false,
+        completedAt: 0,
+      };
+    } else {
+      this.ftue = null;
+    }
   }
 
   // ==================== 极简局内 HUD ====================
@@ -1202,7 +1261,7 @@ export class UIManager {
     this.hudRoot?.remove();
     this.hudCache = {};
     const hud = document.createElement('div');
-    hud.className = 'hud-overlay';
+    hud.className = `hud-overlay ${this.engine.input.usingTouch ? 'is-touch-hud' : 'is-pc-hud'}`;
     hud.innerHTML = `
       <div class="screen-vignette" id="hud-vignette"></div>
 
@@ -1220,6 +1279,19 @@ export class UIManager {
           </div>
           <div class="relic-row" id="hud-relics"></div>
           <div class="hud-squad-list" id="hud-squad-list"></div>
+
+          <div class="hud-ftue-card" id="hud-ftue-card" style="display:none">
+            <div class="ftue-head">
+              <span id="ftue-title">${I18n.t('ftueTitle')}</span>
+              <button class="ftue-skip-btn" id="btn-ftue-skip" type="button">${I18n.t('ftueSkip')}</button>
+            </div>
+            <div class="ftue-steps">
+              <div class="ftue-step" id="ftue-step-move"><span class="ftue-box" id="ftue-chk-move">○</span><span id="ftue-txt-move"></span></div>
+              <div class="ftue-step" id="ftue-step-shoot"><span class="ftue-box" id="ftue-chk-shoot">○</span><span id="ftue-txt-shoot"></span></div>
+              <div class="ftue-step" id="ftue-step-gear"><span class="ftue-box" id="ftue-chk-gear">○</span><span id="ftue-txt-gear"></span></div>
+              <div class="ftue-step" id="ftue-step-skill"><span class="ftue-box" id="ftue-chk-skill">○</span><span id="ftue-txt-skill"></span></div>
+            </div>
+          </div>
         </div>
 
         <div class="hud-center">
@@ -1292,13 +1364,95 @@ export class UIManager {
           <span class="moba-atk-ammo" id="main-atk-ammo">14/∞</span>
         </button>
       </div>
+
+      <div class="pc-hotbar" id="pc-hotbar">
+        <button class="pc-wep-slot is-active" id="pc-slot-0" type="button">
+          <kbd class="pc-key">1</kbd>
+          <img class="pc-wep-ico" id="pc-slot-0-ico" src="./assets/gun_pistol.png" alt="" />
+          <div class="pc-wep-meta">
+            <span class="pc-wep-name" id="pc-slot-0-name">Pistol</span>
+            <span class="pc-wep-ammo" id="pc-slot-0-ammo">14/∞</span>
+          </div>
+        </button>
+
+        <button class="pc-wep-slot is-empty" id="pc-slot-1" type="button">
+          <kbd class="pc-key" id="pc-slot-1-key">2</kbd>
+          <img class="pc-wep-ico" id="pc-slot-1-ico" src="./assets/gun_smg.png" alt="" />
+          <div class="pc-wep-meta">
+            <span class="pc-wep-name" id="pc-slot-1-name">${I18n.t('pcSlotEmpty')}</span>
+            <span class="pc-wep-ammo" id="pc-slot-1-ammo">Q</span>
+          </div>
+        </button>
+
+        <div class="pc-hotbar-divider"></div>
+
+        <button class="pc-act-pill" id="pc-btn-reload" type="button">
+          <kbd class="pc-key">R</kbd>
+          <img class="pc-act-ico" src="./assets/prop_ammo_box.png" alt="" />
+          <span id="pc-reload-txt">${I18n.t('pcReloadLabel')}</span>
+        </button>
+
+        <button class="pc-act-pill" id="pc-btn-skill" type="button">
+          <kbd class="pc-key">F</kbd>
+          <img class="pc-act-ico" id="pc-skill-ico" src="./assets/prop_ammo_box.png" alt="" />
+          <span id="pc-skill-txt">${I18n.t('pcSkillLabel')}</span>
+        </button>
+
+        <button class="pc-act-pill" id="pc-btn-grenade" type="button">
+          <kbd class="pc-key">G</kbd>
+          <img class="pc-act-ico" src="./assets/prop_grenade.png" alt="" />
+          <span id="pc-grenade-txt">×2</span>
+        </button>
+
+        <button class="pc-act-pill pc-shop-pill" id="pc-btn-armory" type="button">
+          <kbd class="pc-key">B</kbd>
+          <img class="pc-act-ico" src="./assets/prop_armory_kiosk.png" alt="" />
+          <span id="pc-armory-txt">${I18n.t('pcArmoryLabel')}</span>
+        </button>
+      </div>
     `;
     this.uiLayer.appendChild(hud);
     this.hudRoot = hud;
 
-    this.bindModalTap(hud.querySelector('#btn-pause') as HTMLButtonElement, () => {
+    const pauseBtn = hud.querySelector('#btn-pause') as HTMLButtonElement;
+    pauseBtn.title = I18n.t('pcPauseHint');
+    this.bindModalTap(pauseBtn, () => {
       this.togglePauseMenu();
     });
+
+    const ftueSkip = hud.querySelector('#btn-ftue-skip') as HTMLButtonElement;
+    ftueSkip.onclick = () => {
+      if (this.ftue) {
+        this.ftue.active = false;
+      }
+      (hud.querySelector('#hud-ftue-card') as HTMLElement).style.display = 'none';
+    };
+
+    (hud.querySelector('#pc-slot-0') as HTMLButtonElement).onclick = () => {
+      this.engine.switchWeapon(0);
+    };
+    (hud.querySelector('#pc-slot-1') as HTMLButtonElement).onclick = () => {
+      const s = this.engine.state;
+      if (!s) return;
+      if (s.player.weapons.length >= 2) {
+        const targetSlot = s.player.activeSlot === 0 ? 1 : (s.player.activeSlot + 1) % s.player.weapons.length;
+        this.engine.switchWeapon(targetSlot);
+      } else {
+        this.toggleArmoryShop();
+      }
+    };
+    (hud.querySelector('#pc-btn-reload') as HTMLButtonElement).onclick = () => {
+      this.engine.startReload();
+    };
+    (hud.querySelector('#pc-btn-skill') as HTMLButtonElement).onclick = () => {
+      this.engine.useActiveClassSkill();
+    };
+    (hud.querySelector('#pc-btn-grenade') as HTMLButtonElement).onclick = () => {
+      this.engine.throwGrenade();
+    };
+    (hud.querySelector('#pc-btn-armory') as HTMLButtonElement).onclick = () => {
+      this.toggleArmoryShop();
+    };
 
     this.bindModalTap(hud.querySelector('#btn-open-armory') as HTMLButtonElement, () => {
       this.toggleArmoryShop();
@@ -1514,6 +1668,7 @@ export class UIManager {
     if (!s) return;
     const autoOn = this.engine.input.autoFireEnabled;
     const muted = SoundFX.isUserMuted();
+    const musicMuted = SoundFX.isMusicMuted();
     const fsSupported = this.isFullscreenSupported();
     const fsActive = this.isFullscreenActive();
 
@@ -1526,6 +1681,9 @@ export class UIManager {
             <button class="btn-cartoon btn-green" id="btn-resume">${I18n.t('resumeBtn')}</button>
             <button class="btn-cartoon ${autoOn ? 'btn-blue' : 'btn-gray'}" id="btn-toggle-auto">
               ${I18n.t('autoFireBtn', { state: autoOn ? I18n.t('on') : I18n.t('off') })}
+            </button>
+            <button class="btn-cartoon ${!musicMuted ? 'btn-blue' : 'btn-gray'}" id="btn-toggle-music">
+              ${musicMuted ? I18n.t('musicMuted') : I18n.t('musicOn')}
             </button>
             <button class="btn-cartoon btn-gray" id="btn-toggle-mute">
               ${muted ? I18n.t('soundMuted') : I18n.t('soundOn')}
@@ -1556,6 +1714,11 @@ export class UIManager {
 
     (this.modalRoot.querySelector('#btn-toggle-auto') as HTMLButtonElement).onclick = () => {
       this.engine.input.autoFireEnabled = !this.engine.input.autoFireEnabled;
+      this.renderPauseMenu();
+    };
+
+    (this.modalRoot.querySelector('#btn-toggle-music') as HTMLButtonElement).onclick = () => {
+      SoundFX.toggleMusicMute();
       this.renderPauseMenu();
     };
 
@@ -1947,7 +2110,21 @@ export class UIManager {
 
   public syncHUD(): void {
     const s = this.engine.state;
-    if (!s || !this.hudRoot) return;
+    if (!s || !this.hudRoot) {
+      document.body.classList.remove('pc-combat-cursor');
+      return;
+    }
+
+    const usingTouch = this.engine.input.usingTouch;
+    const hideOsCursor =
+      !usingTouch &&
+      !this.armoryOpen &&
+      !this.pauseOpen &&
+      !this.engine.modalPaused &&
+      !this.engine.paused &&
+      this.modalRoot.childElementCount === 0 &&
+      s.waveState !== 'ended';
+    document.body.classList.toggle('pc-combat-cursor', hideOsCursor);
 
     const setIfChanged = (key: string, val: string, fn: () => void) => {
       if (this.hudCache[key] !== val) {
@@ -1955,6 +2132,11 @@ export class UIManager {
         fn();
       }
     };
+
+    setIfChanged('hudInputMode', usingTouch ? 'touch' : 'pc', () => {
+      this.hudRoot!.classList.toggle('is-touch-hud', usingTouch);
+      this.hudRoot!.classList.toggle('is-pc-hud', !usingTouch);
+    });
 
     const vigState = `${s.player.hp / s.player.maxHp < 0.3 ? 1 : 0}|${s.player.hitFlashTimer > 0 ? 1 : 0}`;
     setIfChanged('vig', vigState, () => {
@@ -2281,6 +2463,178 @@ export class UIManager {
       relBtn.disabled = !canReload && !isReloading;
       relBtn.classList.toggle('reloading', isReloading);
       relBtn.classList.toggle('need-reload', canReload && lowAmmo);
+    });
+
+    // 动态切换 Boss 战高燃配乐 vs 常规战斗合成波配乐
+    SoundFX.setBgmMode(bossTarget && isBossKind(bossTarget.kind) ? 'boss' : 'combat');
+
+    // PC 桌面端底部战术动作栏同步
+    if (!usingTouch) {
+      const slot0 = s.player.weapons[0];
+      const slot1 = s.player.weapons.length >= 2 ? s.player.weapons[s.player.activeSlot === 0 ? 1 : s.player.activeSlot] : null;
+      const pcBarKey = [
+        I18n.lang,
+        s.player.activeSlot,
+        s.player.weapons.length,
+        slot0 ? `${slot0.defId}:${slot0.evolved ? 1 : 0}:${slot0.mag}/${slot0.reserve}` : 'none',
+        slot1 ? `${slot1.defId}:${slot1.evolved ? 1 : 0}:${slot1.mag}/${slot1.reserve}` : 'empty',
+        isReloading ? 'rel' : canReload ? (lowAmmo ? 'low' : 'ok') : 'full',
+        `${clsDef.id}:${skillCdSec}`,
+        s.player.grenades,
+        pulseShop,
+      ].join('|');
+
+      setIfChanged('pcHotbar', pcBarKey, () => {
+        const formatSlotAmmo = (w: NonNullable<typeof slot0>, active: boolean) => {
+          if (active && isReloading) return I18n.t('reloadingShort');
+          return w.reserve < 0 ? `${w.mag}/∞` : `${w.mag}/${w.reserve}`;
+        };
+
+        if (slot0) {
+          const def0 = WEAPONS[slot0.defId];
+          const btn0 = this.hudRoot!.querySelector('#pc-slot-0') as HTMLButtonElement;
+          const ico0 = this.hudRoot!.querySelector('#pc-slot-0-ico') as HTMLImageElement;
+          const nm0 = this.hudRoot!.querySelector('#pc-slot-0-name') as HTMLElement;
+          const am0 = this.hudRoot!.querySelector('#pc-slot-0-ammo') as HTMLElement;
+          btn0.classList.toggle('is-active', s.player.activeSlot === 0);
+          btn0.classList.toggle('is-evolved', slot0.evolved);
+          ico0.setAttribute('src', `./assets/gun_${slot0.defId}.png`);
+          nm0.textContent = slot0.evolved
+            ? I18n.wSuperName(def0.id, def0.superName)
+            : I18n.wName(def0.id, def0.name);
+          am0.textContent = formatSlotAmmo(slot0, s.player.activeSlot === 0);
+          am0.classList.toggle('low-ammo', s.player.activeSlot === 0 && lowAmmo);
+        }
+
+        const btn1 = this.hudRoot!.querySelector('#pc-slot-1') as HTMLButtonElement;
+        const key1 = this.hudRoot!.querySelector('#pc-slot-1-key') as HTMLElement;
+        const ico1 = this.hudRoot!.querySelector('#pc-slot-1-ico') as HTMLImageElement;
+        const nm1 = this.hudRoot!.querySelector('#pc-slot-1-name') as HTMLElement;
+        const am1 = this.hudRoot!.querySelector('#pc-slot-1-ammo') as HTMLElement;
+        if (slot1) {
+          const def1 = WEAPONS[slot1.defId];
+          const slot1Active = s.player.activeSlot !== 0;
+          btn1.classList.remove('is-empty');
+          btn1.classList.toggle('is-active', slot1Active);
+          btn1.classList.toggle('is-evolved', slot1.evolved);
+          key1.textContent = s.player.weapons.length > 2 ? 'Q' : '2';
+          ico1.setAttribute('src', `./assets/gun_${slot1.defId}.png`);
+          nm1.textContent = slot1.evolved
+            ? I18n.wSuperName(def1.id, def1.superName)
+            : I18n.wName(def1.id, def1.name);
+          am1.textContent = formatSlotAmmo(slot1, slot1Active);
+          am1.classList.toggle('low-ammo', slot1Active && lowAmmo);
+        } else {
+          btn1.classList.add('is-empty');
+          btn1.classList.remove('is-active', 'is-evolved');
+          key1.textContent = '2';
+          ico1.setAttribute('src', './assets/gun_smg.png');
+          nm1.textContent = I18n.t('pcSlotEmpty');
+          am1.textContent = 'B / Q';
+          am1.classList.remove('low-ammo');
+        }
+
+        const pcRel = this.hudRoot!.querySelector('#pc-btn-reload') as HTMLButtonElement;
+        const pcRelTxt = this.hudRoot!.querySelector('#pc-reload-txt') as HTMLElement;
+        pcRel.disabled = !canReload && !isReloading;
+        pcRel.classList.toggle('need-reload', canReload && lowAmmo);
+        pcRelTxt.textContent = isReloading ? I18n.t('reloadingShort') : I18n.t('pcReloadLabel');
+
+        const pcSk = this.hudRoot!.querySelector('#pc-btn-skill') as HTMLButtonElement;
+        const pcSkIco = this.hudRoot!.querySelector('#pc-skill-ico') as HTMLImageElement;
+        const pcSkTxt = this.hudRoot!.querySelector('#pc-skill-txt') as HTMLElement;
+        pcSkIco.setAttribute('src', clsDef.skillSprite);
+        pcSk.disabled = skillCdSec > 0;
+        pcSk.style.borderColor = skillCdSec > 0 ? '' : clsDef.color;
+        pcSkTxt.textContent = skillCdSec > 0 ? `${skillCdSec}s` : I18n.t('pcSkillLabel');
+
+        const pcGr = this.hudRoot!.querySelector('#pc-btn-grenade') as HTMLButtonElement;
+        const pcGrTxt = this.hudRoot!.querySelector('#pc-grenade-txt') as HTMLElement;
+        pcGr.disabled = s.player.grenades <= 0;
+        pcGrTxt.textContent = `×${s.player.grenades}`;
+
+        const pcShop = this.hudRoot!.querySelector('#pc-btn-armory') as HTMLButtonElement;
+        const pcShopTxt = this.hudRoot!.querySelector('#pc-armory-txt') as HTMLElement;
+        pcShop.classList.toggle('shop-ready', pulseShop === '1');
+        pcShopTxt.textContent = I18n.t('pcArmoryLabel');
+      });
+    }
+
+    // 新玩家首局实战交互式键位教学引导（FTUE）
+    this.syncFtueChecklist(s, usingTouch, setIfChanged);
+  }
+
+  private syncFtueChecklist(
+    s: RunSnapshot,
+    usingTouch: boolean,
+    setIfChanged: (key: string, val: string, fn: () => void) => void
+  ): void {
+    const card = this.hudRoot?.querySelector('#hud-ftue-card') as HTMLElement | null;
+    if (!card) return;
+    const ft = this.ftue;
+    if (!ft || !ft.active) {
+      if (card.style.display !== 'none') card.style.display = 'none';
+      return;
+    }
+
+    const p = s.player;
+    if (!ft.moved && Math.hypot(p.x - ft.startX, p.y - ft.startY) > 72) {
+      ft.moved = true;
+      SoundFX.coin();
+    }
+    if (!ft.shot && (s.kills >= 1 || p.muzzleFlashTimer > 0 || s.bullets.length > 0)) {
+      ft.shot = true;
+      SoundFX.coin();
+    }
+    if (!ft.geared && (this.armoryOpen || p.weapons.length >= 2 || s.cash < ft.initialCash)) {
+      ft.geared = true;
+      SoundFX.coin();
+    }
+    if (
+      !ft.tactical &&
+      (s.skillCooldown > 0 || p.grenades < ft.initialGrenades || s.doors.some((d) => d.unlocked))
+    ) {
+      ft.tactical = true;
+      SoundFX.coin();
+    }
+
+    const allDone = ft.moved && ft.shot && ft.geared && ft.tactical;
+    if ((allDone || s.wave >= 3) && ft.completedAt === 0) {
+      ft.completedAt = performance.now();
+      if (allDone) {
+        s.cash += 150;
+        s.bannerText = I18n.t('ftueBonusBanner');
+        s.bannerTimer = 3.6;
+        SoundFX.fanfare();
+      }
+    }
+
+    if (ft.completedAt > 0 && performance.now() - ft.completedAt > 1500) {
+      ft.active = false;
+      card.style.display = 'none';
+      return;
+    }
+
+    const sig = `${I18n.lang}:${usingTouch ? 1 : 0}:${ft.moved ? 1 : 0}${ft.shot ? 1 : 0}${ft.geared ? 1 : 0}${ft.tactical ? 1 : 0}:${ft.completedAt > 0 ? 1 : 0}`;
+    setIfChanged('ftueCard', sig, () => {
+      card.style.display = 'flex';
+      card.classList.toggle('all-done', ft.completedAt > 0);
+      (card.querySelector('#ftue-title') as HTMLElement).textContent = I18n.t('ftueTitle');
+      (card.querySelector('#btn-ftue-skip') as HTMLElement).textContent = I18n.t('ftueSkip');
+
+      const applyStep = (id: string, done: boolean, html: string) => {
+        const row = card.querySelector(`#ftue-step-${id}`) as HTMLElement;
+        const chk = card.querySelector(`#ftue-chk-${id}`) as HTMLElement;
+        const txt = card.querySelector(`#ftue-txt-${id}`) as HTMLElement;
+        row.classList.toggle('done', done);
+        chk.textContent = done ? '✓' : '○';
+        txt.innerHTML = html;
+      };
+
+      applyStep('move', ft.moved, I18n.t(usingTouch ? 'ftueMoveTouch' : 'ftueMovePc'));
+      applyStep('shoot', ft.shot, I18n.t(usingTouch ? 'ftueShootTouch' : 'ftueShootPc'));
+      applyStep('gear', ft.geared, I18n.t(usingTouch ? 'ftueGearTouch' : 'ftueGearPc'));
+      applyStep('skill', ft.tactical, I18n.t(usingTouch ? 'ftueSkillTouch' : 'ftueSkillPc'));
     });
   }
 

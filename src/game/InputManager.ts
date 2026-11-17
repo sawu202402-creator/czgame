@@ -1,3 +1,5 @@
+import { PlatformSDK } from '../platform/PlatformSDK';
+
 export interface StickState {
   active: boolean;
   id: number;
@@ -31,7 +33,7 @@ export class InputManager {
   private onUseClassSkillCb: (() => void) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
-    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+    if (PlatformSDK.isMobileOrTablet()) {
       this.usingTouch = true;
       this.autoFireEnabled = true;
       this.touchAutoFireInitialized = true;
@@ -66,7 +68,8 @@ export class InputManager {
       if (e.repeat) return;
 
       this.keys.add(code);
-      if (code === 'Escape') {
+      this.usingTouch = false;
+      if (code === 'Escape' || code === 'KeyP') {
         e.preventDefault();
         this.onEscapeCb?.();
       } else if (code === 'KeyQ') {
