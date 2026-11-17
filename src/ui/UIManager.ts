@@ -47,6 +47,9 @@ export class UIManager {
     if (urlRoom) {
       this.hubTab = 'coop';
       setTimeout(() => CoopManager.joinRoomByCode(urlRoom), 60);
+    } else if (PlatformSDK.isInstantMultiplayerRequested()) {
+      this.hubTab = 'coop';
+      setTimeout(() => CoopManager.createHostRoom(STAGES[0].id, this.selectedMode), 60);
     }
   }
 

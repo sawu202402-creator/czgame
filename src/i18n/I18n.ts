@@ -199,6 +199,7 @@ const UI_TEXT: Record<LangCode, DictMap> = {
     mockAdReward: 'Unlocking: <strong>{title}</strong>',
     mockAdTimer: 'Game muted & paused · {s}s remaining',
     mockAdCancel: 'Cancel',
+    adUnavailableNotice: '⚠️ Video ad unavailable right now (disabled during Basic Launch test or blocked by AdBlocker)',
     // Engine / Renderer combat texts
     roomLocked: '🔒 Locked · {name}',
     boardChopper: 'Step onto Helipad [H] to Evac!',
@@ -450,6 +451,7 @@ const UI_TEXT: Record<LangCode, DictMap> = {
     mockAdReward: '即将解锁：<strong>{title}</strong>',
     mockAdTimer: '游戏已自动静音并暂停 · 剩余 {s} 秒',
     mockAdCancel: '放弃奖励',
+    adUnavailableNotice: '⚠️ 当前暂无可用视频广告（平台测试期未开启广告或被插件拦截）',
     roomLocked: '🔒 未开启 · {name}',
     boardChopper: '踩入停机坪登机撤离!',
     stepOrB: '踩入或按 B',

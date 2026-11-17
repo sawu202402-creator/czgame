@@ -20,6 +20,7 @@ declare global {
           showInviteButton?: (params: Record<string, string>) => string;
           hideInviteButton?: () => void;
           getInviteParam?: (key: string) => string | null;
+          isInstantMultiplayer?: boolean;
           settings?: { muteAudio?: boolean };
           addSettingsChangeListener?: (cb: (settings: { muteAudio?: boolean }) => void) => void;
         };
@@ -308,6 +309,49 @@ class PlatformAdapter {
     }
   }
 
+  public isInstantMultiplayerRequested(): boolean {
+    if (__BUILD_PLATFORM__ !== 'poki') {
+      try {
+        return Boolean(window.CrazyGames?.SDK?.game?.isInstantMultiplayer);
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private showAdUnavailableNotice(): void {
+    try {
+      const existing = document.getElementById('sdk-ad-notice-toast');
+      existing?.remove();
+      const toast = document.createElement('div');
+      toast.id = 'sdk-ad-notice-toast';
+      toast.textContent = I18n.t('adUnavailableNotice');
+      Object.assign(toast.style, {
+        position: 'fixed',
+        top: '18px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: '260',
+        background: 'rgba(15, 23, 42, 0.96)',
+        color: '#fde047',
+        border: '2px solid #f59e0b',
+        borderRadius: '999px',
+        padding: '8px 18px',
+        fontSize: '13px',
+        fontWeight: '800',
+        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.55)',
+        pointerEvents: 'none',
+        textAlign: 'center',
+        maxWidth: '90vw',
+      });
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 2600);
+    } catch {
+      // ignore
+    }
+  }
+
   public consumeInviteRoomCode(): string | null {
     if (__BUILD_PLATFORM__ !== 'crazygames') {
       try {
@@ -387,6 +431,7 @@ class PlatformAdapter {
             if (window.CrazyGames?.SDK?.environment === 'local') {
               this.runMockAdModal(placement, rewardTitle).then((ok) => resolve(finish(ok)));
             } else {
+              this.showAdUnavailableNotice();
               resolve(finish(false));
             }
           },
