@@ -1165,6 +1165,92 @@ button {
   box-shadow: 0 0 14px rgba(74, 222, 128, 0.65), 0 4px 10px rgba(0, 0, 0, 0.42);
 }
 
+/* 右上角主武器一键快捷补弹/重装按钮 */
+.quick-ammo-btn {
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px 5px 8px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(251, 191, 36, 0.72);
+  background: linear-gradient(180deg, rgba(180, 83, 9, 0.94), rgba(120, 53, 15, 0.96));
+  color: #fef3c7;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.46);
+  transition: transform 0.1s ease, border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+.quick-ammo-btn:active {
+  transform: scale(0.93);
+}
+.quick-ammo-btn.is-evolved {
+  border-color: #c084fc;
+}
+.quick-ammo-btn.is-urgent {
+  background: linear-gradient(180deg, #f59e0b, #d97706);
+  color: #090e17;
+  border-color: #fef08a;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.7), 0 4px 10px rgba(0, 0, 0, 0.48);
+  animation: quickAmmoPulse 1.15s ease-in-out infinite;
+}
+.quick-ammo-btn.is-empty:not(.no-cash) {
+  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  color: #ffffff;
+  border-color: #fde047;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.78), 0 4px 12px rgba(0, 0, 0, 0.52);
+  animation: quickAmmoPulse 0.9s ease-in-out infinite;
+}
+.quick-ammo-btn.no-cash {
+  background: rgba(15, 23, 42, 0.84);
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.35);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.36);
+  animation: none;
+}
+.quick-ammo-gun {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
+  pointer-events: none;
+}
+.quick-ammo-btn.no-cash .quick-ammo-gun {
+  opacity: 0.55;
+}
+.quick-ammo-text {
+  white-space: nowrap;
+  pointer-events: none;
+}
+.quick-ammo-key {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(9, 14, 23, 0.72);
+  color: #fde047;
+  border: 1px solid rgba(253, 224, 71, 0.48);
+  line-height: 13px;
+  pointer-events: none;
+}
+.quick-ammo-btn.no-cash .quick-ammo-key {
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+@keyframes quickAmmoPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
 .hud-icon-btn {
   pointer-events: auto;
   cursor: pointer;
@@ -1199,6 +1285,12 @@ button {
 .hud-banner.visible {
   opacity: 1;
   transform: translateY(0);
+}
+.hud-banner.alert-banner {
+  background: linear-gradient(90deg, rgba(127, 29, 29, 0.92), rgba(154, 52, 18, 0.92));
+  color: #fef08a;
+  border: 1.5px solid #fbbf24;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.55), 0 6px 16px rgba(0, 0, 0, 0.5);
 }
 
 /* 零遮挡局内晋升/战术遗物获取滑入提示卡 */
@@ -2212,6 +2304,15 @@ button {
   .moba-shop-btn {
     padding: 4px 10px 4px 8px;
     font-size: 11.5px;
+  }
+  .quick-ammo-btn {
+    padding: 4px 9px 4px 7px;
+    font-size: 11px;
+    gap: 4px;
+  }
+  .quick-ammo-gun {
+    width: 19px;
+    height: 19px;
   }
   .moba-wheel-zone {
     width: 154px;

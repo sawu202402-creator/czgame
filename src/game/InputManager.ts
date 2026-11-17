@@ -27,6 +27,7 @@ export class InputManager {
   private onToggleArmoryCb: (() => void) | null = null;
   private onThrowGrenadeCb: (() => void) | null = null;
   private onEscapeCb: (() => void) | null = null;
+  private onQuickBuyAmmoCb: (() => void) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
@@ -79,6 +80,8 @@ export class InputManager {
         this.onToggleArmoryCb?.();
       } else if (code === 'KeyG' || code === 'Space') {
         this.onThrowGrenadeCb?.();
+      } else if (code === 'KeyV') {
+        this.onQuickBuyAmmoCb?.();
       }
     });
 
@@ -229,13 +232,15 @@ export class InputManager {
     onReload: () => void,
     onToggleArmory: () => void,
     onThrowGrenade: () => void,
-    onEscape?: () => void
+    onEscape?: () => void,
+    onQuickBuyAmmo?: () => void
   ): void {
     this.onSwitchWeaponCb = onSwitchWeapon;
     this.onReloadCb = onReload;
     this.onToggleArmoryCb = onToggleArmory;
     this.onThrowGrenadeCb = onThrowGrenade;
     this.onEscapeCb = onEscape || null;
+    this.onQuickBuyAmmoCb = onQuickBuyAmmo || null;
   }
 
   public getMoveVector(): { x: number; y: number } {

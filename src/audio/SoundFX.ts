@@ -194,6 +194,23 @@ class SoundFXManager {
     });
   }
 
+  public emptyClip(): void {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [720, 310].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.065);
+      gain.gain.setValueAtTime(0.11, now + idx * 0.065);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.065 + 0.06);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + idx * 0.065);
+      osc.stop(now + idx * 0.065 + 0.06);
+    });
+  }
+
   public explosion(): void {
     const perfNow = performance.now();
     if (perfNow - this.lastExplosionAt < 55) return;

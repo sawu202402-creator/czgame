@@ -928,6 +928,11 @@ export class UIManager {
             <img class="moba-shop-sprite" src="./assets/prop_armory_kiosk.png" alt="" />
             <span id="hud-shop-label">${I18n.t('shopBtn')}</span>
           </button>
+          <button class="quick-ammo-btn" id="btn-quick-ammo" type="button" style="display:none">
+            <img class="quick-ammo-gun" id="quick-ammo-icon" src="./assets/gun_smg.png" alt="" />
+            <span class="quick-ammo-text" id="quick-ammo-label"></span>
+            <kbd class="quick-ammo-key" id="quick-ammo-key">V</kbd>
+          </button>
         </div>
       </div>
 
@@ -976,6 +981,10 @@ export class UIManager {
 
     this.bindModalTap(hud.querySelector('#btn-open-armory') as HTMLButtonElement, () => {
       this.toggleArmoryShop();
+    });
+
+    this.bindCombatTap(hud.querySelector('#btn-quick-ammo') as HTMLButtonElement, () => {
+      this.engine.quickBuyPrimaryAmmo();
     });
 
     this.bindModalTap(hud.querySelector('#hud-cash') as HTMLButtonElement, () => {
@@ -1718,6 +1727,36 @@ export class UIManager {
       );
     });
 
+    const qTarget = this.engine.getQuickRefillTarget();
+    const showKeyHint = !this.engine.input.usingTouch;
+    const qKey = qTarget
+      ? `${I18n.lang}:${qTarget.defId}:${qTarget.evolved ? 1 : 0}:${qTarget.cost}:${qTarget.isEmpty ? 1 : 0}:${qTarget.needsReequip ? 1 : 0}:${qTarget.urgent ? 1 : 0}:${qTarget.canAfford ? 1 : 0}:${showKeyHint ? 1 : 0}`
+      : 'none';
+    setIfChanged('quickAmmo', qKey, () => {
+      const qBtn = this.hudRoot!.querySelector('#btn-quick-ammo') as HTMLButtonElement;
+      if (!qTarget) {
+        qBtn.style.display = 'none';
+        return;
+      }
+      const qIcon = this.hudRoot!.querySelector('#quick-ammo-icon') as HTMLImageElement;
+      const qLbl = this.hudRoot!.querySelector('#quick-ammo-label') as HTMLElement;
+      const qKbd = this.hudRoot!.querySelector('#quick-ammo-key') as HTMLElement;
+      qBtn.style.display = 'inline-flex';
+      const iconSrc = `./assets/gun_${qTarget.defId}.png`;
+      if (qIcon.getAttribute('src') !== iconSrc) {
+        qIcon.setAttribute('src', iconSrc);
+      }
+      qLbl.textContent = I18n.t(
+        qTarget.isEmpty && qTarget.needsReequip ? 'quickAmmoReequipBtn' : 'quickAmmoBtn',
+        { cost: qTarget.cost }
+      );
+      qKbd.style.display = showKeyHint ? 'inline-block' : 'none';
+      qBtn.classList.toggle('is-empty', qTarget.isEmpty);
+      qBtn.classList.toggle('is-urgent', qTarget.urgent && qTarget.canAfford);
+      qBtn.classList.toggle('no-cash', !qTarget.canAfford);
+      qBtn.classList.toggle('is-evolved', qTarget.evolved);
+    });
+
     const grenStr = `${s.player.grenades}`;
     setIfChanged('gren', grenStr, () => {
       const grenBtn = this.hudRoot!.querySelector('#btn-grenade') as HTMLButtonElement;
@@ -1731,9 +1770,10 @@ export class UIManager {
       const bannerEl = this.hudRoot!.querySelector('#hud-banner') as HTMLElement;
       if (bannerKey) {
         bannerEl.textContent = bannerKey;
+        bannerEl.classList.toggle('alert-banner', bannerKey.startsWith('⚠️'));
         bannerEl.classList.add('visible');
       } else {
-        bannerEl.classList.remove('visible');
+        bannerEl.classList.remove('visible', 'alert-banner');
       }
     });
 

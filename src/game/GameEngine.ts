@@ -97,6 +97,9 @@ export class GameEngine {
         if (this.state && this.state.waveState !== 'ended') {
           this.callbacks.onTogglePauseMenu();
         }
+      },
+      () => {
+        this.quickBuyPrimaryAmmo();
       }
     );
   }
@@ -222,6 +225,7 @@ export class GameEngine {
       localCallsign,
       squadCount,
       remotePlayers,
+      lastPrimaryWeaponId: null,
       player: {
         x: stage.playerSpawn.x + myOff.dx,
         y: stage.playerSpawn.y + myOff.dy,
@@ -640,6 +644,7 @@ export class GameEngine {
         w.mag = this.getMaxMag(weaponId, w.evolved);
         if (def.maxReserve > 0) w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
         s.player.activeSlot = ownedIdx;
+        if (def.maxReserve > 0) s.lastPrimaryWeaponId = weaponId;
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
         SoundFX.fanfare();
@@ -648,6 +653,7 @@ export class GameEngine {
 
       if (!forceRefill && s.player.activeSlot !== ownedIdx) {
         s.player.activeSlot = ownedIdx;
+        if (def.maxReserve > 0) s.lastPrimaryWeaponId = weaponId;
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
         SoundFX.reloadDone();
@@ -663,6 +669,7 @@ export class GameEngine {
       const maxRes = def.maxReserve * (w.evolved ? 2 : 1);
       if (w.reserve >= maxRes && w.mag >= this.getMaxMag(weaponId, w.evolved)) {
         s.player.activeSlot = ownedIdx;
+        s.lastPrimaryWeaponId = weaponId;
         s.player.reloadTimer = 0;
         s.player.weaponSwapTimer = 0.32;
         return { ok: true, msg: I18n.t('msgAmmoFull') };
@@ -672,6 +679,7 @@ export class GameEngine {
       w.mag = this.getMaxMag(weaponId, w.evolved);
       w.reserve = maxRes;
       s.player.activeSlot = ownedIdx;
+      s.lastPrimaryWeaponId = weaponId;
       s.player.reloadTimer = 0;
       s.player.weaponSwapTimer = 0.32;
       SoundFX.reloadDone();
@@ -683,6 +691,128 @@ export class GameEngine {
     this.giveOrRefillWeapon(weaponId, false);
     SoundFX.fanfare();
     return { ok: true, msg: I18n.t('msgBoughtGun', { name: wTitle(false) }) };
+  }
+
+  public getQuickRefillTarget(): {
+    defId: string;
+    evolved: boolean;
+    cost: number;
+    isEmpty: boolean;
+    needsReequip: boolean;
+    urgent: boolean;
+    canAfford: boolean;
+  } | null {
+    const s = this.state;
+    if (!s || s.waveState === 'ended') return null;
+    const p = s.player;
+    if (p.downed || p.spectating) return null;
+
+    const activeWep = p.weapons[p.activeSlot];
+    const activeDef = WEAPONS[activeWep.defId];
+    if (activeDef.maxReserve > 0) {
+      s.lastPrimaryWeaponId = activeWep.defId;
+      const maxMag = this.getMaxMag(activeWep.defId, activeWep.evolved);
+      const maxRes = activeDef.maxReserve * (activeWep.evolved ? 2 : 1);
+      if (activeWep.mag >= maxMag && activeWep.reserve >= maxRes) {
+        return null;
+      }
+      const totalCur = activeWep.mag + activeWep.reserve;
+      const totalMax = maxMag + maxRes;
+      return {
+        defId: activeWep.defId,
+        evolved: activeWep.evolved,
+        cost: activeDef.ammoCost,
+        isEmpty: totalCur <= 0,
+        needsReequip: false,
+        urgent: activeWep.reserve <= 0 || totalCur <= Math.ceil(totalMax * 0.28),
+        canAfford: s.cash >= activeDef.ammoCost,
+      };
+    }
+
+    let candidate = s.lastPrimaryWeaponId
+      ? p.weapons.find((w) => w.defId === s.lastPrimaryWeaponId && WEAPONS[w.defId].maxReserve > 0)
+      : undefined;
+
+    if (!candidate) {
+      for (let i = p.weapons.length - 1; i >= 0; i--) {
+        const w = p.weapons[i];
+        const d = WEAPONS[w.defId];
+        if (d.maxReserve > 0 && w.mag + w.reserve <= 0) {
+          candidate = w;
+          break;
+        }
+      }
+    }
+    if (!candidate) {
+      for (let i = p.weapons.length - 1; i >= 0; i--) {
+        const w = p.weapons[i];
+        const d = WEAPONS[w.defId];
+        if (d.maxReserve > 0) {
+          const maxM = this.getMaxMag(w.defId, w.evolved);
+          const maxR = d.maxReserve * (w.evolved ? 2 : 1);
+          if (w.mag < maxM || w.reserve < maxR) {
+            candidate = w;
+            break;
+          }
+        }
+      }
+    }
+    if (!candidate) return null;
+
+    const cDef = WEAPONS[candidate.defId];
+    const cMaxMag = this.getMaxMag(candidate.defId, candidate.evolved);
+    const cMaxRes = cDef.maxReserve * (candidate.evolved ? 2 : 1);
+    if (candidate.mag >= cMaxMag && candidate.reserve >= cMaxRes) {
+      return null;
+    }
+    const cTotal = candidate.mag + candidate.reserve;
+    return {
+      defId: candidate.defId,
+      evolved: candidate.evolved,
+      cost: cDef.ammoCost,
+      isEmpty: cTotal <= 0,
+      needsReequip: true,
+      urgent: cTotal <= 0 || candidate.reserve <= 0,
+      canAfford: s.cash >= cDef.ammoCost,
+    };
+  }
+
+  public quickBuyPrimaryAmmo(): boolean {
+    const s = this.state;
+    if (!s || this.landscapePaused || s.waveState === 'ended') return false;
+    if (!s.isCoop && (this.paused || this.modalPaused)) return false;
+    const target = this.getQuickRefillTarget();
+    if (!target) return false;
+
+    const def = WEAPONS[target.defId];
+    const wIdx = s.player.weapons.findIndex((w) => w.defId === target.defId);
+    if (wIdx < 0) return false;
+    const w = s.player.weapons[wIdx];
+    const wLabel = w.evolved ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name);
+
+    if (s.cash < target.cost) {
+      SoundFX.emptyClip();
+      this.spawnFloatingText(s.player.x, s.player.y - 36, I18n.t('msgNoCash', { c: target.cost }), '#fca5a5', 1.15);
+      return false;
+    }
+
+    s.cash -= target.cost;
+    w.mag = this.getMaxMag(w.defId, w.evolved);
+    w.reserve = def.maxReserve * (w.evolved ? 2 : 1);
+    s.player.activeSlot = wIdx;
+    s.lastPrimaryWeaponId = w.defId;
+    s.player.reloadTimer = 0;
+    s.player.reloadDuration = 0;
+    s.player.weaponSwapTimer = 0.26;
+    SoundFX.reloadDone();
+    this.spawnFloatingText(
+      s.player.x,
+      s.player.y - 38,
+      I18n.t('ftQuickRefilled', { name: wLabel }),
+      w.evolved ? def.superColor : '#4ade80',
+      1.25
+    );
+    return true;
   }
 
   public evolveActiveWeaponInShop(cost = 1850): { ok: boolean; msg: string } {
@@ -960,6 +1090,9 @@ export class GameEngine {
       s.player.weaponSwapTimer = 0.28;
       const wep = s.player.weapons[next];
       const def = WEAPONS[wep.defId];
+      if (def.maxReserve > 0) {
+        s.lastPrimaryWeaponId = wep.defId;
+      }
       const wLabel = wep.evolved ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name);
       SoundFX.reloadDone();
       this.spawnFloatingText(
@@ -1762,8 +1895,7 @@ export class GameEngine {
     if (!overdrive && wep.mag <= 0) {
       if (wep.reserve === 0) {
         if (p.activeSlot !== 0) {
-          p.activeSlot = 0;
-          this.spawnFloatingText(p.x, p.y - 34, I18n.t('ftOutOfAmmo'), '#fca5a5', 1);
+          this.notifyAndFallbackFromEmptyWeapon(wep);
         }
       } else {
         this.startReload();
@@ -1919,6 +2051,28 @@ export class GameEngine {
         this.fireFlushTimer = 0.048;
       }
     }
+
+    if (!overdrive && wep.mag <= 0 && wep.reserve === 0 && p.activeSlot !== 0) {
+      this.notifyAndFallbackFromEmptyWeapon(wep);
+    }
+  }
+
+  private notifyAndFallbackFromEmptyWeapon(wep: RunSnapshot['player']['weapons'][number]): void {
+    const s = this.state!;
+    const p = s.player;
+    const def = WEAPONS[wep.defId];
+    if (def.maxReserve > 0) {
+      s.lastPrimaryWeaponId = wep.defId;
+    }
+    const wLabel = wep.evolved ? I18n.wSuperName(def.id, def.superName) : I18n.wName(def.id, def.name);
+    p.activeSlot = 0;
+    p.reloadTimer = 0;
+    p.reloadDuration = 0;
+    p.weaponSwapTimer = 0.3;
+    p.fireCooldown = Math.max(p.fireCooldown, 0.25);
+    SoundFX.emptyClip();
+    this.showBanner(I18n.t('bannerOutOfAmmo', { name: wLabel, cost: def.ammoCost }), 4.0);
+    this.spawnFloatingText(p.x, p.y - 38, I18n.t('ftOutOfAmmo', { name: wLabel }), '#fde047', 1.28);
   }
 
   private flushPendingNetFire(dt: number): void {
@@ -2294,6 +2448,9 @@ export class GameEngine {
       };
       p.weapons.push(inst);
       p.activeSlot = p.weapons.length - 1;
+    }
+    if (def.maxReserve > 0) {
+      s.lastPrimaryWeaponId = weaponId;
     }
     p.reloadTimer = 0;
     p.weaponSwapTimer = 0.32;

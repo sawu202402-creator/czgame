@@ -259,6 +259,7 @@ export interface RunSnapshot {
   localCallsign: string;
   squadCount: number;
   remotePlayers: RemotePlayerState[];
+  lastPrimaryWeaponId: string | null;
   player: {
     x: number;
     y: number;
