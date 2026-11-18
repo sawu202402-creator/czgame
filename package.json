@@ -9,7 +9,9 @@
     "preview": "vite preview --host",
     "pack:crazygames": "VITE_PLATFORM=crazygames npm run build && python3 scripts/pack_platforms.py crazygames",
     "pack:poki": "VITE_PLATFORM=poki npm run build && python3 scripts/pack_platforms.py poki",
-    "pack:all": "npm run pack:crazygames && npm run pack:poki && npm run build"
+    "pack:gd": "VITE_PLATFORM=gamedistribution npm run build && python3 scripts/pack_platforms.py gamedistribution",
+    "pack:itch": "VITE_PLATFORM=itch npm run build && python3 scripts/pack_platforms.py itch",
+    "pack:all": "npm run pack:crazygames && npm run pack:poki && npm run pack:gd && npm run pack:itch && npm run build"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

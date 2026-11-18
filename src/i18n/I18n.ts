@@ -239,8 +239,8 @@ const UI_TEXT: Record<LangCode, DictMap> = {
     settleTitle: '🎖️ Mission Report',
     multClaimBtn: '🎬 Bonus Claim',
     normalClaimBtn: 'Claim Rewards',
-    // Mock Ad
-    mockAdBadge: 'Dev Mode · Simulated Rewarded Ad',
+    // Mock Ad / Tactical Uplink
+    mockAdBadge: 'HQ Satellite Uplink · Tactical Support',
     mockAdTitle: '📡 Calling HQ Supply Drop...',
     mockAdReward: 'Unlocking: <strong>{title}</strong>',
     mockAdTimer: 'Game muted & paused · {s}s remaining',
@@ -610,7 +610,7 @@ const UI_TEXT: Record<LangCode, DictMap> = {
     settleTitle: '🎖️ 行动结算',
     multClaimBtn: '🎬 翻倍领取',
     normalClaimBtn: '普通领取',
-    mockAdBadge: '开发调试 · 模拟激励视频',
+    mockAdBadge: '总部卫星连线 · 战术空投支援',
     mockAdTitle: '📡 正在呼叫总部空投支援...',
     mockAdReward: '即将解锁：<strong>{title}</strong>',
     mockAdTimer: '游戏已自动静音并暂停 · 剩余 {s} 秒',

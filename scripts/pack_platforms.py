@@ -6,24 +6,36 @@ import zipfile
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 
-# Host-only files that should NOT be inside CrazyGames / Poki upload bundles
+# Host-only files that should NOT be inside platform upload bundles
 EXCLUDED_ROOT_FILES = {".nojekyll", "_headers", "manifest.json", ".DS_Store"}
 
 TARGETS = {
     "crazygames": {
         "zip_name": "crazygames-release.zip",
-        "must_include": "sdk.crazygames.com/crazygames-sdk-v3.js",
-        "must_exclude": "poki",
+        "must_include": ["sdk.crazygames.com/crazygames-sdk-v3.js"],
+        "must_exclude": ["poki", "gamedistribution", "gdsdk"],
     },
     "poki": {
         "zip_name": "poki-release.zip",
-        "must_include": "game-cdn.poki.com/scripts/v2/poki-sdk.js",
-        "must_exclude": "crazygames",
+        "must_include": ["game-cdn.poki.com/scripts/v2/poki-sdk.js"],
+        "must_exclude": ["crazygames", "gamedistribution", "gdsdk"],
+    },
+    "gamedistribution": {
+        "zip_name": "gd-release.zip",
+        "must_include": ["html5.api.gamedistribution.com/main.min.js", "GD_OPTIONS"],
+        "must_exclude": ["crazygames", "poki"],
+    },
+    "itch": {
+        "zip_name": "itch-release.zip",
+        "must_include": [],
+        "must_exclude": ["crazygames", "poki", "gamedistribution", "gdsdk"],
     },
 }
 
 
 def pack_target(target_key: str) -> None:
+    if target_key == "gd":
+        target_key = "gamedistribution"
     if target_key not in TARGETS:
         raise SystemExit(f"Unknown target '{target_key}'. Expected one of: {', '.join(TARGETS)}")
 
@@ -32,17 +44,29 @@ def pack_target(target_key: str) -> None:
     if not os.path.isfile(index_path):
         raise SystemExit("Error: dist/index.html not found! Run Vite build first.")
 
+    if target_key == "gamedistribution":
+        gd_id = os.environ.get("VITE_GD_GAME_ID", "").strip()
+        gd_cfg_path = os.path.join(DIST_DIR, "gd-config.js")
+        with open(gd_cfg_path, "w", encoding="utf-8") as gf:
+            gf.write(
+                "// Paste your 32-character GameDistribution Game ID below (from developer.gamedistribution.com)\n"
+                f'window.CZ_GD_GAME_ID = "{gd_id}";\n'
+            )
+
     with open(index_path, "r", encoding="utf-8") as fh:
         html_text = fh.read()
 
-    if cfg["must_include"] not in html_text:
-        raise SystemExit(
-            f"Error: dist/index.html is missing required SDK '{cfg['must_include']}' for {target_key}!"
-        )
-    if cfg["must_exclude"] in html_text.lower():
-        raise SystemExit(
-            f"Error: dist/index.html contains forbidden competitor keyword '{cfg['must_exclude']}'!"
-        )
+    for req in cfg["must_include"]:
+        if req not in html_text:
+            raise SystemExit(
+                f"Error: dist/index.html is missing required SDK '{req}' for {target_key}!"
+            )
+
+    for forbidden in cfg["must_exclude"]:
+        if forbidden in html_text.lower():
+            raise SystemExit(
+                f"Error: dist/index.html contains forbidden competitor keyword '{forbidden}'!"
+            )
 
     # Audit built JS files to guarantee zero competitor SDK references
     assets_dir = os.path.join(DIST_DIR, "assets")
@@ -52,16 +76,19 @@ def pack_target(target_key: str) -> None:
                 fpath = os.path.join(assets_dir, fname)
                 with open(fpath, "r", encoding="utf-8", errors="ignore") as jf:
                     js_text = jf.read().lower()
-                if cfg["must_exclude"] in js_text:
-                    raise SystemExit(
-                        f"Error: {fname} contains forbidden competitor symbol '{cfg['must_exclude']}'!"
-                    )
+                for forbidden in cfg["must_exclude"]:
+                    if forbidden in js_text:
+                        raise SystemExit(
+                            f"Error: {fname} contains forbidden competitor symbol '{forbidden}'!"
+                        )
 
     out_zip = os.path.join(ROOT_DIR, cfg["zip_name"])
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for root, _, files in os.walk(DIST_DIR):
             for f in sorted(files):
                 if f in EXCLUDED_ROOT_FILES or f.startswith("."):
+                    continue
+                if target_key != "gamedistribution" and f == "gd-config.js":
                     continue
                 abs_p = os.path.join(root, f)
                 rel_p = os.path.relpath(abs_p, DIST_DIR)
@@ -81,7 +108,7 @@ def pack_target(target_key: str) -> None:
             dst_dir = out_folder if rel_dir == "." else os.path.join(out_folder, rel_dir)
             os.makedirs(dst_dir, exist_ok=True)
             for f in sorted(files):
-                if f in EXCLUDED_ROOT_FILES or f.startswith("."):
+                if f in EXCLUDED_ROOT_FILES or f == "gd-config.js" or f.startswith("."):
                     continue
                 shutil.copy2(os.path.join(root, f), os.path.join(dst_dir, f))
         print(f"[CRAZYGAMES] Clean drag-and-drop folder ready: {out_folder}")

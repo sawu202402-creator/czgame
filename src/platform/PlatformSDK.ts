@@ -2,7 +2,11 @@ import { AdPlacement } from '../types';
 import { SoundFX } from '../audio/SoundFX';
 import { I18n } from '../i18n/I18n';
 
-declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'web';
+declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'gamedistribution' | 'itch' | 'web';
+
+interface GdSdkEvent {
+  name?: string;
+}
 
 declare global {
   interface Window {
@@ -70,6 +74,13 @@ declare global {
       getURLParam?: (key: string) => string;
       setDebug?: (debug: boolean) => void;
     };
+    gdsdk?: {
+      showAd?: (adType?: string) => Promise<void>;
+      preloadAd?: (adType: string) => Promise<void>;
+      Rewarded?: string;
+    };
+    __gdEventQueue?: GdSdkEvent[];
+    __onGdSdkEvent?: (ev: GdSdkEvent) => void;
   }
 }
 
@@ -80,13 +91,64 @@ class PlatformAdapter {
   private hasPlayedAnyRun = false;
   private lastAdFinishedAt = 0;
   private pauseHook: ((paused: boolean) => void) | null = null;
+  private gdRewardEarned = false;
+  private gdAdResumeResolver: (() => void) | null = null;
 
   public async init(onPauseChange: (paused: boolean) => void): Promise<void> {
     this.pauseHook = onPauseChange;
     if (this.initialized) return;
     this.initialized = true;
 
-    if (__BUILD_PLATFORM__ !== 'crazygames') {
+    if (__BUILD_PLATFORM__ === 'gamedistribution') {
+      const handleGdEvent = (ev: GdSdkEvent) => {
+        const name = ev?.name || '';
+        if (name === 'SDK_READY') {
+          this.sdkActive = true;
+          try {
+            window.gdsdk?.preloadAd?.('rewarded')?.catch?.(() => {});
+          } catch {
+            // ignore
+          }
+        } else if (name === 'SDK_GAME_PAUSE') {
+          SoundFX.setAdMuted(true);
+          this.pauseHook?.(true);
+        } else if (name === 'SDK_GAME_START') {
+          SoundFX.setAdMuted(false);
+          this.pauseHook?.(false);
+          if (this.gdAdResumeResolver) {
+            const done = this.gdAdResumeResolver;
+            this.gdAdResumeResolver = null;
+            done();
+          }
+        } else if (name === 'SDK_REWARDED_WATCH_COMPLETE') {
+          this.gdRewardEarned = true;
+        }
+      };
+
+      window.__onGdSdkEvent = handleGdEvent;
+      if (Array.isArray(window.__gdEventQueue)) {
+        while (window.__gdEventQueue.length > 0) {
+          const queued = window.__gdEventQueue.shift();
+          if (queued) handleGdEvent(queued);
+        }
+      }
+      if (!this.sdkActive) {
+        await new Promise<void>((resolve) => {
+          let checks = 0;
+          const timer = setInterval(() => {
+            checks++;
+            if (this.sdkActive || window.gdsdk || checks >= 10) {
+              if (window.gdsdk) this.sdkActive = true;
+              clearInterval(timer);
+              resolve();
+            }
+          }, 50);
+        });
+      }
+      return;
+    }
+
+    if (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') {
       if (__BUILD_PLATFORM__ === 'poki' && !window.PokiSDK) {
         await new Promise<void>((resolve) => {
           let checks = 0;
@@ -110,7 +172,7 @@ class PlatformAdapter {
       }
     }
 
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         if (__BUILD_PLATFORM__ === 'crazygames' && !window.CrazyGames?.SDK) {
           await new Promise<void>((resolve) => {
@@ -144,7 +206,7 @@ class PlatformAdapter {
   }
 
   public loadingStart(): void {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.CrazyGames?.SDK?.game?.loadingStart?.();
       } catch {
@@ -154,14 +216,14 @@ class PlatformAdapter {
   }
 
   public loadingStop(): void {
-    if (__BUILD_PLATFORM__ !== 'crazygames') {
+    if (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.PokiSDK?.gameLoadingFinished?.();
       } catch {
         // ignore
       }
     }
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.CrazyGames?.SDK?.game?.loadingStop?.();
       } catch {
@@ -175,14 +237,14 @@ class PlatformAdapter {
     this.isGameplayActive = true;
     this.hasPlayedAnyRun = true;
 
-    if (__BUILD_PLATFORM__ !== 'crazygames') {
+    if (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.PokiSDK?.gameplayStart?.();
       } catch {
         // ignore
       }
     }
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.CrazyGames?.SDK?.game?.gameplayStart?.();
       } catch {
@@ -195,14 +257,14 @@ class PlatformAdapter {
     if (!this.isGameplayActive) return;
     this.isGameplayActive = false;
 
-    if (__BUILD_PLATFORM__ !== 'crazygames') {
+    if (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.PokiSDK?.gameplayStop?.();
       } catch {
         // ignore
       }
     }
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.CrazyGames?.SDK?.game?.gameplayStop?.();
       } catch {
@@ -212,7 +274,7 @@ class PlatformAdapter {
   }
 
   public happyTime(): void {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.CrazyGames?.SDK?.game?.happytime?.();
       } catch {
@@ -222,8 +284,8 @@ class PlatformAdapter {
   }
 
   /**
-   * 平台中场商业广告（Poki commercialBreak / CrazyGames midgame）
-   * 严格遵循双平台体验铁律：
+   * 平台中场商业广告（Poki commercialBreak / CrazyGames midgame / GameDistribution showAd）
+   * 严格遵循全平台体验铁律：
    * 1) 玩家首次进局绝不弹广告（First gameplay free of ads）
    * 2) 两次广告之间至少间隔 60 秒（刚看完激励广告绝不连弹插屏）
    */
@@ -235,7 +297,32 @@ class PlatformAdapter {
 
     this.gameplayStop();
 
-    if (__BUILD_PLATFORM__ !== 'crazygames' && this.sdkActive && window.PokiSDK?.commercialBreak) {
+    if (__BUILD_PLATFORM__ === 'gamedistribution' && this.sdkActive && window.gdsdk?.showAd) {
+      SoundFX.setAdMuted(true);
+      this.pauseHook?.(true);
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            this.gdAdResumeResolver = resolve;
+            Promise.resolve(window.gdsdk!.showAd!()).catch(() => resolve());
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 12_000)),
+        ]);
+      } catch {
+        // ignore
+      }
+      this.gdAdResumeResolver = null;
+      this.lastAdFinishedAt = performance.now();
+      SoundFX.setAdMuted(false);
+      this.pauseHook?.(false);
+      return;
+    }
+
+    if (
+      (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') &&
+      this.sdkActive &&
+      window.PokiSDK?.commercialBreak
+    ) {
       SoundFX.setAdMuted(true);
       this.pauseHook?.(true);
       try {
@@ -252,7 +339,7 @@ class PlatformAdapter {
     }
 
     if (
-      __BUILD_PLATFORM__ !== 'poki' &&
+      (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') &&
       this.sdkActive &&
       window.CrazyGames?.SDK?.ad &&
       window.CrazyGames.SDK.environment === 'crazygames'
@@ -279,7 +366,7 @@ class PlatformAdapter {
   }
 
   public async buildInviteLink(roomCode: string): Promise<string> {
-    if (__BUILD_PLATFORM__ !== 'crazygames') {
+    if (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') {
       try {
         if (this.sdkActive && window.PokiSDK?.shareableURL) {
           const pokiLink = await window.PokiSDK.shareableURL({ room: roomCode });
@@ -290,7 +377,7 @@ class PlatformAdapter {
       }
     }
 
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         if (this.sdkActive && window.CrazyGames?.SDK?.game?.inviteLink) {
           const cgLink = window.CrazyGames.SDK.game.inviteLink({ roomId: roomCode });
@@ -307,7 +394,7 @@ class PlatformAdapter {
   }
 
   public showInviteButton(roomCode: string, isJoinable = true): void {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         if (this.sdkActive && window.CrazyGames?.SDK?.game?.updateRoom) {
           window.CrazyGames.SDK.game.updateRoom({
@@ -323,7 +410,7 @@ class PlatformAdapter {
   }
 
   public hideInviteButton(keepRoomCode?: string): void {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         if (!this.sdkActive) return;
         if (keepRoomCode && window.CrazyGames?.SDK?.game?.updateRoom) {
@@ -342,7 +429,7 @@ class PlatformAdapter {
   }
 
   public registerJoinRoomListener(onJoinRoom: (roomCode: string) => void): void {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.CrazyGames?.SDK?.game?.addJoinRoomListener?.((params) => {
           const code = params?.roomId || params?.room;
@@ -357,7 +444,7 @@ class PlatformAdapter {
   }
 
   public isInstantMultiplayerRequested(): boolean {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         return Boolean(window.CrazyGames?.SDK?.game?.isInstantMultiplayer);
       } catch {
@@ -384,7 +471,7 @@ class PlatformAdapter {
    * 优先读取 CrazyGames.SDK.system.info.device.type，避免触控屏 Windows 笔记本被 maxTouchPoints 误判为手机！
    */
   public getDeviceType(): 'desktop' | 'tablet' | 'mobile' {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         const cgType = window.CrazyGames?.SDK?.system?.info?.device?.type;
         if (cgType === 'desktop' || cgType === 'tablet' || cgType === 'mobile') {
@@ -417,7 +504,7 @@ class PlatformAdapter {
   }
 
   public hasPendingInviteUrl(): boolean {
-    if (__BUILD_PLATFORM__ !== 'crazygames') {
+    if (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') {
       try {
         const pokiRoom = window.PokiSDK?.getURLParam?.('room');
         if (pokiRoom && pokiRoom.trim().length >= 4) return true;
@@ -425,7 +512,7 @@ class PlatformAdapter {
         // ignore
       }
     }
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         const cgInvite =
           window.CrazyGames?.SDK?.game?.inviteParams?.roomId ||
@@ -478,7 +565,7 @@ class PlatformAdapter {
   }
 
   public consumeInviteRoomCode(): string | null {
-    if (__BUILD_PLATFORM__ !== 'crazygames') {
+    if (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') {
       try {
         const pokiRoom = window.PokiSDK?.getURLParam?.('room');
         if (pokiRoom && pokiRoom.trim().length >= 4) {
@@ -489,7 +576,7 @@ class PlatformAdapter {
       }
     }
 
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         const initInvite =
           window.CrazyGames?.SDK?.game?.inviteParams?.roomId ||
@@ -535,7 +622,49 @@ class PlatformAdapter {
       return success;
     };
 
-    if (__BUILD_PLATFORM__ !== 'crazygames' && this.sdkActive && window.PokiSDK?.rewardedBreak) {
+    if (__BUILD_PLATFORM__ === 'gamedistribution' && this.sdkActive && window.gdsdk?.showAd) {
+      this.gdRewardEarned = false;
+      try {
+        const adType = window.gdsdk.Rewarded || 'rewarded';
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            this.gdAdResumeResolver = resolve;
+            Promise.resolve(window.gdsdk!.showAd!(adType))
+              .then(() => {
+                setTimeout(resolve, 250);
+              })
+              .catch(() => resolve());
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 45_000)),
+        ]);
+      } catch {
+        // ignore
+      }
+      this.gdAdResumeResolver = null;
+      try {
+        window.gdsdk?.preloadAd?.('rewarded')?.catch?.(() => {});
+      } catch {
+        // ignore
+      }
+      if (this.gdRewardEarned) {
+        return finish(true);
+      }
+      const isLocal =
+        typeof location !== 'undefined' &&
+        (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+      if (isLocal) {
+        const ok = await this.runMockAdModal(placement, rewardTitle);
+        return finish(ok);
+      }
+      this.showAdUnavailableNotice();
+      return finish(false);
+    }
+
+    if (
+      (__BUILD_PLATFORM__ === 'poki' || __BUILD_PLATFORM__ === 'web') &&
+      this.sdkActive &&
+      window.PokiSDK?.rewardedBreak
+    ) {
       try {
         const withReward = await window.PokiSDK.rewardedBreak(() => {
           SoundFX.setAdMuted(true);
@@ -546,7 +675,11 @@ class PlatformAdapter {
       }
     }
 
-    if (__BUILD_PLATFORM__ !== 'poki' && this.sdkActive && window.CrazyGames?.SDK?.ad) {
+    if (
+      (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') &&
+      this.sdkActive &&
+      window.CrazyGames?.SDK?.ad
+    ) {
       return new Promise<boolean>((resolve) => {
         window.CrazyGames!.SDK!.ad!.requestAd('rewarded', {
           adStarted: () => {
@@ -571,19 +704,19 @@ class PlatformAdapter {
     return finish(ok);
   }
 
-  private runMockAdModal(placement: AdPlacement, rewardTitle: string): Promise<boolean> {
+  private runMockAdModal(_placement: AdPlacement, rewardTitle: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       const overlay = document.createElement('div');
       overlay.className = 'mock-ad-overlay';
       overlay.innerHTML = `
         <div class="mock-ad-card">
-          <div class="mock-ad-badge">${I18n.t('mockAdBadge')} (${placement})</div>
+          <div class="mock-ad-badge">${I18n.t('mockAdBadge')}</div>
           <h3>${I18n.t('mockAdTitle')}</h3>
           <p class="mock-ad-reward">${I18n.t('mockAdReward', { title: rewardTitle })}</p>
           <div class="mock-ad-bar-wrap">
             <div class="mock-ad-bar-fill" id="mock-ad-bar"></div>
           </div>
-          <p class="mock-ad-sub" id="mock-ad-timer">${I18n.t('mockAdTimer', { s: '2.0' })}</p>
+          <p class="mock-ad-sub" id="mock-ad-timer">${I18n.t('mockAdTimer', { s: '1.8' })}</p>
           <div class="mock-ad-actions">
             <button class="btn-cartoon btn-gray" id="mock-ad-cancel">${I18n.t('mockAdCancel')}</button>
           </div>
@@ -595,7 +728,7 @@ class PlatformAdapter {
       const timerText = overlay.querySelector('#mock-ad-timer') as HTMLElement;
       const cancelBtn = overlay.querySelector('#mock-ad-cancel') as HTMLButtonElement;
 
-      const totalMs = 1800;
+      const totalMs = 1600;
       const start = performance.now();
       let cancelled = false;
 
@@ -628,7 +761,7 @@ class PlatformAdapter {
   }
 
   public getStorageItem(key: string): string | null {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         if (window.CrazyGames?.SDK?.data) {
           const val = window.CrazyGames.SDK.data.getItem(key);
@@ -646,7 +779,7 @@ class PlatformAdapter {
   }
 
   public setStorageItem(key: string, value: string): void {
-    if (__BUILD_PLATFORM__ !== 'poki') {
+    if (__BUILD_PLATFORM__ === 'crazygames' || __BUILD_PLATFORM__ === 'web') {
       try {
         window.CrazyGames?.SDK?.data?.setItem(key, value);
       } catch {

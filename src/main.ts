@@ -1,4 +1,5 @@
 import './style.css';
+import { STAGES } from './data/stages';
 import { Assets } from './game/AssetLoader';
 import { GameEngine } from './game/GameEngine';
 import { InputManager } from './game/InputManager';
@@ -115,6 +116,15 @@ async function bootstrap() {
   syncViewportAndOrientation();
 
   ui = new UIManager(uiLayer, engine);
+  if ((window as unknown as { __CZ_TRAILER_RECORDER__?: boolean }).__CZ_TRAILER_RECORDER__) {
+    (window as unknown as Record<string, unknown>).__cz = {
+      engine,
+      ui,
+      Assets,
+      STAGES,
+      syncViewportAndOrientation,
+    };
+  }
   if (bootLoader) {
     bootLoader.classList.add('fade-out');
     setTimeout(() => bootLoader.remove(), 320);
@@ -137,6 +147,9 @@ async function bootstrap() {
 
     const dt = Math.min(0.05, Math.max(0, (now - lastTime) / 1000));
     lastTime = now;
+    if ((window as unknown as { __czManualStep?: boolean }).__czManualStep) {
+      return;
+    }
 
     try {
       if (engine.state) {
