@@ -8,6 +8,21 @@ import { GameEngine } from '../game/GameEngine';
 import { I18n, LANG_OPTIONS, LangCode } from '../i18n/I18n';
 import { SaveManager, UPGRADE_TRACKS } from '../meta/SaveManager';
 import {
+  CHIP_MAX_LEVEL,
+  DIFFICULTY_TIERS,
+  MAX_EQUIPPED_CHIPS,
+  PARAGON_TRACKS,
+  TACTICAL_CHIPS,
+  WEAPON_MASTERY_MAX,
+  getChipUpgradeCost,
+  getDifficultyMeta,
+  getParagonCost,
+  getStageEcology,
+  getWeaponAwakeningDesc,
+  getWeaponMasteryBonuses,
+  getWeaponMasteryCost,
+} from '../meta/EndgameDefs';
+import {
   AGENT_CLASSES,
   DAILY_CHECKIN_REWARDS,
   DAILY_GRAND_BONUS,
@@ -19,7 +34,15 @@ import {
 import { CoopManager } from '../net/CoopManager';
 import { SQUAD_SLOTS, getCoopScaling } from '../net/CoopProtocol';
 import { PlatformSDK } from '../platform/PlatformSDK';
-import { AgentClassId, GameMode, InRunPerkDef, PowerUpType, StageDef } from '../types';
+import {
+  AgentClassId,
+  DifficultyTier,
+  GameMode,
+  InRunPerkDef,
+  ParagonKey,
+  PowerUpType,
+  StageDef,
+} from '../types';
 
 export class UIManager {
   private hudRoot: HTMLElement | null = null;
@@ -28,7 +51,9 @@ export class UIManager {
   private armoryOpen = false;
   private pauseOpen = false;
   private selectedMode: GameMode = 'standard';
+  private selectedTier: DifficultyTier = 1;
   private hubTab: 'stages' | 'upgrades' | 'coop' | 'daily' | 'rank' = 'stages';
+  private upgSubTab: 'core' | 'mastery' | 'endgame' = 'core';
   private rankSort: 'endless' | 'kills' = 'endless';
   private armoryTab: 'guns' | 'supplies' = 'guns';
   private hudCache: Record<string, string> = {};
@@ -61,9 +86,9 @@ export class UIManager {
           this.showHomeHub();
         }
       },
-      (stageId, mode) => {
+      (stageId, mode, lobby) => {
         const st = STAGES.find((item) => item.id === stageId) || STAGES[0];
-        this.startStageRun(st, mode);
+        this.startStageRun(st, mode, false, lobby?.tier || 1);
       }
     );
 
@@ -270,6 +295,7 @@ export class UIManager {
 
           <div class="agent-bar">
             <span class="gold-pill"><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${save.gold}</span>
+            <span class="core-pill" title="Tech Cores">💠 ${save.techCores || 0}</span>
             <select class="hub-lang-select" id="hub-lang-sel" aria-label="Language">${langOptsHtml}</select>
             <button class="hub-util-btn ${!musicMuted ? 'active' : ''}" id="btn-hub-music" title="${I18n.t('hubMusicTitle')}">${musicMuted ? '🔕' : '🎵'}</button>
             <button class="hub-util-btn" id="btn-hub-mute" title="${I18n.t('hubSoundTitle')}">${muted ? '🔇' : '🔊'}</button>
@@ -334,13 +360,27 @@ export class UIManager {
       };
     });
 
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-tier-pick]').forEach((btn) => {
+      btn.onclick = () => {
+        this.selectedTier = Number(btn.dataset.tierPick) as DifficultyTier;
+        this.showHomeHub();
+      };
+    });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-upg-sub]').forEach((btn) => {
+      btn.onclick = () => {
+        this.upgSubTab = btn.dataset.upgSub as 'core' | 'mastery' | 'endgame';
+        this.showHomeHub();
+      };
+    });
+
     const tutBtn = this.modalRoot.querySelector('#btn-hub-tutorial') as HTMLButtonElement | null;
     if (tutBtn) {
       tutBtn.onclick = () => {
         if (CoopManager.role !== 'offline') {
           CoopManager.disconnect();
         }
-        this.startStageRun(TUTORIAL_STAGE, 'standard', true);
+        this.startStageRun(TUTORIAL_STAGE, 'standard', true, 1);
       };
     }
 
@@ -350,16 +390,76 @@ export class UIManager {
         const idx = STAGES.findIndex((item) => item.id === btn.dataset.stageGo);
         if (idx < 0) return;
         const unlocked = idx === 0 || save.clearedStages.includes(STAGES[idx - 1].id);
-        if (!unlocked) return;
+        const st = STAGES[idx];
+        if (!unlocked || !SaveManager.isTierUnlocked(st.id, this.selectedTier)) return;
         if (CoopManager.role !== 'offline') {
           CoopManager.disconnect();
         }
         btn.disabled = true;
-        const st = STAGES[idx];
         await PlatformSDK.showCommercialBreak();
-        this.startStageRun(st, this.selectedMode);
+        this.startStageRun(st, this.selectedMode, false, this.selectedTier);
       };
     });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-gun-mastery]').forEach((btn) => {
+      btn.onclick = () => {
+        const wid = btn.dataset.gunMastery || '';
+        if (SaveManager.upgradeWeaponMastery(wid)) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        } else {
+          SoundFX.emptyClip();
+        }
+      };
+    });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-chip-upg]').forEach((btn) => {
+      btn.onclick = () => {
+        const cid = btn.dataset.chipUpg || '';
+        if (SaveManager.upgradeOrUnlockChip(cid)) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        } else {
+          SoundFX.emptyClip();
+        }
+      };
+    });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-chip-equip]').forEach((btn) => {
+      btn.onclick = () => {
+        const cid = btn.dataset.chipEquip || '';
+        if (SaveManager.toggleEquipChip(cid)) {
+          SoundFX.reloadDone();
+          this.showHomeHub();
+        } else {
+          SoundFX.emptyClip();
+        }
+      };
+    });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-paragon-buy]').forEach((btn) => {
+      btn.onclick = () => {
+        const pKey = btn.dataset.paragonBuy as ParagonKey;
+        if (SaveManager.buyParagonLevel(pKey)) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        } else {
+          SoundFX.emptyClip();
+        }
+      };
+    });
+
+    const forgeCoreBtn = this.modalRoot.querySelector('#btn-forge-core') as HTMLButtonElement | null;
+    if (forgeCoreBtn) {
+      forgeCoreBtn.onclick = () => {
+        if (SaveManager.forgeTechCoreWithGold(420)) {
+          SoundFX.fanfare();
+          this.showHomeHub();
+        } else {
+          SoundFX.emptyClip();
+        }
+      };
+    }
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-upg]').forEach((btn) => {
       btn.onclick = () => {
@@ -509,12 +609,18 @@ export class UIManager {
 
       const unlocked = idx === 0 || save.clearedStages.includes(STAGES[idx - 1].id);
       const cleared = save.clearedStages.includes(st.id);
+      const starsEarned = SaveManager.getStageStars(st.id);
+      const tierUnlocked = unlocked && SaveManager.isTierUnlocked(st.id, this.selectedTier);
+      const eco = getStageEcology(st.id);
+      const ecoTag = I18n.isZh() ? eco.zhEcologyTag : eco.enEcologyTag;
       const bestWave = save.endlessBestWave[st.id] || 0;
+      const starDisplay =
+        starsEarned > 0 ? '★'.repeat(starsEarned) + '☆'.repeat(Math.max(0, 3 - starsEarned)) : '';
       const statusText = !unlocked
         ? I18n.t('stageLockedBadge')
         : this.selectedMode === 'standard'
-          ? cleared
-            ? I18n.t('stageCleared')
+          ? starsEarned > 0
+            ? `${starDisplay} ${I18n.t('stageCleared')}`
             : locMeta.diffLabel
           : bestWave > 0
             ? I18n.t('stageEndlessBest', { w: bestWave })
@@ -524,17 +630,26 @@ export class UIManager {
         .map((sp, sIdx) => `<img class="stage-vis-sp sp-${sIdx}" src="./assets/${sp}.png" alt="" />`)
         .join('');
 
-      const tagsHtml = locMeta.tags.map((tag) => `<span class="stage-tag">${tag}</span>`).join('');
-      const btnClass = !unlocked
+      const tagsHtml = `<span class="stage-tag eco-tag">${ecoTag}</span>` +
+        locMeta.tags.slice(0, 2).map((tag) => `<span class="stage-tag">${tag}</span>`).join('');
+      const prevTierMeta = getDifficultyMeta((Math.max(1, this.selectedTier - 1)) as DifficultyTier);
+      const btnClass = !tierUnlocked
         ? 'btn-disabled'
-        : this.selectedMode === 'standard'
-          ? 'btn-green'
-          : 'btn-purple';
+        : this.selectedTier === 3
+          ? 'btn-purple'
+          : this.selectedTier === 2
+            ? 'btn-yellow'
+            : this.selectedMode === 'standard'
+              ? 'btn-green'
+              : 'btn-purple';
+      const tierBadgePrefix = this.selectedTier > 1 ? `${getDifficultyMeta(this.selectedTier).stars} ` : '';
       const btnLabel = !unlocked
         ? I18n.t('stageLockedBtn', { n: idx })
-        : this.selectedMode === 'standard'
-          ? I18n.t('deployStandard')
-          : I18n.t('deployEndless');
+        : !tierUnlocked
+          ? I18n.t('tierNeedPrev', { prev: I18n.isZh() ? prevTierMeta.zhName : prevTierMeta.enName })
+          : this.selectedMode === 'standard'
+            ? `${tierBadgePrefix}${I18n.t('deployStandard')}`
+            : `${tierBadgePrefix}${I18n.t('deployEndless')}`;
 
       return `
         <article class="stage-card ${cleared ? 'is-cleared' : ''} ${!unlocked ? 'is-locked' : ''}">
@@ -552,7 +667,7 @@ export class UIManager {
             <h3>${locMeta.name}</h3>
             <p>${locMeta.subtitle}</p>
             <div class="stage-tags">${tagsHtml}</div>
-            <button class="btn-cartoon ${btnClass} stage-go-btn" data-stage-go="${st.id}" ${!unlocked ? 'disabled' : ''}>
+            <button class="btn-cartoon ${btnClass} stage-go-btn" data-stage-go="${st.id}" ${!tierUnlocked ? 'disabled' : ''}>
               ${btnLabel}
             </button>
           </div>
@@ -612,8 +727,8 @@ export class UIManager {
 
           <div class="hero-stats-row">
             <span class="hero-stat-chip">${I18n.t('clearedStat', { done: save.clearedStages.length, total: STAGES.length })}</span>
+            <span class="hero-stat-chip">${I18n.t('starsStat', { cur: SaveManager.getTotalStars(), max: STAGES.length * 3 })}</span>
             <span class="hero-stat-chip">${I18n.t('bestEndlessStat', { wave: endlessRecordStr })}</span>
-            <span class="hero-stat-chip">${I18n.t('arsenalStat')}</span>
           </div>
 
           <div class="hero-mode-box">
@@ -621,8 +736,16 @@ export class UIManager {
               <button class="seg-btn ${this.selectedMode === 'standard' ? 'active' : ''}" data-mode-pick="standard">${I18n.t('modeStandard')}</button>
               <button class="seg-btn ${this.selectedMode === 'endless' ? 'active' : ''}" data-mode-pick="endless">${I18n.t('modeEndless')}</button>
             </div>
+            <div class="seg-group tier-seg-group">
+              ${([1, 2, 3] as DifficultyTier[])
+                .map((t) => {
+                  const tm = DIFFICULTY_TIERS[t];
+                  return `<button class="seg-btn tier-btn-${t} ${this.selectedTier === t ? 'active' : ''}" data-tier-pick="${t}">${I18n.isZh() ? tm.zhName : tm.enName}</button>`;
+                })
+                .join('')}
+            </div>
             <button class="btn-cartoon btn-mini btn-blue" id="btn-hub-tutorial" type="button">${I18n.t('tutReplayBtn')}</button>
-            <span class="hero-mode-desc">${modeDesc}</span>
+            <span class="hero-mode-desc">${this.selectedTier > 1 ? (I18n.isZh() ? DIFFICULTY_TIERS[this.selectedTier].zhRule : DIFFICULTY_TIERS[this.selectedTier].enRule) : modeDesc}</span>
           </div>
         </div>
 
@@ -739,6 +862,32 @@ export class UIManager {
       `;
     }).join('');
 
+    const subNavHtml = `
+      <div class="upg-subnav-bar">
+        <div class="seg-group dark">
+          <button class="seg-btn ${this.upgSubTab === 'core' ? 'active' : ''}" data-upg-sub="core">${I18n.t('upgSubCore')}</button>
+          <button class="seg-btn ${this.upgSubTab === 'mastery' ? 'active' : ''}" data-upg-sub="mastery">${I18n.t('upgSubMastery')}</button>
+          <button class="seg-btn ${this.upgSubTab === 'endgame' ? 'active' : ''}" data-upg-sub="endgame">${I18n.t('upgSubEndgame')}</button>
+        </div>
+        <span class="core-wallet-hint">💠 ${save.techCores || 0} · ⭐ ${SaveManager.getTotalStars()}/${STAGES.length * 3}</span>
+      </div>
+    `;
+
+    let subBodyHtml = '';
+    if (this.upgSubTab === 'mastery') {
+      subBodyHtml = this.buildWeaponMasterySubView(save);
+    } else if (this.upgSubTab === 'endgame') {
+      subBodyHtml = this.buildChipsAndParagonSubView(save);
+    } else {
+      subBodyHtml = `
+        <div class="hub-sec-heading">${I18n.t('classSecTitle')}</div>
+        <div class="class-spec-grid">${classesHtml}</div>
+
+        <div class="hub-sec-heading">${I18n.t('upgSecTitle')}</div>
+        <div class="upgrade-list">${upgradesHtml}</div>
+      `;
+    }
+
     return `
       <div class="upg-dossier-card">
         <img class="upg-hero-avatar" src="${getAgentClassDef(save.selectedClass).sprite}" alt="" />
@@ -756,11 +905,143 @@ export class UIManager {
         </div>
       </div>
 
-      <div class="hub-sec-heading">${I18n.t('classSecTitle')}</div>
-      <div class="class-spec-grid">${classesHtml}</div>
+      ${subNavHtml}
+      ${subBodyHtml}
+    `;
+  }
 
-      <div class="hub-sec-heading">${I18n.t('upgSecTitle')}</div>
-      <div class="upgrade-list">${upgradesHtml}</div>
+  private buildWeaponMasterySubView(save: ReturnType<typeof SaveManager.get>): string {
+    const cardsHtml = WEAPON_LIST.map((w) => {
+      const rank = save.weaponMastery[w.id] || 0;
+      const kills = save.weaponKills[w.id] || 0;
+      const isMax = rank >= WEAPON_MASTERY_MAX;
+      const cost = getWeaponMasteryCost(rank);
+      const canBuy = !isMax && save.gold >= cost.gold && (save.techCores || 0) >= cost.cores;
+      const bonus = getWeaponMasteryBonuses(rank);
+      const starsStr = '★'.repeat(rank) + '☆'.repeat(WEAPON_MASTERY_MAX - rank);
+      const dmgPct = Math.round((bonus.damageMult - 1) * 100);
+      const capPct = Math.round((bonus.capacityMult - 1) * 100);
+      const bonusLine = I18n.t('masteryBonusLine', {
+        dmg: dmgPct,
+        cap: capPct,
+        extra: rank >= 3 ? I18n.t('masteryExtra3') : '',
+      });
+      const awakenText = getWeaponAwakeningDesc(w.id);
+      const costStr = isMax
+        ? I18n.t('masteryAwakened')
+        : `<img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${cost.gold}${cost.cores > 0 ? ` + 💠${cost.cores}` : ''} · ${I18n.t('masteryUpgradeBtn', { next: rank + 1 })}`;
+
+      return `
+        <div class="mastery-gun-card ${isMax ? 'golden-awakened' : ''}">
+          <div class="mastery-card-top">
+            <div class="mastery-gun-box">
+              <img src="./assets/gun_${w.id}.png" alt="" />
+            </div>
+            <div class="mastery-gun-meta">
+              <div class="mastery-name-row">
+                <strong>${I18n.wName(w.id, w.name)}</strong>
+                <span class="mastery-kills">${I18n.t('masteryKills', { k: kills })}</span>
+              </div>
+              <div class="mastery-stars-row">
+                <span class="mastery-stars">${starsStr}</span>
+                <small>⚡${I18n.wSuperName(w.id, w.superName)}</small>
+              </div>
+            </div>
+          </div>
+          <div class="mastery-stat-line">${bonusLine}</div>
+          <div class="mastery-awaken-box ${isMax ? 'unlocked' : ''}">${awakenText}</div>
+          <button class="btn-cartoon btn-mini ${isMax ? 'btn-yellow' : canBuy ? 'btn-green' : 'btn-disabled'}" data-gun-mastery="${w.id}" ${isMax || !canBuy ? 'disabled' : ''}>
+            ${costStr}
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="hub-sec-heading">${I18n.t('masterySecTitle')}</div>
+      <div class="mastery-gun-grid">${cardsHtml}</div>
+    `;
+  }
+
+  private buildChipsAndParagonSubView(save: ReturnType<typeof SaveManager.get>): string {
+    const canForgeCore = save.gold >= 420;
+    const equippedCount = save.equippedChips.length;
+
+    const chipsHtml = TACTICAL_CHIPS.map((c) => {
+      const lv = save.chipLevels[c.id] || 0;
+      const isEquipped = save.equippedChips.includes(c.id);
+      const isMax = lv >= CHIP_MAX_LEVEL;
+      const cost = getChipUpgradeCost(c, lv);
+      const canUpg = !isMax && save.gold >= cost.gold && (save.techCores || 0) >= cost.cores;
+      const cName = I18n.isZh() ? c.zhName : c.enName;
+      const cDesc = I18n.isZh() ? c.zhDesc(Math.max(1, lv)) : c.enDesc(Math.max(1, lv));
+
+      const upgLabel = isMax
+        ? I18n.t('chipMaxBtn')
+        : `<img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${cost.gold}${cost.cores > 0 ? ` + 💠${cost.cores}` : ''} · ${lv === 0 ? I18n.t('chipCraftBtn') : I18n.t('chipUpgBtn', { next: lv + 1 })}`;
+
+      const equipBtnHtml =
+        lv > 0
+          ? `<button class="btn-cartoon btn-mini ${isEquipped ? 'btn-green' : equippedCount >= MAX_EQUIPPED_CHIPS ? 'btn-disabled' : 'btn-blue'}" data-chip-equip="${c.id}" ${!isEquipped && equippedCount >= MAX_EQUIPPED_CHIPS ? 'disabled' : ''}>
+              ${isEquipped ? I18n.t('chipUnequipBtn') : equippedCount >= MAX_EQUIPPED_CHIPS ? I18n.t('chipSlotsFull') : I18n.t('chipEquipBtn')}
+            </button>`
+          : '';
+
+      return `
+        <div class="chip-mod-card ${isEquipped ? 'equipped' : ''} ${lv === 0 ? 'locked' : ''}" style="--chip-color:${c.color}">
+          <div class="chip-mod-top">
+            <div class="chip-ico-box"><img src="${c.sprite}" alt="" /></div>
+            <div class="chip-mod-title">
+              <strong>${cName}</strong>
+              <span class="chip-lv-tag">${lv > 0 ? `Lv.${lv}/${CHIP_MAX_LEVEL}` : I18n.t('chipLocked')}</span>
+            </div>
+          </div>
+          <p class="chip-mod-desc">${cDesc}</p>
+          <div class="chip-mod-actions">
+            ${equipBtnHtml}
+            <button class="btn-cartoon btn-mini ${isMax ? 'btn-gray' : canUpg ? 'btn-yellow' : 'btn-disabled'}" data-chip-upg="${c.id}" ${isMax || !canUpg ? 'disabled' : ''}>
+              ${upgLabel}
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const paragonHtml = PARAGON_TRACKS.map((pt) => {
+      const lv = save.paragon[pt.key] || 0;
+      const cost = getParagonCost(lv);
+      const canBuy = save.gold >= cost;
+      const pName = I18n.isZh() ? pt.zhName : pt.enName;
+      const pVal = I18n.isZh() ? pt.zhVal(lv) : pt.enVal(lv);
+      return `
+        <div class="paragon-card" style="--par-color:${pt.color}">
+          <div class="paragon-top">
+            <img src="${pt.sprite}" alt="" />
+            <div>
+              <strong>${pName} <small>Lv.${lv}</small></strong>
+              <div class="paragon-val">${pVal}</div>
+            </div>
+          </div>
+          <button class="btn-cartoon btn-mini ${canBuy ? 'btn-purple' : 'btn-disabled'}" data-paragon-buy="${pt.key}" ${!canBuy ? 'disabled' : ''}>
+            <img class="inline-coin" src="./assets/ui_coin.png" alt="" /> ${cost} · ${I18n.t('paragonBuyBtn', { next: lv + 1 })}
+          </button>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="chip-top-forge-bar">
+        <strong>${I18n.t('chipBarTitle', { n: equippedCount })}</strong>
+        <button class="btn-cartoon btn-mini ${canForgeCore ? 'btn-blue' : 'btn-disabled'}" id="btn-forge-core" ${!canForgeCore ? 'disabled' : ''}>
+          ${I18n.t('forgeCoreBtn')}
+        </button>
+      </div>
+
+      <div class="hub-sec-heading">${I18n.t('chipSecTitle')}</div>
+      <div class="chip-mod-grid">${chipsHtml}</div>
+
+      <div class="hub-sec-heading">${I18n.t('paragonSecTitle')}</div>
+      <div class="paragon-grid">${paragonHtml}</div>
     `;
   }
 
@@ -1062,6 +1343,8 @@ export class UIManager {
       return `<option value="${st.id}" ${st.id === lobby.stageId ? 'selected' : ''} ${!unlocked ? 'disabled' : ''}>${!unlocked ? '🔒 ' : ''}${sTitle}</option>`;
     }).join('');
 
+    const lobbyTier: DifficultyTier = lobby.tier || 1;
+    const lobbyTierMeta = getDifficultyMeta(lobbyTier);
     const hostControls = isHost
       ? `
         <div class="coop-stage-Controls">
@@ -1073,6 +1356,11 @@ export class UIManager {
             <button class="seg-btn ${lobby.mode === 'standard' ? 'active' : ''}" data-coop-mode="standard">${I18n.t('modeStandard')}</button>
             <button class="seg-btn ${lobby.mode === 'endless' ? 'active' : ''}" data-coop-mode="endless">${I18n.t('modeEndless')}</button>
           </div>
+          <div class="seg-group dark">
+            ${([1, 2, 3] as DifficultyTier[])
+              .map((t) => `<button class="seg-btn ${lobbyTier === t ? 'active' : ''}" data-coop-tier="${t}">${DIFFICULTY_TIERS[t].stars}</button>`)
+              .join('')}
+          </div>
           <button class="btn-cartoon btn-green coop-launch-btn" id="btn-coop-launch">
             ${memberCount >= 2 ? I18n.t('launchSquadBtn', { n: memberCount }) : I18n.t('launchSoloRoomBtn', { n: memberCount })}
           </button>
@@ -1081,7 +1369,7 @@ export class UIManager {
       : `
         <div class="coop-stage-Controls">
           <div class="coop-client-stage-info">
-            ${I18n.t('hostPickedLabel')} <strong>${selectedStageTitle}</strong> · <span>${lobby.mode === 'standard' ? I18n.t('modeStandard') : I18n.t('modeEndless')}</span>
+            ${I18n.t('hostPickedLabel')} <strong>${selectedStageTitle}</strong> · <span>${I18n.isZh() ? lobbyTierMeta.zhName : lobbyTierMeta.enName} · ${lobby.mode === 'standard' ? I18n.t('modeStandard') : I18n.t('modeEndless')}</span>
           </div>
           <button class="btn-cartoon ${me?.ready ? 'btn-gray' : 'btn-green'}" id="btn-coop-ready">
             ${me?.ready ? I18n.t('readyWaitingHost') : I18n.t('clickReady')}
@@ -1210,7 +1498,19 @@ export class UIManager {
         if (!CoopManager.lobby) return;
         CoopManager.setHostStageAndMode(
           CoopManager.lobby.stageId,
-          btn.dataset.coopMode as GameMode
+          btn.dataset.coopMode as GameMode,
+          CoopManager.lobby.tier || 1
+        );
+      };
+    });
+
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-coop-tier]').forEach((btn) => {
+      btn.onclick = () => {
+        if (!CoopManager.lobby) return;
+        CoopManager.setHostStageAndMode(
+          CoopManager.lobby.stageId,
+          CoopManager.lobby.mode,
+          Number(btn.dataset.coopTier) as DifficultyTier
         );
       };
     });
@@ -1230,7 +1530,12 @@ export class UIManager {
     }
   }
 
-  public startStageRun(stage: StageDef, mode: GameMode, isFirstTutorial = false): void {
+  public startStageRun(
+    stage: StageDef,
+    mode: GameMode,
+    isFirstTutorial = false,
+    difficultyTier: DifficultyTier = 1
+  ): void {
     this.armoryOpen = false;
     this.pauseOpen = false;
     this.armoryTab = 'guns';
@@ -1244,7 +1549,7 @@ export class UIManager {
       orient?.lock?.('landscape').catch(() => {});
     }
     this.mountHUD();
-    this.engine.startRun(stage, mode);
+    this.engine.startRun(stage, mode, difficultyTier);
 
     const s = this.engine.state;
     if ((isFirstTutorial || stage.isTutorial) && s && !s.isCoop) {
@@ -1817,7 +2122,7 @@ export class UIManager {
     let contentHtml = '';
     if (this.armoryTab === 'guns') {
       const isTut = Boolean(s.stage.isTutorial);
-      const evoCost = isTut ? 0 : 1850;
+      const evoCost = isTut ? 0 : this.engine.getEffectiveEvolveCost(activeWep.defId);
       const canEvolve = !activeWep.evolved && s.cash >= evoCost;
       const evolveStrip = activeWep.evolved
         ? `<div class="evolve-strip done">${I18n.t('evolvedDone', { name: activeSupName })}</div>`
@@ -1833,7 +2138,10 @@ export class UIManager {
         const isPermanent = !!owned && owned.tempWavesLeft === undefined;
         const isEquipped = activeWep.defId === w.id;
         const locked = !isTut && unlockedRooms < w.unlockRoomsRequired && !owned;
-        const wTitle = owned?.evolved ? `⚡${I18n.wSuperName(w.id, w.superName)}` : I18n.wName(w.id, w.name);
+        const mRank = SaveManager.getWeaponMastery(w.id);
+        const mStars = mRank > 0 ? ` <em class="shop-mastery-tag">★${mRank}</em>` : '';
+        const wTitle =
+          (owned?.evolved ? `⚡${I18n.wSuperName(w.id, w.superName)}` : I18n.wName(w.id, w.name)) + mStars;
 
         const gunCost = this.engine.getEffectiveGunCost(w.id);
         const ammoCost = this.engine.getEffectiveAmmoCost(w.id);
@@ -2046,7 +2354,7 @@ export class UIManager {
     const evolveBtn = this.modalRoot.querySelector('#btn-shop-evolve') as HTMLButtonElement | null;
     if (evolveBtn) {
       evolveBtn.onclick = () => {
-        const res = this.engine.evolveActiveWeaponInShop(1850);
+        const res = this.engine.evolveActiveWeaponInShop();
         this.renderArmoryShop(res.msg);
       };
     }
@@ -2209,16 +2517,19 @@ export class UIManager {
     });
 
     const coopSuffix = s.isCoop ? I18n.t('coopCountSuffix', { n: s.squadCount }) : '';
+    const tierPrefix = s.difficultyTier > 1 ? `${getDifficultyMeta(s.difficultyTier).stars} ` : '';
     let waveStr = '';
     if (s.waveState === 'extraction') {
-      waveStr = `${I18n.t('waveEvac', { pct: Math.round(s.extractionProgress * 100) })}${coopSuffix}`;
+      waveStr = `${tierPrefix}${I18n.t('waveEvac', { pct: Math.round(s.extractionProgress * 100) })}${coopSuffix}`;
     } else if (s.waveState === 'intermission') {
-      waveStr = `${I18n.t('waveBreak', { s: Math.ceil(s.intermissionTimer) })}${coopSuffix}`;
+      waveStr = `${tierPrefix}${I18n.t('waveBreak', { s: Math.ceil(s.intermissionTimer) })}${coopSuffix}`;
     } else {
       waveStr =
+        tierPrefix +
         (s.mode === 'standard'
           ? I18n.t('waveStd', { w: s.wave, m: s.maxWaves, n: s.zombiesRemainingInWave })
-          : I18n.t('waveEndl', { w: s.wave, n: s.zombiesRemainingInWave })) + coopSuffix;
+          : I18n.t('waveEndl', { w: s.wave, n: s.zombiesRemainingInWave })) +
+        coopSuffix;
     }
     setIfChanged('wave', waveStr, () => {
       (this.hudRoot!.querySelector('#hud-wave') as HTMLElement).textContent = waveStr;
@@ -2799,15 +3110,27 @@ export class UIManager {
     if (isTut) {
       SaveManager.markTutorialDone();
     }
+    const stageEco = getStageEcology(s.stage.id);
+    const tierMeta = getDifficultyMeta(s.difficultyTier);
+    const pStats = SaveManager.getEffectivePlayerStats();
+    const rewardMult = isTut
+      ? 1
+      : stageEco.rewardMult * tierMeta.rewardMult * pStats.settlementRewardMult;
     const stageTierBonus = (s.stage.index - 1) * 20;
     const rawGold = Math.round(
-      25 + stageTierBonus + s.wave * 14 + Math.min(220, s.kills * 0.45) + (victory ? 110 : 0)
+      (25 + stageTierBonus + s.wave * 14 + Math.min(260, s.kills * 0.45) + (victory ? 110 : 0)) *
+        rewardMult
     );
     const rawXp = Math.round(
-      30 + stageTierBonus + s.wave * 16 + Math.min(260, s.kills * 0.65) + (victory ? 100 : 0)
+      (30 + stageTierBonus + s.wave * 16 + Math.min(300, s.kills * 0.65) + (victory ? 100 : 0)) *
+        rewardMult
     );
     const baseGold = isTut && victory ? Math.max(180, rawGold) : rawGold;
     const baseXp = isTut && victory ? Math.max(85, rawXp) : rawXp;
+    const bonusCores = !isTut && victory ? tierMeta.clearTechCores : 0;
+    if (bonusCores > 0) {
+      SaveManager.addTechCores(bonusCores);
+    }
     const zones = [2, 3, 5, 3, 2];
 
     this.modalRoot.innerHTML = `
@@ -2819,6 +3142,7 @@ export class UIManager {
           <div class="reward-preview">
             <span><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> <strong id="rew-gold">+${baseGold}</strong></span>
             <span><img class="inline-coin" src="./assets/drop_xp.png" alt="" /> <strong id="rew-xp">+${baseXp} XP</strong></span>
+            ${bonusCores > 0 ? `<span><strong>💠 +${bonusCores}</strong></span>` : ''}
           </div>
 
           <div class="meter-wrap">

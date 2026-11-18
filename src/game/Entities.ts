@@ -1,5 +1,6 @@
 import {
   AgentClassId,
+  DifficultyTier,
   DoorConfig,
   GameMode,
   InteriorPropConfig,
@@ -98,6 +99,8 @@ export interface BulletEntity {
   sawblade: boolean;
   hitIds: Set<number>;
   life: number;
+  weaponId?: string;
+  golden?: boolean;
   localVisualOnly?: boolean;
 }
 
@@ -233,9 +236,21 @@ export interface MechDogEntity {
   biteCd: number;
 }
 
+export interface StageHazardZone {
+  id: number;
+  kind: 'cryo_vent' | 'bio_spore' | 'bomb_strike' | 'plasma_strike';
+  x: number;
+  y: number;
+  radius: number;
+  timer: number;
+  maxTimer: number;
+  detonated?: boolean;
+}
+
 export interface RunSnapshot {
   stage: StageDef;
   mode: GameMode;
+  difficultyTier: DifficultyTier;
   wave: number;
   maxWaves: number;
   waveState: 'fighting' | 'intermission' | 'extraction' | 'ended';
@@ -310,7 +325,12 @@ export interface RunSnapshot {
     killHealCounter: number;
     chillTimer: number;
     chillImmuneTimer: number;
+    shotCounter: number;
   };
+  blackoutTimer: number;
+  neonSurgeTimer: number;
+  hazardCooldown: number;
+  hazardZones: StageHazardZone[];
   mapRevision: number;
   modifiers: RunModifiers;
   relicIds: string[];

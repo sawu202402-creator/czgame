@@ -115,13 +115,12 @@ async function bootstrap() {
   syncViewportAndOrientation();
 
   ui = new UIManager(uiLayer, engine);
-  ui.launchInitialExperience();
-  PlatformSDK.loadingStop();
-
   if (bootLoader) {
     bootLoader.classList.add('fade-out');
     setTimeout(() => bootLoader.remove(), 320);
   }
+  PlatformSDK.loadingStop();
+  ui.launchInitialExperience();
 
   // 首屏秒开后，在后台静默分批预热全部 15 把武器与后续 8 大关卡贴图
   setTimeout(() => {

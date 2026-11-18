@@ -68,6 +68,7 @@ function pointInAnyRect(px: number, py: number, rects: Rect[], pad = 0): boolean
 export class CartoonRenderer {
   // 静态世界地图离屏烘焙缓存（包含多层立体墙体、四向环境光遮蔽AO、室内战术灯光、线缆、防爆地垫与户外工事，零帧率损耗！）
   private mapCanvas: HTMLCanvasElement | null = null;
+  private lightCanvas: HTMLCanvasElement | null = null;
   private mapOriginX = 0;
   private mapOriginY = 0;
   private cachedStageId = '';
@@ -124,8 +125,9 @@ export class CartoonRenderer {
     // 1. 单次极速 Blit 预烘焙的高精度立体战术地图
     this.blitStaticMapViewport(ctx);
 
-    // 2. 地面爆汁贴花与冒泡腐蚀毒潭
+    // 2. 地面爆汁贴花与冒泡腐蚀毒潭 & 战区动态环境危机圈
     this.drawDecals(ctx, state);
+    this.drawHazardZones(ctx, state);
 
     // 3. 停机坪标志 & 直升机撤离光圈
     this.drawHelipad(ctx, state);
@@ -157,6 +159,11 @@ export class CartoonRenderer {
     this.drawExtractionHelicopterOverhead(ctx, state);
 
     ctx.restore();
+
+    // 10.5 断电夜战手电筒与夜视仪光束遮罩层（地铁站 / 核地堡 / 炼狱模式）
+    if (state.blackoutTimer > 0) {
+      this.drawBlackoutFlashlight(ctx, viewW, viewH, state, camX, camY, zoom);
+    }
 
     // 11. 屏幕层：雷达小地图（手机端自动避让左拇指摇杆区）、屏幕外目标箭头、触屏双摇杆、PC战术准星
     this.drawTacticalMinimap(ctx, viewW, viewH, state, input.usingTouch);
@@ -4010,6 +4017,159 @@ export class CartoonRenderer {
     ctx.strokeStyle = '#090e17';
     ctx.stroke();
 
+    ctx.restore();
+  }
+
+  private drawHazardZones(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    if (!state.hazardZones || state.hazardZones.length === 0) return;
+    const now = performance.now() * 0.004;
+
+    for (const hz of state.hazardZones) {
+      if (!this.inView(hz.x, hz.y, hz.radius + 40)) continue;
+      ctx.save();
+      ctx.translate(hz.x, hz.y);
+
+      if (hz.kind === 'cryo_vent') {
+        const alpha = Math.min(1, hz.timer * 0.8);
+        const grad = ctx.createRadialGradient(0, 0, 8, 0, 0, hz.radius);
+        grad.addColorStop(0, `rgba(103, 232, 249, ${0.42 * alpha})`);
+        grad.addColorStop(0.68, `rgba(14, 165, 233, ${0.22 * alpha})`);
+        grad.addColorStop(1, 'rgba(14, 165, 233, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, hz.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = `rgba(125, 211, 252, ${0.65 * alpha})`;
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([10, 7]);
+        ctx.lineDashOffset = -now * 16;
+        ctx.beginPath();
+        ctx.arc(0, 0, hz.radius * 0.92, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (hz.kind === 'bio_spore') {
+        const alpha = Math.min(1, hz.timer * 0.8);
+        const pulse = 1 + Math.sin(now * 1.6 + hz.id) * 0.06;
+        const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, hz.radius * pulse);
+        grad.addColorStop(0, `rgba(132, 204, 22, ${0.42 * alpha})`);
+        grad.addColorStop(0.7, `rgba(34, 197, 94, ${0.2 * alpha})`);
+        grad.addColorStop(1, 'rgba(22, 163, 74, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, hz.radius * pulse, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = `rgba(163, 230, 53, ${0.6 * alpha})`;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 8]);
+        ctx.beginPath();
+        ctx.arc(0, 0, hz.radius * 0.9, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        // bomb_strike / plasma_strike 锁定倒计时预警红圈/紫圈
+        const isPlasma = hz.kind === 'plasma_strike';
+        const pct = Math.max(0, Math.min(1, 1 - hz.timer / Math.max(0.1, hz.maxTimer)));
+        const colRgb = isPlasma ? '192, 132, 252' : '248, 113, 113';
+
+        ctx.fillStyle = `rgba(${colRgb}, ${0.12 + pct * 0.22})`;
+        ctx.beginPath();
+        ctx.arc(0, 0, hz.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = `rgba(${colRgb}, 0.88)`;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, hz.radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 收缩锁定内环
+        ctx.strokeStyle = isPlasma ? '#f0abfc' : '#fde047';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(8, hz.radius * (1 - pct)), 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 中心十字准星
+        ctx.beginPath();
+        ctx.moveTo(-14, 0);
+        ctx.lineTo(14, 0);
+        ctx.moveTo(0, -14);
+        ctx.lineTo(0, 14);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+  }
+
+  private drawBlackoutFlashlight(
+    ctx: CanvasRenderingContext2D,
+    viewW: number,
+    viewH: number,
+    state: RunSnapshot,
+    camX: number,
+    camY: number,
+    zoom: number
+  ): void {
+    const fade = Math.min(1, state.blackoutTimer * 1.2);
+    if (fade <= 0.02) return;
+
+    const lw = Math.max(1, Math.ceil(viewW * 0.5));
+    const lh = Math.max(1, Math.ceil(viewH * 0.5));
+    if (!this.lightCanvas) {
+      this.lightCanvas = document.createElement('canvas');
+    }
+    if (this.lightCanvas.width !== lw || this.lightCanvas.height !== lh) {
+      this.lightCanvas.width = lw;
+      this.lightCanvas.height = lh;
+    }
+
+    const lctx = this.lightCanvas.getContext('2d');
+    if (!lctx) return;
+
+    lctx.globalCompositeOperation = 'source-over';
+    lctx.clearRect(0, 0, lw, lh);
+    lctx.fillStyle = `rgba(3, 7, 18, ${(0.78 * fade).toFixed(3)})`;
+    lctx.fillRect(0, 0, lw, lh);
+
+    // 挖空玩家与联机队友的战术手电筒扇形光束 + 夜视仪近身光环
+    lctx.globalCompositeOperation = 'destination-out';
+    const scale = 0.5;
+    const sources: { x: number; y: number; angle: number }[] = [
+      { x: state.player.x, y: state.player.y, angle: state.player.angle },
+      ...state.remotePlayers
+        .filter((rp) => !rp.spectating)
+        .map((rp) => ({ x: rp.x, y: rp.y, angle: rp.angle })),
+    ];
+
+    for (const src of sources) {
+      const sx = ((src.x - camX) * zoom + viewW / 2) * scale;
+      const sy = ((src.y - camY) * zoom + viewH / 2) * scale;
+      const haloR = 95 * zoom * scale;
+      const beamLen = 360 * zoom * scale;
+
+      const halo = lctx.createRadialGradient(sx, sy, haloR * 0.18, sx, sy, haloR);
+      halo.addColorStop(0, 'rgba(0,0,0,0.96)');
+      halo.addColorStop(1, 'rgba(0,0,0,0)');
+      lctx.fillStyle = halo;
+      lctx.beginPath();
+      lctx.arc(sx, sy, haloR, 0, Math.PI * 2);
+      lctx.fill();
+
+      const coneGrad = lctx.createRadialGradient(sx, sy, 8, sx, sy, beamLen);
+      coneGrad.addColorStop(0, 'rgba(0,0,0,0.98)');
+      coneGrad.addColorStop(0.72, 'rgba(0,0,0,0.72)');
+      coneGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      lctx.fillStyle = coneGrad;
+      lctx.beginPath();
+      lctx.moveTo(sx, sy);
+      lctx.arc(sx, sy, beamLen, src.angle - 0.44, src.angle + 0.44);
+      lctx.closePath();
+      lctx.fill();
+    }
+
+    ctx.save();
+    ctx.drawImage(this.lightCanvas, 0, 0, viewW, viewH);
     ctx.restore();
   }
 

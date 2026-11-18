@@ -1,6 +1,6 @@
 import { I18n } from '../i18n/I18n';
 import { PlatformSDK } from '../platform/PlatformSDK';
-import { GameMode } from '../types';
+import { DifficultyTier, GameMode } from '../types';
 import {
   CoopNetMessage,
   LobbyMember,
@@ -172,6 +172,7 @@ class CoopNetworkManager {
           roomCode: code,
           stageId: initialStageId,
           mode: initialMode,
+          tier: 1,
           inGame: false,
           members: [
             {
@@ -458,10 +459,13 @@ class CoopNetworkManager {
     }, 2400);
   }
 
-  public setHostStageAndMode(stageId: string, mode: GameMode): void {
+  public setHostStageAndMode(stageId: string, mode: GameMode, tier?: DifficultyTier): void {
     if (this.role !== 'host' || !this.lobby) return;
     this.lobby.stageId = stageId;
     this.lobby.mode = mode;
+    if (tier !== undefined) {
+      this.lobby.tier = tier;
+    }
     this.broadcastLobby();
     this.notifyLobby();
   }

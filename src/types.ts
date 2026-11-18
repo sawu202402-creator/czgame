@@ -1,4 +1,13 @@
 export type GameMode = 'standard' | 'endless';
+export type DifficultyTier = 1 | 2 | 3; // 1 = ★ 标准, 2 = ★★ 噩梦, 3 = ★★★ 炼狱
+export type ParagonKey = 'might' | 'haste' | 'fortune' | 'vitality';
+
+export interface ParagonLevels {
+  might: number;
+  haste: number;
+  fortune: number;
+  vitality: number;
+}
 
 export type AdPlacement =
   | 'revive_shockwave'
@@ -261,7 +270,14 @@ export interface SaveData {
   careerKills: number;
   upgrades: AgentUpgradeLevels;
   clearedStages: string[];
+  stageStars: Record<string, number>; // stageId -> 1 | 2 | 3 highest cleared tier
   endlessBestWave: Record<string, number>;
+  techCores: number; // 战术核心芯片币（噩梦/炼狱通关 & 击杀Boss获取，也可金币直铸）
+  weaponMastery: Record<string, number>; // weaponId -> 0..5 (★5 = 黄金觉醒)
+  weaponKills: Record<string, number>; // weaponId -> 生涯累计击杀
+  chipLevels: Record<string, number>; // chipId -> 0..5
+  equippedChips: string[]; // 最多装配 3 枚战术芯片
+  paragon: ParagonLevels; // 无上限传奇巅峰等级
   totalRuns: number;
   tutorialDone?: boolean;
   freeStarterUsedCount: number;

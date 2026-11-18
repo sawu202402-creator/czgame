@@ -22,7 +22,12 @@ import {
 } from '../net/CoopProtocol';
 import { PlatformSDK } from '../platform/PlatformSDK';
 import { getAgentClassDef, getLocalizedClassText } from '../meta/ProgressionDefs';
-import { GameMode, InRunPerkDef, PowerUpType, Rect, StageDef } from '../types';
+import {
+  getDifficultyMeta,
+  getStageEcology,
+  getWeaponMasteryBonuses,
+} from '../meta/EndgameDefs';
+import { DifficultyTier, GameMode, InRunPerkDef, PowerUpType, Rect, StageDef } from '../types';
 import {
   DropItem,
   RunSnapshot,
@@ -125,7 +130,7 @@ export class GameEngine {
     }
   }
 
-  public startRun(stage: StageDef, mode: GameMode): void {
+  public startRun(stage: StageDef, mode: GameMode, difficultyTier: DifficultyTier = 1): void {
     const pStats = SaveManager.getEffectivePlayerStats();
     const save = SaveManager.get();
     save.totalRuns += 1;
@@ -138,6 +143,13 @@ export class GameEngine {
     if (isCoop) {
       SaveManager.markTutorialDone();
     }
+    const effTier: DifficultyTier = stage.isTutorial
+      ? 1
+      : isCoop && CoopManager.lobby?.tier
+        ? CoopManager.lobby.tier
+        : difficultyTier;
+    const tierMeta = getDifficultyMeta(effTier);
+    const stageEco = getStageEcology(stage.id);
     const lobby = CoopManager.lobby;
     const squadCount = isCoop ? CoopManager.getSquadCount() : 1;
     const scaling = getCoopScaling(squadCount);
@@ -225,6 +237,7 @@ export class GameEngine {
     this.state = {
       stage,
       mode,
+      difficultyTier: effTier,
       wave: 1,
       maxWaves: mode === 'standard' ? (stage.totalWaves ?? 10) : 9999,
       waveState: 'fighting',
@@ -320,7 +333,12 @@ export class GameEngine {
         killHealCounter: 0,
         chillTimer: 0,
         chillImmuneTimer: 0,
+        shotCounter: 0,
       },
+      blackoutTimer: 0,
+      neonSurgeTimer: 0,
+      hazardCooldown: stage.isTutorial ? 9999 : Math.round(stageEco.hazardInterval * tierMeta.hazardCdMult * 0.72),
+      hazardZones: [],
       mapRevision: 1,
       modifiers: {
         damageMult: pStats.agentDamageBonus,
@@ -335,19 +353,23 @@ export class GameEngine {
         killHealRatio: pStats.killHealRatio,
         cashMult: pStats.cashBonusMult,
         killRefillChance: 0,
-        cryoShotChance: 0,
+        cryoShotChance: pStats.cryoChipChance,
         electricShotChance: 0,
         lowHpDamageBonus: 0,
       },
       relicIds: [],
       rooms: stage.rooms.map((r) => ({ ...r, unlocked: r.initiallyUnlocked })),
-      windows: stage.windows.map((w) => ({
-        ...w,
-        planks: pStats.maxPlanks,
-        maxPlanks: pStats.maxPlanks,
-        armorPlanks: 0,
-        attackCooldown: 0,
-      })),
+      windows: stage.windows.map((w) => {
+        const initRoom = stage.rooms.find((r) => r.id === w.roomId);
+        const startAlloy = Boolean(pStats.startAlloyRoomOne && !stage.isTutorial && initRoom?.initiallyUnlocked);
+        return {
+          ...w,
+          planks: pStats.maxPlanks,
+          maxPlanks: pStats.maxPlanks,
+          armorPlanks: startAlloy ? pStats.maxPlanks : 0,
+          attackCooldown: 0,
+        };
+      }),
       doors: stage.doors.map((d) => ({
         ...d,
         cost: Math.round((d.cost * scaling.doorCostMult) / 10) * 10,
@@ -691,20 +713,38 @@ export class GameEngine {
     if (this.state?.stage.isTutorial) return 0;
     const def = WEAPONS[weaponId];
     if (def.shopCost <= 0) return 0;
-    return Math.max(50, Math.round((def.shopCost * SaveManager.getEffectivePlayerStats().gunShopCostMult) / 5) * 5);
+    const mastery = getWeaponMasteryBonuses(SaveManager.getWeaponMastery(weaponId));
+    return Math.max(
+      45,
+      Math.round((def.shopCost * SaveManager.getEffectivePlayerStats().gunShopCostMult * mastery.costMult) / 5) * 5
+    );
   }
 
   public getEffectiveAmmoCost(weaponId: string): number {
     if (this.state?.stage.isTutorial) return 0;
     const def = WEAPONS[weaponId];
     if (def.ammoCost <= 0) return 0;
-    return Math.max(20, Math.round((def.ammoCost * SaveManager.getEffectivePlayerStats().ammoCostMult) / 5) * 5);
+    const mastery = getWeaponMasteryBonuses(SaveManager.getWeaponMastery(weaponId));
+    return Math.max(
+      15,
+      Math.round((def.ammoCost * SaveManager.getEffectivePlayerStats().ammoCostMult * mastery.costMult) / 5) * 5
+    );
+  }
+
+  public getEffectiveEvolveCost(weaponId?: string): number {
+    if (this.state?.stage.isTutorial) return 0;
+    const wid = weaponId || this.state?.player.weapons[this.state.player.activeSlot]?.defId || 'pistol';
+    const mastery = getWeaponMasteryBonuses(SaveManager.getWeaponMastery(wid));
+    return mastery.isGoldenAwakened ? 1380 : 1850;
   }
 
   public getMaxReserve(weaponId: string, evolved: boolean): number {
     const def = WEAPONS[weaponId];
     if (def.maxReserve < 0) return -1;
-    return Math.round(def.maxReserve * (evolved ? 2 : 1) * SaveManager.getEffectivePlayerStats().reserveAmmoMult);
+    const mastery = getWeaponMasteryBonuses(SaveManager.getWeaponMastery(weaponId));
+    return Math.round(
+      def.maxReserve * (evolved ? 2 : 1) * SaveManager.getEffectivePlayerStats().reserveAmmoMult * mastery.capacityMult
+    );
   }
 
   public buyOrRefillWeaponFromShop(weaponId: string, forceRefill = false): { ok: boolean; msg: string } {
@@ -902,12 +942,12 @@ export class GameEngine {
     return true;
   }
 
-  public evolveActiveWeaponInShop(cost = 1850): { ok: boolean; msg: string } {
+  public evolveActiveWeaponInShop(cost?: number): { ok: boolean; msg: string } {
     const s = this.state;
     if (!s) return { ok: false, msg: '' };
-    const effCost = s.stage.isTutorial ? 0 : cost;
     const wep = s.player.weapons[s.player.activeSlot];
     const def = WEAPONS[wep.defId];
+    const effCost = s.stage.isTutorial ? 0 : (cost ?? this.getEffectiveEvolveCost(wep.defId));
     if (wep.evolved) return { ok: false, msg: I18n.t('msgAlreadyEvo') };
     if (s.cash < effCost) return { ok: false, msg: I18n.t('msgNoCash', { c: effCost }) };
 
@@ -1135,6 +1175,19 @@ export class GameEngine {
       SoundFX.explosion();
     }
 
+    // 战术芯片【极寒新星芯】：任意职业释放大招时额外爆发极寒冰环冻结近身尸潮！
+    if (pStats.skillCryoNova) {
+      this.spawnHitSparks(p.x, p.y, '#67e8f9', 16);
+      for (const z of s.zombies) {
+        if (Math.hypot(z.x - p.x, z.y - p.y) <= 215) {
+          z.slowTimer = Math.max(z.slowTimer, 4.2);
+          if (!isBossKind(z.kind)) {
+            z.stunTimer = Math.max(z.stunTimer, 1.35);
+          }
+        }
+      }
+    }
+
     this.spawnFloatingText(
       p.x,
       p.y - 42,
@@ -1277,63 +1330,51 @@ export class GameEngine {
     }
 
     const scaling = getCoopScaling(s.squadCount);
+    const stageEco = getStageEcology(s.stage.id);
+    const tierMeta = getDifficultyMeta(s.difficultyTier);
     const queue: ZombieKind[] = [];
     const baseCount =
-      10 + wave * 6.2 + Math.pow(Math.max(0, wave - 3), 1.45) * 2.8 + (s.stage.index - 1) * 3.6;
-    const totalCount = Math.round(baseCount * scaling.countMult);
-    const necroChance = wave >= 5 ? Math.min(0.1, 0.05 + (wave - 5) * 0.01) : 0;
-    const frostChance = wave >= 4 ? Math.min(0.14, 0.08 + (wave - 4) * 0.012) : 0;
-    const spitterChance = wave >= 4 ? Math.min(0.18, 0.1 + (wave - 4) * 0.014) : 0;
-    const riotChance = wave >= 3 ? Math.min(0.15, 0.08 + (wave - 3) * 0.012) : 0;
-    const boomerChance = wave >= 2 ? Math.min(0.14, 0.07 + (wave - 2) * 0.012) : 0;
-    const runnerChance = wave >= 2 ? Math.min(0.32, 0.2 + (wave - 2) * 0.022) : 0.14;
+      10 + wave * 6.2 + Math.pow(Math.max(0, wave - 3), 1.45) * 2.8 + stageEco.countBonus;
+    const totalCount = Math.round(baseCount * scaling.countMult * tierMeta.countMult);
+
+    // 按当前战区专属怪物生态权重抽选尸潮配方（后期波次进一步提高变异怪占比！）
+    const entries = Object.entries(stageEco.weights) as [ZombieKind, number][];
+    const lateShift = Math.min(0.28, Math.max(0, wave - 2) * 0.035);
+    const adjusted = entries.map(([k, w]) => {
+      const mult = k === 'walker' ? Math.max(0.35, 1 - lateShift * 1.6) : 1 + lateShift;
+      return [k, w * mult] as [ZombieKind, number];
+    });
+    const wSum = adjusted.reduce((acc, [, w]) => acc + w, 0) || 1;
 
     for (let i = 0; i < totalCount; i++) {
-      const r = Math.random();
-      let acc = necroChance;
-      if (r < acc) {
-        queue.push('necro');
-        continue;
+      let r = Math.random() * wSum;
+      let chosen: ZombieKind = adjusted[adjusted.length - 1][0];
+      for (const [k, w] of adjusted) {
+        r -= w;
+        if (r <= 0) {
+          chosen = k;
+          break;
+        }
       }
-      acc += frostChance;
-      if (r < acc) {
-        queue.push('frost');
-        continue;
-      }
-      acc += spitterChance;
-      if (r < acc) {
-        queue.push('spitter');
-        continue;
-      }
-      acc += riotChance;
-      if (r < acc) {
-        queue.push('riot');
-        continue;
-      }
-      acc += boomerChance;
-      if (r < acc) {
-        queue.push('boomer');
-        continue;
-      }
-      acc += runnerChance;
-      if (r < acc) {
-        queue.push('runner');
-      } else {
-        queue.push('walker');
-      }
+      queue.push(chosen);
     }
 
-    if (wave % 3 === 0) {
+    if (wave % 3 === 0 || (s.stage.id === 'stage_mall' && wave % 2 === 0)) {
       queue.splice(Math.floor(queue.length * 0.45), 0, 'thief');
     }
 
-    // 中后期（第 5 波起）混编重装暴君精英，多人联机额外增派精英突击！
+    // 按战区阶梯提前混编重装暴君精英，噩梦/炼狱与联机额外增派精英突击！
     let miniBossCount = 0;
-    if (wave === 5 || wave === 6) miniBossCount = 1 + scaling.extraMiniBoss;
-    else if (wave === 7 || wave === 8) miniBossCount = 2 + scaling.extraMiniBoss;
-    else if (wave === 9) miniBossCount = 3 + scaling.extraMiniBoss;
-    else if (wave === 10) miniBossCount = 2 + scaling.extraMiniBoss;
-    else if (wave > 10) miniBossCount = 2 + Math.floor((wave - 9) / 2) + scaling.extraMiniBoss;
+    const tierExtraMini = s.difficultyTier >= 3 ? 2 : s.difficultyTier === 2 ? 1 : 0;
+    if (wave >= stageEco.miniBossStartWave) {
+      const waveOffset = wave - stageEco.miniBossStartWave;
+      miniBossCount =
+        1 +
+        Math.floor(waveOffset / 2) +
+        stageEco.extraMiniBoss +
+        tierExtraMini +
+        scaling.extraMiniBoss;
+    }
 
     for (let m = 0; m < miniBossCount; m++) {
       const insertIdx = Math.min(
@@ -1346,11 +1387,17 @@ export class GameEngine {
     const isBossWave = wave % 10 === 0 || (wave > 10 && wave % 5 === 0);
     const waveBossKind = isBossWave ? getStageBossKind(s.stage.id, wave) : null;
     if (waveBossKind) {
-      queue.splice(Math.floor(queue.length * 0.72), 0, waveBossKind);
-      if (s.squadCount >= 3 && wave >= 10) {
-        // 3~4人满编高难下双线精英护卫压境！
-        queue.splice(Math.floor(queue.length * 0.48), 0, 'miniboss');
+      queue.splice(Math.floor(queue.length * 0.45), 0, waveBossKind);
+      if (tierMeta.doubleBossOnFinal) {
+        // ★★★ 炼狱死斗：双倍终局尸王同屏夹击！
+        queue.splice(Math.floor(queue.length * 0.24), 0, waveBossKind);
+      } else if (s.squadCount >= 3 && wave >= 10) {
+        queue.splice(Math.floor(queue.length * 0.28), 0, 'miniboss');
       }
+    }
+
+    if (tierMeta.periodicBlackout && wave >= 2 && wave % 2 === 0) {
+      s.blackoutTimer = Math.max(s.blackoutTimer, 7.5);
     }
 
     if (wave >= 2 && (wave - 2) % 3 === 0 && s.chests.length < 2) {
@@ -1445,7 +1492,8 @@ export class GameEngine {
   public getMaxMag(defId: string, evolved: boolean): number {
     const s = this.state;
     const def = WEAPONS[defId];
-    const mult = (s ? s.modifiers.magMult : 1) * (evolved ? 1.5 : 1);
+    const mastery = getWeaponMasteryBonuses(SaveManager.getWeaponMastery(defId));
+    const mult = (s ? s.modifiers.magMult : 1) * (evolved ? 1.5 : 1) * mastery.capacityMult;
     return Math.max(2, Math.round(def.magSize * mult));
   }
 
@@ -1585,6 +1633,8 @@ export class GameEngine {
     if (s.hqSupportCooldown > 0) s.hqSupportCooldown -= dt;
     if (s.armoryAdCooldown > 0) s.armoryAdCooldown -= dt;
     if (s.skillCooldown > 0) s.skillCooldown = Math.max(0, s.skillCooldown - dt);
+    if (s.blackoutTimer > 0) s.blackoutTimer = Math.max(0, s.blackoutTimer - dt);
+    if (s.neonSurgeTimer > 0) s.neonSurgeTimer = Math.max(0, s.neonSurgeTimer - dt);
     if (s.camera.shake > 0) s.camera.shake = Math.max(0, s.camera.shake - dt * 2.8);
 
     (Object.keys(s.powerUpTimers) as PowerUpType[]).forEach((k) => {
@@ -1624,6 +1674,8 @@ export class GameEngine {
       }
 
       this.updateWaveLogic(dt);
+      if (this.isRunHalted()) return;
+      this.updateStageHazards(dt);
       if (this.isRunHalted()) return;
 
       this.updatePlayer(dt, viewW, viewH);
@@ -1799,7 +1851,7 @@ export class GameEngine {
           s.waveState = 'ended';
           PlatformSDK.gameplayStop();
           PlatformSDK.happyTime();
-          SaveManager.markStageCleared(s.stage.id);
+          SaveManager.markStageCleared(s.stage.id, s.difficultyTier);
           SaveManager.addDailyProgress('clear', 1);
           this.flushRunTelemetry(true);
           if (s.isCoop && CoopManager.role === 'host') {
@@ -1809,6 +1861,201 @@ export class GameEngine {
         }
       } else {
         s.extractionProgress = Math.max(0, s.extractionProgress - dt * 0.55);
+      }
+    }
+  }
+
+  private updateStageHazards(dt: number): void {
+    const s = this.state!;
+    if (s.stage.isTutorial) return;
+
+    // 1. 持续更新场上已激活的环境危险区（液氮喷口 / 剧毒孢子团 / 舰炮航弹红圈 / 等离子核脉冲）
+    for (let i = s.hazardZones.length - 1; i >= 0; i--) {
+      const hz = s.hazardZones[i];
+      hz.timer -= dt;
+
+      if (hz.kind === 'cryo_vent') {
+        for (const z of s.zombies) {
+          if (z.hp > 0 && Math.hypot(z.x - hz.x, z.y - hz.y) <= hz.radius + z.radius) {
+            z.slowTimer = Math.max(z.slowTimer, 1.4);
+            this.damageZombie(z, 68 * dt, 0, 0, false, false, false, true);
+          }
+        }
+        if (
+          !s.player.downed &&
+          !s.player.spectating &&
+          s.player.chillImmuneTimer <= 0 &&
+          Math.hypot(s.player.x - hz.x, s.player.y - hz.y) <= hz.radius
+        ) {
+          s.player.chillTimer = Math.max(s.player.chillTimer, 0.75);
+        }
+        if (hz.timer <= 0) s.hazardZones.splice(i, 1);
+      } else if (hz.kind === 'bio_spore') {
+        for (const z of s.zombies) {
+          if (z.hp > 0 && z.hp < z.maxHp && Math.hypot(z.x - hz.x, z.y - hz.y) <= hz.radius + z.radius) {
+            z.hp = Math.min(z.maxHp, z.hp + z.maxHp * 0.04 * dt);
+          }
+        }
+        if (
+          !s.player.downed &&
+          !s.player.spectating &&
+          s.player.invulnTimer <= 0 &&
+          Math.hypot(s.player.x - hz.x, s.player.y - hz.y) <= hz.radius
+        ) {
+          s.player.hp = Math.max(1, s.player.hp - 12 * dt);
+        }
+        if (hz.timer <= 0) s.hazardZones.splice(i, 1);
+      } else if (hz.kind === 'bomb_strike' || hz.kind === 'plasma_strike') {
+        if (hz.timer <= 0 && !hz.detonated) {
+          hz.detonated = true;
+          const strikeDmg =
+            (hz.kind === 'plasma_strike' ? 460 : 340) *
+            s.modifiers.damageMult *
+            this.getSectorDamageMult();
+          this.explodeAt(hz.x, hz.y, hz.radius, strikeDmg);
+          if (
+            !s.player.downed &&
+            !s.player.spectating &&
+            s.player.invulnTimer <= 0 &&
+            Math.hypot(s.player.x - hz.x, s.player.y - hz.y) <= hz.radius * 0.78
+          ) {
+            s.player.hp = Math.max(1, s.player.hp - (hz.kind === 'plasma_strike' ? 22 : 16));
+            s.player.hitFlashTimer = 0.22;
+          }
+          s.hazardZones.splice(i, 1);
+        }
+      }
+    }
+
+    // 2. 战斗阶段周期性触发当前战区专属动态环境事件
+    if (s.waveState !== 'fighting' || s.zombies.length < 3) return;
+    s.hazardCooldown -= dt;
+    if (s.hazardCooldown > 0) return;
+
+    const eco = getStageEcology(s.stage.id);
+    const tierMeta = getDifficultyMeta(s.difficultyTier);
+    s.hazardCooldown = eco.hazardInterval * tierMeta.hazardCdMult * (0.88 + Math.random() * 0.26);
+
+    const bannerMsg = I18n.isZh() ? eco.zhHazardBanner : eco.enHazardBanner;
+    this.showBanner(bannerMsg, 3.6);
+    SoundFX.alarm();
+
+    const pickRoomSpots = (count: number): { x: number; y: number }[] => {
+      const unlocked = s.rooms.filter((r) => r.unlocked);
+      const out: { x: number; y: number }[] = [];
+      for (let k = 0; k < count; k++) {
+        if (s.zombies.length > 0 && Math.random() < 0.65) {
+          const tz = s.zombies[Math.floor(Math.random() * s.zombies.length)];
+          if (tz.insideBuilding) {
+            out.push({ x: tz.x, y: tz.y });
+            continue;
+          }
+        }
+        const rm = unlocked[Math.floor(Math.random() * unlocked.length)];
+        const rect = rm.rects[Math.floor(Math.random() * rm.rects.length)];
+        const pad = 64;
+        out.push({
+          x: rect.x + pad + Math.random() * Math.max(20, rect.w - pad * 2),
+          y: rect.y + pad + Math.random() * Math.max(20, rect.h - pad * 2),
+        });
+      }
+      return out;
+    };
+
+    switch (eco.hazardKind) {
+      case 'swat_flare': {
+        for (const z of s.zombies) {
+          if (z.insideBuilding) {
+            z.stunTimer = Math.max(z.stunTimer, 2.2);
+            this.spawnHitSparks(z.x, z.y, '#fde047', 5);
+          }
+        }
+        this.spawnQueue.unshift('riot', 'riot');
+        s.zombiesRemainingInWave = this.spawnQueue.length + s.zombies.length;
+        break;
+      }
+      case 'neon_overcharge': {
+        s.neonSurgeTimer = 7.0;
+        this.triggerChainLightning(s.player.x, s.player.y, 120 * s.modifiers.damageMult, 4);
+        if (!s.zombies.some((z) => z.kind === 'thief')) {
+          this.spawnZombie('thief');
+        }
+        break;
+      }
+      case 'cryo_leak': {
+        for (const pt of pickRoomSpots(2)) {
+          s.hazardZones.push({
+            id: this.nextEntityId++,
+            kind: 'cryo_vent',
+            x: pt.x,
+            y: pt.y,
+            radius: 105,
+            timer: 7.0,
+            maxTimer: 7.0,
+          });
+        }
+        break;
+      }
+      case 'bio_spore': {
+        for (const pt of pickRoomSpots(2)) {
+          s.hazardZones.push({
+            id: this.nextEntityId++,
+            kind: 'bio_spore',
+            x: pt.x,
+            y: pt.y,
+            radius: 110,
+            timer: 7.0,
+            maxTimer: 7.0,
+          });
+        }
+        break;
+      }
+      case 'mortar_barrage': {
+        for (const pt of pickRoomSpots(3)) {
+          s.hazardZones.push({
+            id: this.nextEntityId++,
+            kind: 'bomb_strike',
+            x: pt.x,
+            y: pt.y,
+            radius: 125,
+            timer: 1.45,
+            maxTimer: 1.45,
+          });
+        }
+        break;
+      }
+      case 'blackout': {
+        s.blackoutTimer = 8.5;
+        break;
+      }
+      case 'airstrike': {
+        for (const pt of pickRoomSpots(4)) {
+          s.hazardZones.push({
+            id: this.nextEntityId++,
+            kind: 'bomb_strike',
+            x: pt.x,
+            y: pt.y,
+            radius: 135,
+            timer: 1.35,
+            maxTimer: 1.35,
+          });
+        }
+        break;
+      }
+      case 'reactor_meltdown': {
+        s.blackoutTimer = 8.0;
+        for (const pt of pickRoomSpots(3)) {
+          s.hazardZones.push({
+            id: this.nextEntityId++,
+            kind: 'plasma_strike',
+            x: pt.x,
+            y: pt.y,
+            radius: 140,
+            timer: 1.45,
+            maxTimer: 1.45,
+          });
+        }
+        break;
       }
     }
   }
@@ -1844,15 +2091,21 @@ export class GameEngine {
     }
     const wf = this.getWindowFrame(win);
 
-    // 紧绷硬核且平滑衔接 8 大战区与 1~4 人联机动态血量/伤害膨胀曲线！
-    const stageMult = 1 + (s.stage.index - 1) * 0.22;
+    // 紧绷硬核且鲜明拉开 8 大战区阶梯、3 大危机星级（标准/噩梦/炼狱）与 1~4 人联机动态曲线！
+    const stageEco = getStageEcology(s.stage.id);
+    const tierMeta = getDifficultyMeta(s.difficultyTier);
     const hpScale =
       (1 + (s.wave - 1) * 0.42 + Math.pow(Math.max(0, s.wave - 3), 1.76) * 0.36) *
-      stageMult *
+      stageEco.hpMult *
+      tierMeta.hpMult *
       scaling.hpMult;
     const dmgScale =
-      (1 + Math.max(0, s.wave - 1) * 0.095 + (s.stage.index - 1) * 0.095) * scaling.dmgMult;
-    const stageBountyMult = 1 + (s.stage.index - 1) * 0.08;
+      (1 + Math.max(0, s.wave - 1) * 0.095) *
+      stageEco.dmgMult *
+      tierMeta.dmgMult *
+      scaling.dmgMult;
+    const speedScale = stageEco.speedMult * tierMeta.speedMult;
+    const stageBountyMult = stageEco.rewardMult * (1 + (s.difficultyTier - 1) * 0.25);
     const cashTaper = stageBountyMult / (1 + Math.max(0, s.wave - 3) * 0.14);
 
     let hp = Math.round(68 * hpScale);
@@ -1951,6 +2204,10 @@ export class GameEngine {
       damage = 8;
       cash = 25;
       xp = 22;
+    }
+
+    if (!s.stage.isTutorial && kind !== 'thief') {
+      speed = Math.round(speed * speedScale);
     }
 
     // 360° 广角环城外围散点生成：按 ~150° 大扇面分布在建筑外圈与镜头视野外，彻底告别直线排队进场！
@@ -2113,6 +2370,7 @@ export class GameEngine {
       (inAcid ? 0.78 : 1) *
       (p.chillTimer > 0 ? 0.86 : 1);
     if (s.feverTimer > 0 || s.powerUpTimers.overdrive > 0) speed *= 1.24;
+    if (s.neonSurgeTimer > 0) speed *= 1.2;
 
     const oldX = p.x;
     const oldY = p.y;
@@ -2312,14 +2570,20 @@ export class GameEngine {
     }
     if (p.fireCooldown > 0) return;
 
+    const pStats = SaveManager.getEffectivePlayerStats();
+    const mastery = getWeaponMasteryBonuses(SaveManager.getWeaponMastery(def.id));
+    const lowHpFireRate =
+      pStats.lowHpFireRateBonus > 0 && p.hp <= p.maxHp * 0.65 ? 1 + pStats.lowHpFireRateBonus : 1;
     const rateMult =
       s.modifiers.fireRateMult *
+      lowHpFireRate *
       (overdrive ? 1.6 : 1) *
       (s.feverTimer > 0 ? 1.26 : 1) *
       (wep.evolved ? 1.16 : 1);
     p.fireCooldown = 1 / (def.fireRate * rateMult);
 
-    if (!overdrive) {
+    const freeAmmoProc = pStats.freeShotChance > 0 && Math.random() < pStats.freeShotChance;
+    if (!overdrive && !freeAmmoProc) {
       wep.mag -= 1;
       if (wep.mag <= 0) {
         if (wep.reserve > 0 || wep.reserve < 0) {
@@ -2330,14 +2594,26 @@ export class GameEngine {
       }
     }
 
+    p.shotCounter = (p.shotCounter || 0) + 1;
+    const isShotgunClass = def.id === 'shotgun' || def.id === 'autoshotgun';
+    const isTechPrecision =
+      def.id === 'sniper' || def.id === 'crossbow' || def.id === 'tesla' || def.id === 'plasma';
+    const isAreaStream =
+      def.id === 'flamethrower' || def.id === 'cryogun' || def.id === 'launcher' || def.id === 'sawlauncher';
+    const goldenBallisticBlast =
+      mastery.isGoldenAwakened && !isShotgunClass && !isTechPrecision && !isAreaStream && p.shotCounter % 5 === 0;
+
     const extraFloor = Math.floor(s.modifiers.extraPellets);
     const extraFrac = s.modifiers.extraPellets - extraFloor;
-    const totalPellets = def.pellets + extraFloor + (Math.random() < extraFrac ? 1 : 0);
-    const isCrit = Math.random() < s.modifiers.critChance;
+    const goldenBonusPellets = mastery.isGoldenAwakened && isShotgunClass ? 2 : 0;
+    const totalPellets =
+      def.pellets + extraFloor + goldenBonusPellets + (Math.random() < extraFrac ? 1 : 0);
+    const isCrit = Math.random() < s.modifiers.critChance + mastery.bonusCrit;
     const lowHpMult =
       s.modifiers.lowHpDamageBonus > 0 && p.hp <= p.maxHp * 0.55 ? 1 + s.modifiers.lowHpDamageBonus : 1;
     const baseDmg =
       def.damage *
+      mastery.damageMult *
       s.modifiers.damageMult *
       this.getSectorDamageMult() *
       lowHpMult *
@@ -2370,13 +2646,14 @@ export class GameEngine {
       if (s.bullets.length >= 165) {
         s.bullets.shift();
       }
+      const areaAwakenMult = mastery.isGoldenAwakened && isAreaStream ? 1.28 : 1;
       const bSpec: SerializedBullet = {
         x: Math.round(muzzleX * 10) / 10,
         y: Math.round(muzzleY * 10) / 10,
         vx: Math.round(Math.cos(ang) * def.bulletSpeed * 10) / 10,
         vy: Math.round(Math.sin(ang) * def.bulletSpeed * 10) / 10,
         radius:
-          def.sawblade
+          (def.sawblade
             ? wep.evolved
               ? 13
               : 10.5
@@ -2384,27 +2661,34 @@ export class GameEngine {
               ? 8.5
               : def.laser
                 ? 6
-                : def.explosiveRadius
+                : def.explosiveRadius || goldenBallisticBlast
                   ? 6.5
-                  : isCrit
+                  : isCrit || mastery.isGoldenAwakened
                     ? 5.5
-                    : 4.4,
+                    : 4.4) * areaAwakenMult,
         damage: Math.round(baseDmg * 10) / 10,
         knockback: Math.round(def.knockback),
-        pierceLeft: def.pierce + s.modifiers.extraPierce + (wep.evolved ? 1 : 0),
+        pierceLeft: def.pierce + mastery.bonusPierce + s.modifiers.extraPierce + (wep.evolved ? 1 : 0),
         bouncesLeft:
           (def.bounces || 0) +
           (def.sawblade && wep.evolved ? 2 : 0) +
+          (mastery.isGoldenAwakened && isAreaStream ? 1 : 0) +
           (s.relicIds.includes('rubber_bullets') && !def.explosiveRadius ? 1 : 0),
-        explosiveRadius: def.explosiveRadius ? Math.round(def.explosiveRadius * (wep.evolved ? 1.35 : 1)) : 0,
-        color: isCrit ? '#fde047' : wep.evolved ? def.superColor : def.color,
+        explosiveRadius: def.explosiveRadius
+          ? Math.round(def.explosiveRadius * (wep.evolved ? 1.35 : 1) * areaAwakenMult)
+          : goldenBallisticBlast
+            ? 94
+            : 0,
+        color: mastery.isGoldenAwakened || isCrit ? '#fde047' : wep.evolved ? def.superColor : def.color,
         isCrit,
         flame: Boolean(def.flame || (def.id === 'shotgun' && wep.evolved) || s.relicIds.includes('dragon_oil')),
         cryo: Boolean(def.cryo || (s.modifiers.cryoShotChance > 0 && Math.random() < s.modifiers.cryoShotChance)),
         electric: Boolean(
           def.electric ||
+            (mastery.isGoldenAwakened && isTechPrecision) ||
             ((def.id === 'smg' || def.id === 'sniper') && wep.evolved) ||
-            (s.modifiers.electricShotChance > 0 && Math.random() < s.modifiers.electricShotChance)
+            (s.modifiers.electricShotChance > 0 && Math.random() < s.modifiers.electricShotChance) ||
+            (pStats.thunderChipChance > 0 && Math.random() < pStats.thunderChipChance)
         ),
         laser: Boolean(def.laser),
         sawblade: Boolean(def.sawblade),
@@ -2413,6 +2697,8 @@ export class GameEngine {
       if (s.isCoop) netBullets.push(bSpec);
       s.bullets.push({
         ...bSpec,
+        weaponId: def.id,
+        golden: mastery.isGoldenAwakened,
         hitIds: new Set(),
         localVisualOnly: isClientOnly,
       });
@@ -3081,6 +3367,7 @@ export class GameEngine {
   private updateTurretsAndDog(dt: number): void {
     const s = this.state!;
     const sectorMult = this.getSectorDamageMult();
+    const turretChipMult = SaveManager.getEffectivePlayerStats().turretDamageMultiplier;
     for (let i = s.turrets.length - 1; i >= 0; i--) {
       const t = s.turrets[i];
       t.life -= dt;
@@ -3103,7 +3390,7 @@ export class GameEngine {
             vx: Math.cos(t.angle) * 950,
             vy: Math.sin(t.angle) * 950,
             radius: 3.8,
-            damage: 25 * s.modifiers.damageMult * sectorMult,
+            damage: 25 * s.modifiers.damageMult * sectorMult * turretChipMult,
             knockback: 45,
             pierceLeft: 0,
             bouncesLeft: 0,
@@ -3203,7 +3490,12 @@ export class GameEngine {
       for (const barrel of s.barrels) {
         if (!barrel.alive) continue;
         if (Math.hypot(b.x - barrel.x, b.y - barrel.y) <= 24 + b.radius) {
-          this.explodeAt(barrel.x, barrel.y, 185, 250 * s.modifiers.damageMult * this.getSectorDamageMult());
+          this.explodeAt(
+            barrel.x,
+            barrel.y,
+            185,
+            250 * s.modifiers.damageMult * this.getSectorDamageMult() * SaveManager.getEffectivePlayerStats().grenadeDamageMult
+          );
           barrel.alive = false;
           barrel.respawnWaves = 2;
           s.bullets.splice(i, 1);
@@ -3317,7 +3609,11 @@ export class GameEngine {
   ): void {
     if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) return;
     const s = this.state!;
-    z.hp -= dmg;
+    const effDmg =
+      isBossKind(z.kind) || z.kind === 'miniboss'
+        ? dmg * SaveManager.getEffectivePlayerStats().bossBonusDmgMult
+        : dmg;
+    z.hp -= effDmg;
     z.hitFlash = 0.09;
     if (flame) z.burnTimer = 3.0;
     if (cryo && z.kind !== 'frost' && z.kind !== 'boss_cryo') {
@@ -3395,9 +3691,17 @@ export class GameEngine {
 
     s.kills += 1;
     SaveManager.addDailyProgress('kills', 1);
+    const activeWepKill = s.player.weapons[s.player.activeSlot];
+    if (activeWepKill) {
+      SaveManager.recordWeaponKill(activeWepKill.defId, 1);
+    }
     const isBoss = isBossKind(z.kind);
     if (isBoss || z.kind === 'miniboss') {
       SaveManager.addDailyProgress('bosses', 1);
+    }
+    if (isBoss && !s.stage.isTutorial) {
+      SaveManager.addTechCores(1, false);
+      this.spawnFloatingText(z.x, z.y - z.radius - 26, '💠 +1 Tech Core', '#38bdf8', 1.3);
     }
 
     if (s.modifiers.killRefillChance > 0 && Math.random() < s.modifiers.killRefillChance) {
@@ -3456,6 +3760,11 @@ export class GameEngine {
         if (s.player.hp < s.player.maxHp) {
           s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
           this.spawnFloatingText(s.player.x, s.player.y - 34, I18n.t('ftKillSiphon', { n: heal }), '#34d399', 1.12);
+        } else {
+          const overArmor = SaveManager.getEffectivePlayerStats().vampOverhealArmor;
+          if (overArmor > 0 && s.player.armor < s.player.maxArmor) {
+            s.player.armor = Math.min(s.player.maxArmor, s.player.armor + overArmor);
+          }
         }
       }
     }

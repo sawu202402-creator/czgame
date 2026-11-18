@@ -1,4 +1,4 @@
-import { GameMode, PowerUpType } from '../types';
+import { DifficultyTier, GameMode, PowerUpType } from '../types';
 import { ZombieKind } from '../game/Entities';
 
 export const SQUAD_SLOTS = [
@@ -62,6 +62,7 @@ export interface LobbyState {
   roomCode: string;
   stageId: string;
   mode: GameMode;
+  tier?: DifficultyTier;
   members: LobbyMember[];
   inGame: boolean;
 }

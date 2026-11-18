@@ -1,5 +1,14 @@
-import { AgentClassId, AgentUpgradeLevels, DailyMissionKind, SaveData } from '../types';
+import { AgentClassId, AgentUpgradeLevels, DailyMissionKind, DifficultyTier, ParagonKey, SaveData } from '../types';
 import { PlatformSDK } from '../platform/PlatformSDK';
+import {
+  CHIP_MAX_LEVEL,
+  MAX_EQUIPPED_CHIPS,
+  TACTICAL_CHIPS,
+  WEAPON_MASTERY_MAX,
+  getChipUpgradeCost,
+  getParagonCost,
+  getWeaponMasteryCost,
+} from './EndgameDefs';
 import {
   AGENT_CLASSES,
   DAILY_CHECKIN_REWARDS,
@@ -32,7 +41,19 @@ const DEFAULT_SAVE: SaveData = {
     ordnance: 0,
   },
   clearedStages: [],
+  stageStars: {},
   endlessBestWave: {},
+  techCores: 0,
+  weaponMastery: {},
+  weaponKills: {},
+  chipLevels: {},
+  equippedChips: [],
+  paragon: {
+    might: 0,
+    haste: 0,
+    fortune: 0,
+    vitality: 0,
+  },
   totalRuns: 0,
   tutorialDone: false,
   freeStarterUsedCount: 0,
@@ -190,6 +211,26 @@ class SaveService {
           },
           endlessBestWave: {
             ...(parsed.endlessBestWave || {}),
+          },
+          stageStars: (() => {
+            const stars: Record<string, number> = { ...(parsed.stageStars || {}) };
+            if (Array.isArray(parsed.clearedStages)) {
+              for (const sid of parsed.clearedStages) {
+                if (!stars[sid] || stars[sid] < 1) stars[sid] = 1;
+              }
+            }
+            return stars;
+          })(),
+          techCores: typeof parsed.techCores === 'number' ? parsed.techCores : 0,
+          weaponMastery: { ...(parsed.weaponMastery || {}) },
+          weaponKills: { ...(parsed.weaponKills || {}) },
+          chipLevels: { ...(parsed.chipLevels || {}) },
+          equippedChips: Array.isArray(parsed.equippedChips)
+            ? parsed.equippedChips.slice(0, MAX_EQUIPPED_CHIPS)
+            : [],
+          paragon: {
+            ...DEFAULT_SAVE.paragon,
+            ...(parsed.paragon || {}),
           },
           daily: {
             ...structuredClone(DEFAULT_SAVE.daily),
@@ -413,15 +454,121 @@ class SaveService {
     }
   }
 
-  public markStageCleared(stageId: string): void {
+  public markStageCleared(stageId: string, tier: DifficultyTier = 1): void {
     if (stageId === 'stage_tutorial') {
       this.markTutorialDone();
       return;
     }
     if (!this.data.clearedStages.includes(stageId)) {
       this.data.clearedStages.push(stageId);
-      this.save();
     }
+    const prevStars = this.data.stageStars[stageId] || 0;
+    if (tier > prevStars) {
+      this.data.stageStars[stageId] = tier;
+    }
+    this.save();
+  }
+
+  public getStageStars(stageId: string): number {
+    return this.data.stageStars[stageId] || (this.data.clearedStages.includes(stageId) ? 1 : 0);
+  }
+
+  public isTierUnlocked(stageId: string, tier: DifficultyTier): boolean {
+    if (tier <= 1) return true;
+    return this.getStageStars(stageId) >= tier - 1;
+  }
+
+  public addTechCores(delta: number, persistNow = true): void {
+    if (delta <= 0) return;
+    this.data.techCores = Math.max(0, (this.data.techCores || 0) + delta);
+    if (persistNow) this.save();
+  }
+
+  public forgeTechCoreWithGold(cost = 420): boolean {
+    if (this.data.gold < cost) return false;
+    this.data.gold -= cost;
+    this.data.techCores = (this.data.techCores || 0) + 1;
+    this.save();
+    return true;
+  }
+
+  public recordWeaponKill(weaponId: string, count = 1): void {
+    if (!weaponId || count <= 0) return;
+    this.data.weaponKills[weaponId] = (this.data.weaponKills[weaponId] || 0) + count;
+  }
+
+  public getWeaponMastery(weaponId: string): number {
+    return this.data.weaponMastery[weaponId] || 0;
+  }
+
+  public upgradeWeaponMastery(weaponId: string): boolean {
+    const cur = this.getWeaponMastery(weaponId);
+    if (cur >= WEAPON_MASTERY_MAX) return false;
+    const cost = getWeaponMasteryCost(cur);
+    if (this.data.gold < cost.gold || this.data.techCores < cost.cores) return false;
+    this.data.gold -= cost.gold;
+    this.data.techCores -= cost.cores;
+    this.data.weaponMastery[weaponId] = cur + 1;
+    this.save();
+    return true;
+  }
+
+  public upgradeOrUnlockChip(chipId: string): boolean {
+    const def = TACTICAL_CHIPS.find((c) => c.id === chipId);
+    if (!def) return false;
+    const cur = this.data.chipLevels[chipId] || 0;
+    if (cur >= CHIP_MAX_LEVEL) return false;
+    const cost = getChipUpgradeCost(def, cur);
+    if (this.data.gold < cost.gold || this.data.techCores < cost.cores) return false;
+    this.data.gold -= cost.gold;
+    this.data.techCores -= cost.cores;
+    this.data.chipLevels[chipId] = cur + 1;
+    if (cur === 0 && this.data.equippedChips.length < MAX_EQUIPPED_CHIPS && !this.data.equippedChips.includes(chipId)) {
+      this.data.equippedChips.push(chipId);
+    }
+    this.save();
+    return true;
+  }
+
+  public toggleEquipChip(chipId: string): boolean {
+    const lvl = this.data.chipLevels[chipId] || 0;
+    if (lvl <= 0) return false;
+    const idx = this.data.equippedChips.indexOf(chipId);
+    if (idx >= 0) {
+      this.data.equippedChips.splice(idx, 1);
+      this.save();
+      return true;
+    }
+    if (this.data.equippedChips.length >= MAX_EQUIPPED_CHIPS) {
+      return false;
+    }
+    this.data.equippedChips.push(chipId);
+    this.save();
+    return true;
+  }
+
+  public getEquippedChipLevel(chipId: string): number {
+    if (!this.data.equippedChips.includes(chipId)) return 0;
+    return this.data.chipLevels[chipId] || 0;
+  }
+
+  public buyParagonLevel(key: ParagonKey): boolean {
+    const cur = this.data.paragon[key] || 0;
+    const cost = getParagonCost(cur);
+    if (this.data.gold < cost) return false;
+    this.data.gold -= cost;
+    this.data.paragon[key] = cur + 1;
+    this.save();
+    return true;
+  }
+
+  public getTotalStars(): number {
+    return Object.values(this.data.stageStars).reduce((acc, v) => acc + (v || 0), 0);
+  }
+
+  public getTotalParagonLevels(): number {
+    const p = this.data.paragon;
+    return (p.might || 0) + (p.haste || 0) + (p.fortune || 0) + (p.vitality || 0);
   }
 
   public recordEndlessWave(stageId: string, wave: number): void {
@@ -434,39 +581,66 @@ class SaveService {
 
   public getEffectivePlayerStats() {
     const u = this.data.upgrades;
+    const par = this.data.paragon || { might: 0, haste: 0, fortune: 0, vitality: 0 };
     const cls = getAgentClassDef(this.data.selectedClass || 'vanguard');
     const isVanguard = cls.id === 'vanguard';
     const isEngineer = cls.id === 'engineer';
     const isMedic = cls.id === 'medic';
     const isDemo = cls.id === 'demolisher';
 
+    const lvBerserk = this.getEquippedChipLevel('chip_berserker');
+    const lvVamp = this.getEquippedChipLevel('chip_vampire');
+    const lvThunder = this.getEquippedChipLevel('chip_thunder');
+    const lvBottomless = this.getEquippedChipLevel('chip_bottomless');
+    const lvArch = this.getEquippedChipLevel('chip_architect');
+    const lvBoss = this.getEquippedChipLevel('chip_boss_slayer');
+    const lvCryo = this.getEquippedChipLevel('chip_cryo_nova');
+    const lvDemoChip = this.getEquippedChipLevel('chip_demolition');
+    const lvMidas = this.getEquippedChipLevel('chip_midas');
+
+    const cdReduction = Math.min(0.4, (par.haste || 0) * 0.012);
+
     return {
       classId: cls.id,
-      skillCooldown: cls.skillCooldown,
-      maxHp: 100 + u.hp * 18 + (this.data.agentLevel - 1) * 4,
-      reloadMultiplier: Math.max(0.38, 1 - u.reload * 0.06),
-      fireRateMultiplier: isVanguard ? 1.12 : 1,
+      skillCooldown: Math.max(10, Math.round(cls.skillCooldown * (1 - cdReduction) * 10) / 10),
+      maxHp: 100 + u.hp * 18 + (this.data.agentLevel - 1) * 4 + (par.vitality || 0) * 12,
+      reloadMultiplier: Math.max(0.32, (1 - u.reload * 0.06) * (lvBottomless > 0 ? 1 - (0.1 + lvBottomless * 0.03) : 1)),
+      fireRateMultiplier: (isVanguard ? 1.12 : 1) * (1 + (par.haste || 0) * 0.015),
+      lowHpFireRateBonus: lvBerserk > 0 ? 0.15 + lvBerserk * 0.04 : 0,
       moveSpeed: 232 * (1 + u.speed * 0.035 + (isVanguard ? 0.05 : 0)),
       repairSpeedMultiplier: 1 + u.repair * 0.12,
-      killHealRatio: isMedic ? 0.08 : 0,
+      killHealRatio: (isMedic ? 0.08 : 0) + (lvVamp > 0 ? 0.04 + lvVamp * 0.02 : 0),
+      vampOverhealArmor: lvVamp > 0 ? 2 + lvVamp : 0,
       medDropHealMult: isMedic ? 1.5 : 1,
       reviveSpeedMultiplier: isMedic ? 1.65 : 1,
-      turretDurationMultiplier: isEngineer ? 1.35 : 1,
+      turretDurationMultiplier: (isEngineer ? 1.35 : 1) * (lvArch > 0 ? 1.18 + lvArch * 0.06 : 1),
+      turretDamageMultiplier: lvArch > 0 ? 1.18 + lvArch * 0.06 : 1,
+      startAlloyRoomOne: lvArch > 0,
       maxPlanks: 4 + Math.floor(u.repair / 3),
-      startCash: 80 + u.startCash * 45,
+      startCash: 80 + u.startCash * 45 + (par.fortune || 0) * 15,
       startArmor: Math.min(100, u.armor * 10 + (isEngineer ? 35 : 0)),
-      waveArmorRegen: u.armor * 4,
+      waveArmorRegen: u.armor * 4 + (par.vitality || 0) * 2,
       startGrenades: 2 + (u.ordnance >= 3 ? 1 : 0) + (isDemo ? 2 : 0),
-      grenadeDamageMult: 1 + u.ordnance * 0.12,
-      grenadeWaveSupply: u.ordnance >= 6,
+      grenadeDamageMult: (1 + u.ordnance * 0.12) * (lvDemoChip > 0 ? 1.2 + lvDemoChip * 0.07 : 1),
+      grenadeWaveSupply: u.ordnance >= 6 || lvDemoChip > 0,
       critChance: 0.05 + u.crit * 0.025,
       critDamageMult: 2 + u.crit * 0.05,
       magnetMult: 1 + u.magnet * 0.18,
-      cashBonusMult: 1 + u.magnet * 0.04,
+      cashBonusMult: (1 + u.magnet * 0.04) * (lvMidas > 0 ? 1.16 + lvMidas * 0.05 : 1),
+      settlementRewardMult: (1 + (par.fortune || 0) * 0.03) * (lvMidas > 0 ? 1.15 + lvMidas * 0.05 : 1),
       reserveAmmoMult: 1 + u.ammo * 0.08,
-      ammoCostMult: Math.max(0.55, (1 - u.ammo * 0.04) * (isDemo ? 0.88 : 1)),
+      ammoCostMult: Math.max(0.5, (1 - u.ammo * 0.04) * (isDemo ? 0.88 : 1)),
       gunShopCostMult: isDemo ? 0.88 : 1,
-      agentDamageBonus: 1 + (this.data.agentLevel - 1) * 0.03,
+      freeShotChance: lvBottomless > 0 ? 0.16 + lvBottomless * 0.05 : 0,
+      thunderChipChance: lvThunder > 0 ? 0.14 + lvThunder * 0.04 : 0,
+      bossBonusDmgMult: lvBoss > 0 ? 1.22 + lvBoss * 0.07 : 1,
+      bossDamageTakenMult: lvBoss > 0 ? Math.max(0.65, 1 - (0.1 + lvBoss * 0.03)) : 1,
+      skillCryoNova: lvCryo > 0,
+      cryoChipChance: lvCryo > 0 ? 0.12 + lvCryo * 0.04 : 0,
+      agentDamageBonus:
+        (1 + (this.data.agentLevel - 1) * 0.03) *
+        (1 + (par.might || 0) * 0.025) *
+        (lvBerserk > 0 ? 1.12 + lvBerserk * 0.05 : 1),
     };
   }
 }
