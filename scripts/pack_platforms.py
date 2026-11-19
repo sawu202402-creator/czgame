@@ -13,22 +13,27 @@ TARGETS = {
     "crazygames": {
         "zip_name": "crazygames-release.zip",
         "must_include": ["sdk.crazygames.com/crazygames-sdk-v3.js"],
-        "must_exclude": ["poki", "gamedistribution", "gdsdk"],
+        "must_exclude": ["poki", "gamedistribution", "gdsdk", "y8sdk", "cdn.y8.com"],
     },
     "poki": {
         "zip_name": "poki-release.zip",
         "must_include": ["game-cdn.poki.com/scripts/v2/poki-sdk.js"],
-        "must_exclude": ["crazygames", "gamedistribution", "gdsdk"],
+        "must_exclude": ["crazygames", "gamedistribution", "gdsdk", "y8sdk", "cdn.y8.com"],
     },
     "gamedistribution": {
         "zip_name": "gd-release.zip",
         "must_include": ["html5.api.gamedistribution.com/main.min.js", "GD_OPTIONS"],
-        "must_exclude": ["crazygames", "poki"],
+        "must_exclude": ["crazygames", "poki", "y8sdk", "cdn.y8.com"],
+    },
+    "y8": {
+        "zip_name": "y8-release.zip",
+        "must_include": ["cdn.y8.com/minimal-sdk/2-0/y8.min.js"],
+        "must_exclude": ["crazygames", "poki", "gamedistribution", "gdsdk"],
     },
     "itch": {
         "zip_name": "itch-release.zip",
         "must_include": [],
-        "must_exclude": ["crazygames", "poki", "gamedistribution", "gdsdk"],
+        "must_exclude": ["crazygames", "poki", "gamedistribution", "gdsdk", "y8sdk", "cdn.y8.com"],
     },
 }
 
@@ -51,6 +56,17 @@ def pack_target(target_key: str) -> None:
             gf.write(
                 "// Paste your 32-character GameDistribution Game ID below (from developer.gamedistribution.com)\n"
                 f'window.CZ_GD_GAME_ID = "{gd_id}";\n'
+            )
+
+    if target_key == "y8":
+        y8_app_id = os.environ.get("VITE_Y8_APP_ID", "").strip()
+        y8_game_id = os.environ.get("VITE_Y8_GAME_ID", "").strip()
+        y8_cfg_path = os.path.join(DIST_DIR, "y8-config.js")
+        with open(y8_cfg_path, "w", encoding="utf-8") as yf:
+            yf.write(
+                "// Paste your Y8 App ID & optional Game ID below (from developer.y8.com)\n"
+                f'window.CZ_Y8_APP_ID = "{y8_app_id}";\n'
+                f'window.CZ_Y8_GAME_ID = "{y8_game_id}";\n'
             )
 
     with open(index_path, "r", encoding="utf-8") as fh:
@@ -90,6 +106,8 @@ def pack_target(target_key: str) -> None:
                     continue
                 if target_key != "gamedistribution" and f == "gd-config.js":
                     continue
+                if target_key != "y8" and f == "y8-config.js":
+                    continue
                 abs_p = os.path.join(root, f)
                 rel_p = os.path.relpath(abs_p, DIST_DIR)
                 zf.write(abs_p, rel_p)
@@ -108,7 +126,7 @@ def pack_target(target_key: str) -> None:
             dst_dir = out_folder if rel_dir == "." else os.path.join(out_folder, rel_dir)
             os.makedirs(dst_dir, exist_ok=True)
             for f in sorted(files):
-                if f in EXCLUDED_ROOT_FILES or f == "gd-config.js" or f.startswith("."):
+                if f in EXCLUDED_ROOT_FILES or f in {"gd-config.js", "y8-config.js"} or f.startswith("."):
                     continue
                 shutil.copy2(os.path.join(root, f), os.path.join(dst_dir, f))
         print(f"[CRAZYGAMES] Clean drag-and-drop folder ready: {out_folder}")

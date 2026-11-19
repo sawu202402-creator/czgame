@@ -299,6 +299,7 @@ class CoopNetworkManager {
 
   private removeClientPeer(peerId: string): void {
     const existed = this.clientLastSeen.delete(peerId);
+    this.bus?.forgetPeer(peerId);
     if (this.lobby) {
       const before = this.lobby.members.length;
       this.lobby.members = this.lobby.members.filter((m) => m.peerId !== peerId);

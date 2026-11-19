@@ -2,16 +2,18 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   const rawPlatform = (process.env.VITE_PLATFORM || 'web').toLowerCase();
-  const platform: 'crazygames' | 'poki' | 'gamedistribution' | 'itch' | 'web' =
+  const platform: 'crazygames' | 'poki' | 'gamedistribution' | 'y8' | 'itch' | 'web' =
     rawPlatform === 'crazygames'
       ? 'crazygames'
       : rawPlatform === 'poki'
         ? 'poki'
         : rawPlatform === 'gamedistribution' || rawPlatform === 'gd'
           ? 'gamedistribution'
-          : rawPlatform === 'itch'
-            ? 'itch'
-            : 'web';
+          : rawPlatform === 'y8'
+            ? 'y8'
+            : rawPlatform === 'itch'
+              ? 'itch'
+              : 'web';
   const gdGameId = (process.env.VITE_GD_GAME_ID || '').trim();
 
   return {
@@ -66,6 +68,15 @@ export default defineConfig(() => {
                 '  </head>',
               ].join('\n');
               return html.replace('</head>', gdSnippet);
+            }
+            if (platform === 'y8') {
+              const y8Snippet = [
+                '    <!-- Y8 Minimal HTML5 SDK v2 -->',
+                '    <script src="./y8-config.js"></script>',
+                '    <script async src="https://cdn.y8.com/minimal-sdk/2-0/y8.min.js"></script>',
+                '  </head>',
+              ].join('\n');
+              return html.replace('</head>', y8Snippet);
             }
             return html;
           },

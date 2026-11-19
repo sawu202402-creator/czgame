@@ -1,5 +1,5 @@
-declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'web';
-const ASSET_VER_SUFFIX = __BUILD_PLATFORM__ === 'web' ? '?v=fx4' : '';
+declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'gamedistribution' | 'y8' | 'itch' | 'web';
+const ASSET_VER_SUFFIX = __BUILD_PLATFORM__ === 'web' ? '?v=fx5' : '';
 
 export type SpriteKey =
   | 'player_hero'
@@ -334,21 +334,28 @@ class GameAssetManager {
   }
 
   /**
-   * 第一阶段（冷启动极速首屏）：仅阻塞加载约 30 个核心小贴图（< 260 KB），零同步 Canvas 分配
+   * 第一阶段（冷启动极速首屏）：受控并发（8 通道防跨境突发丢包）+ 单图超时自动重试兜底
    */
   public async preloadCritical(onProgress?: (loaded: number, total: number) => void): Promise<void> {
-    const total = CRITICAL_SPRITES.length + CRITICAL_TILES.length;
+    const jobs: (() => Promise<void>)[] = [
+      ...CRITICAL_TILES.map((k) => () => this.ensureTileLoaded(k)),
+      ...CRITICAL_SPRITES.map((k) => () => this.ensureSpriteLoaded(k)),
+    ];
+    const total = jobs.length;
     let loaded = 0;
-    const bump = () => {
-      loaded += 1;
-      onProgress?.(loaded, total);
+    let cursor = 0;
+    const CONCURRENCY = 8;
+
+    const worker = async () => {
+      while (cursor < jobs.length) {
+        const idx = cursor++;
+        await jobs[idx]();
+        loaded += 1;
+        onProgress?.(loaded, total);
+      }
     };
 
-    const tasks: Promise<void>[] = [
-      ...CRITICAL_SPRITES.map((k) => this.ensureSpriteLoaded(k).then(bump)),
-      ...CRITICAL_TILES.map((k) => this.ensureTileLoaded(k).then(bump)),
-    ];
-    await Promise.all(tasks);
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, () => worker()));
   }
 
   /**
@@ -403,13 +410,38 @@ class GameAssetManager {
     ]);
   }
 
-  private loadImage(src: string): Promise<HTMLImageElement | null> {
+  private loadSingleAttempt(url: string, timeoutMs: number): Promise<HTMLImageElement | null> {
     return new Promise((resolve) => {
+      let settled = false;
       const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = `${src}${ASSET_VER_SUFFIX}`;
+      const finish = (res: HTMLImageElement | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        img.onload = null;
+        img.onerror = null;
+        if (!res) {
+          try {
+            img.src = '';
+          } catch {
+            // ignore
+          }
+        }
+        resolve(res);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      img.onload = () => finish(img);
+      img.onerror = () => finish(null);
+      img.src = url;
     });
+  }
+
+  private async loadImage(src: string): Promise<HTMLImageElement | null> {
+    const base = `${src}${ASSET_VER_SUFFIX}`;
+    const first = await this.loadSingleAttempt(base, 2800);
+    if (first) return first;
+    const sep = base.includes('?') ? '&' : '?';
+    return this.loadSingleAttempt(`${base}${sep}r=1`, 3200);
   }
 
   private createSilhouette(img: HTMLImageElement, color: string): HTMLCanvasElement {

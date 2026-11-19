@@ -10,8 +10,9 @@
     "pack:crazygames": "VITE_PLATFORM=crazygames npm run build && python3 scripts/pack_platforms.py crazygames",
     "pack:poki": "VITE_PLATFORM=poki npm run build && python3 scripts/pack_platforms.py poki",
     "pack:gd": "VITE_PLATFORM=gamedistribution npm run build && python3 scripts/pack_platforms.py gamedistribution",
+    "pack:y8": "VITE_PLATFORM=y8 npm run build && python3 scripts/pack_platforms.py y8",
     "pack:itch": "VITE_PLATFORM=itch npm run build && python3 scripts/pack_platforms.py itch",
-    "pack:all": "npm run pack:crazygames && npm run pack:poki && npm run pack:gd && npm run pack:itch && npm run build"
+    "pack:all": "npm run pack:crazygames && npm run pack:poki && npm run pack:gd && npm run pack:y8 && npm run pack:itch && npm run build"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

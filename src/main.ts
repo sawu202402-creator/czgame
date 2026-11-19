@@ -25,11 +25,17 @@ async function bootstrap() {
   const bootFill = document.getElementById('boot-bar-fill');
   const bootPct = document.getElementById('boot-pct');
 
-  await Assets.preloadCritical((loaded, total) => {
-    const pct = Math.min(100, Math.max(8, Math.round((loaded / Math.max(1, total)) * 100)));
-    if (bootFill) bootFill.style.width = `${pct}%`;
-    if (bootPct) bootPct.textContent = `${pct}%`;
-  });
+  // 跨境弱网防卡死保护：老玩家进大厅或点好友联机链接时最多等待 2.2s（新玩家最多 3.2s）即刻放行进界面，剩余贴图后台静默秒补！
+  const maxBootWaitMs =
+    SaveManager.get().tutorialDone || PlatformSDK.hasPendingInviteUrl() ? 2200 : 3200;
+  await Promise.race([
+    Assets.preloadCritical((loaded, total) => {
+      const pct = Math.min(100, Math.max(8, Math.round((loaded / Math.max(1, total)) * 100)));
+      if (bootFill) bootFill.style.width = `${pct}%`;
+      if (bootPct) bootPct.textContent = `${pct}%`;
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, maxBootWaitMs)),
+  ]);
 
   const gameRoot = document.getElementById('game-root') as HTMLElement;
   const canvas = document.getElementById('game-canvas') as HTMLCanvasElement;

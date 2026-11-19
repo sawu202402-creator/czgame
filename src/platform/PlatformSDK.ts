@@ -2,10 +2,26 @@ import { AdPlacement } from '../types';
 import { SoundFX } from '../audio/SoundFX';
 import { I18n } from '../i18n/I18n';
 
-declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'gamedistribution' | 'itch' | 'web';
+declare const __BUILD_PLATFORM__: 'crazygames' | 'poki' | 'gamedistribution' | 'y8' | 'itch' | 'web';
 
 interface GdSdkEvent {
   name?: string;
+}
+
+interface Y8AdOptions {
+  type: 'start' | 'pause' | 'next' | 'browse' | 'reward';
+  name?: string;
+  beforeAd?: () => void;
+  afterAd?: () => void;
+  beforeReward?: (showAdFn: () => void) => void;
+  adViewed?: () => void;
+  adDismissed?: () => void;
+  adBreakDone?: (info?: unknown) => void;
+}
+
+interface Y8SdkInstance {
+  init: (appConfig: Record<string, unknown>, adConfig?: Record<string, unknown>) => void;
+  showAd: (opts: Y8AdOptions) => Promise<void>;
 }
 
 declare global {
@@ -79,6 +95,12 @@ declare global {
       preloadAd?: (adType: string) => Promise<void>;
       Rewarded?: string;
     };
+    y8?: {
+      sdk: () => Y8SdkInstance;
+      emitReadyEvent?: () => void;
+    };
+    CZ_Y8_APP_ID?: string;
+    CZ_Y8_GAME_ID?: string;
     __gdEventQueue?: GdSdkEvent[];
     __onGdSdkEvent?: (ev: GdSdkEvent) => void;
   }
@@ -93,11 +115,61 @@ class PlatformAdapter {
   private pauseHook: ((paused: boolean) => void) | null = null;
   private gdRewardEarned = false;
   private gdAdResumeResolver: (() => void) | null = null;
+  private y8Instance: Y8SdkInstance | null = null;
 
   public async init(onPauseChange: (paused: boolean) => void): Promise<void> {
     this.pauseHook = onPauseChange;
     if (this.initialized) return;
     this.initialized = true;
+
+    if (__BUILD_PLATFORM__ === 'y8') {
+      const bootY8 = () => {
+        if (this.y8Instance || !window.y8?.sdk) return;
+        try {
+          const inst = window.y8.sdk();
+          const appId = (window.CZ_Y8_APP_ID || '').trim();
+          const gameId = (window.CZ_Y8_GAME_ID || '').trim();
+          const appConfig: Record<string, unknown> = {
+            appId: appId || 'PASTE_Y8_APP_ID_IN_Y8_CONFIG_JS',
+            autoLogin: false,
+          };
+          const adConfig: Record<string, unknown> = {
+            preloadAdBreaks: 'auto',
+            sound: 'on',
+          };
+          if (gameId) {
+            adConfig.gameId = gameId;
+          }
+          inst.init(appConfig, adConfig);
+          this.y8Instance = inst;
+          this.sdkActive = true;
+        } catch {
+          this.sdkActive = false;
+        }
+      };
+
+      window.addEventListener('y8sdk.ready', bootY8, { once: true });
+      try {
+        window.y8?.emitReadyEvent?.();
+      } catch {
+        // ignore
+      }
+      bootY8();
+      if (!this.y8Instance) {
+        await new Promise<void>((resolve) => {
+          let checks = 0;
+          const timer = setInterval(() => {
+            bootY8();
+            checks++;
+            if (this.y8Instance || checks >= 10) {
+              clearInterval(timer);
+              resolve();
+            }
+          }, 50);
+        });
+      }
+      return;
+    }
 
     if (__BUILD_PLATFORM__ === 'gamedistribution') {
       const handleGdEvent = (ev: GdSdkEvent) => {
@@ -296,6 +368,36 @@ class PlatformAdapter {
     }
 
     this.gameplayStop();
+
+    if (__BUILD_PLATFORM__ === 'y8' && this.sdkActive && this.y8Instance?.showAd) {
+      SoundFX.setAdMuted(true);
+      this.pauseHook?.(true);
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            this.y8Instance!
+              .showAd({
+                type: 'next',
+                name: 'mission-break',
+                beforeAd: () => {
+                  SoundFX.setAdMuted(true);
+                },
+                afterAd: () => resolve(),
+                adDismissed: () => resolve(),
+                adBreakDone: () => resolve(),
+              })
+              .catch(() => resolve());
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 12_000)),
+        ]);
+      } catch {
+        // ignore
+      }
+      this.lastAdFinishedAt = performance.now();
+      SoundFX.setAdMuted(false);
+      this.pauseHook?.(false);
+      return;
+    }
 
     if (__BUILD_PLATFORM__ === 'gamedistribution' && this.sdkActive && window.gdsdk?.showAd) {
       SoundFX.setAdMuted(true);
@@ -621,6 +723,53 @@ class PlatformAdapter {
       }
       return success;
     };
+
+    if (__BUILD_PLATFORM__ === 'y8' && this.sdkActive && this.y8Instance?.showAd) {
+      let viewed = false;
+      try {
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            this.y8Instance!
+              .showAd({
+                type: 'reward',
+                name: placement,
+                beforeAd: () => {
+                  SoundFX.setAdMuted(true);
+                },
+                beforeReward: (showAdFn) => {
+                  try {
+                    showAdFn();
+                  } catch {
+                    resolve();
+                  }
+                },
+                adViewed: () => {
+                  viewed = true;
+                },
+                adDismissed: () => resolve(),
+                afterAd: () => resolve(),
+                adBreakDone: () => resolve(),
+              })
+              .catch(() => resolve());
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 45_000)),
+        ]);
+      } catch {
+        // ignore
+      }
+      if (viewed) {
+        return finish(true);
+      }
+      const isLocal =
+        typeof location !== 'undefined' &&
+        (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+      if (isLocal) {
+        const ok = await this.runMockAdModal(placement, rewardTitle);
+        return finish(ok);
+      }
+      this.showAdUnavailableNotice();
+      return finish(false);
+    }
 
     if (__BUILD_PLATFORM__ === 'gamedistribution' && this.sdkActive && window.gdsdk?.showAd) {
       this.gdRewardEarned = false;

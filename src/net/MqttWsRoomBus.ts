@@ -1,5 +1,6 @@
 const BROKER_URLS = [
   'wss://broker.emqx.io:8084/mqtt',
+  'wss://mqtt.eclipseprojects.io:443/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
 ];
 
@@ -232,17 +233,21 @@ export interface RoomWireEnvelope<T> {
 }
 
 /**
- * 单主节点低抖动 WSS 房间总线（主节点不可达时自动切换备用节点，杜绝双节点跨洲延迟差导致的位置乱跳）
+ * 多节点并行寻房 + 单优链路自动锁定 WSS 房间总线：
+ * - 同时尝试 8084 (EMQX 亚太高速) / 443 (标准 HTTPS 端口防手机运营商防火墙拦截) / 8884 (HiveMQ 全球)
+ * - 建房/加房握手期跨全部可达节点广播寻房，彻底根除“房主在 A 服、好友切到 B 服”的主备脑裂连不上问题！
+ * - 一旦收到对端数据包立即记录对端所在的最优互通节点，局内高频同步仅走唯一互通单链路，零重复包、零跨洲乱序抖动！
  */
 export class MqttWsRoomBus<T extends { type?: string }> {
-  private activeLink: SingleMqttLink | null = null;
+  private links: (SingleMqttLink | null)[] = new Array(BROKER_URLS.length).fill(null);
+  private retryTimers: number[] = new Array(BROKER_URLS.length).fill(0);
+  private peerBrokerMap = new Map<string, number>();
   private seenIds = new Set<string>();
   private seenQueue: string[] = [];
   private seq = 0;
   private openedOnce = false;
   private closed = false;
-  private failoverTimer = 0;
-  private brokerIndex = 0;
+  private allFailTimer = 0;
   private topic: string;
 
   constructor(
@@ -254,40 +259,31 @@ export class MqttWsRoomBus<T extends { type?: string }> {
     private onReconnected?: () => void
   ) {
     this.topic = `czgame/room/v2/${roomCode}`;
-    this.openBroker(0);
+    for (let i = 0; i < BROKER_URLS.length; i++) {
+      this.openBrokerLink(i);
+    }
+    this.allFailTimer = window.setTimeout(() => {
+      if (!this.openedOnce && !this.closed) {
+        this.onAllFailed();
+      }
+    }, 5500);
   }
 
-  private openBroker(idx: number): void {
+  private openBrokerLink(idx: number): void {
     if (this.closed) return;
-    if (idx >= BROKER_URLS.length) {
-      if (!this.openedOnce) {
-        this.onAllFailed();
-      } else {
-        // 已建立过房间时短暂重连主节点
-        this.failoverTimer = window.setTimeout(() => this.openBroker(0), 1200);
-      }
-      return;
-    }
-
-    this.brokerIndex = idx;
-    this.activeLink?.close();
+    window.clearTimeout(this.retryTimers[idx]);
+    this.links[idx]?.close();
 
     const url = BROKER_URLS[idx];
-    const cid = `cz_${this.myPeerId}_${idx}_${Math.floor(Math.random() * 9999)}`;
+    const cid = `cz_${this.myPeerId}_${idx}_${Math.floor(Math.random() * 99999)}`;
 
-    window.clearTimeout(this.failoverTimer);
-    this.failoverTimer = window.setTimeout(() => {
-      if (!this.activeLink?.ready && !this.closed) {
-        this.openBroker(idx + 1);
-      }
-    }, 3400);
-
-    this.activeLink = new SingleMqttLink(
+    this.links[idx] = new SingleMqttLink(
       url,
       cid,
       this.topic,
       () => {
-        window.clearTimeout(this.failoverTimer);
+        if (this.closed) return;
+        window.clearTimeout(this.allFailTimer);
         if (!this.openedOnce) {
           this.openedOnce = true;
           this.onConnected();
@@ -295,16 +291,17 @@ export class MqttWsRoomBus<T extends { type?: string }> {
           this.onReconnected?.();
         }
       },
-      (batchTexts) => this.handleBatch(batchTexts),
+      (batchTexts) => this.handleBatch(batchTexts, idx),
       () => {
         if (this.closed) return;
-        window.clearTimeout(this.failoverTimer);
-        this.openBroker(this.brokerIndex + 1);
+        this.retryTimers[idx] = window.setTimeout(() => {
+          this.openBrokerLink(idx);
+        }, 3600);
       }
     );
   }
 
-  private handleBatch(batchTexts: string[]): void {
+  private handleBatch(batchTexts: string[], sourceBrokerIdx: number): void {
     // 同一 TCP 接收批次内如果积压了多帧高频快照（world_sync / players_fast / player_sync），只保留最新一帧，彻底消除瞬间卡顿！
     const parsed: RoomWireEnvelope<T>[] = [];
     let latestWorldIdx = -1;
@@ -317,6 +314,9 @@ export class MqttWsRoomBus<T extends { type?: string }> {
         if (!env || !env.id || !env.from || env.from === this.myPeerId) continue;
         if (env.exclude && env.exclude === this.myPeerId) continue;
         if (env.to !== '*' && env.to !== this.myPeerId) continue;
+
+        // 锁定该对端最新可达的互通 Broker 索引，后续发往该对端的包直接走此互通节点！
+        this.peerBrokerMap.set(env.from, sourceBrokerIdx);
 
         if (this.seenIds.has(env.id)) continue;
         this.seenIds.add(env.id);
@@ -352,12 +352,28 @@ export class MqttWsRoomBus<T extends { type?: string }> {
     }
   }
 
+  private getReadyLinks(): { idx: number; link: SingleMqttLink }[] {
+    const out: { idx: number; link: SingleMqttLink }[] = [];
+    for (let i = 0; i < this.links.length; i++) {
+      const l = this.links[i];
+      if (l && l.ready) out.push({ idx: i, link: l });
+    }
+    return out;
+  }
+
   public isCongested(): boolean {
-    return !this.activeLink || !this.activeLink.ready || this.activeLink.getBufferedAmount() > 24_576;
+    const ready = this.getReadyLinks();
+    if (ready.length === 0) return true;
+    for (const { link } of ready) {
+      if (link.getBufferedAmount() <= 24_576) return false;
+    }
+    return true;
   }
 
   public send(to: string, msg: T, exclude?: string): void {
-    if (!this.activeLink || !this.activeLink.ready) return;
+    const ready = this.getReadyLinks();
+    if (ready.length === 0) return;
+
     this.seq = (this.seq + 1) % 1_000_000;
     const env: RoomWireEnvelope<T> = {
       id: `${this.myPeerId}:${this.seq.toString(36)}`,
@@ -366,13 +382,53 @@ export class MqttWsRoomBus<T extends { type?: string }> {
       ...(exclude ? { exclude } : {}),
       msg,
     };
-    this.activeLink.publish(JSON.stringify(env));
+    const wire = JSON.stringify(env);
+
+    // 1) 单播：如果已知目标对端所在的互通节点且在线，精准单发；否则（如首次 join_req 寻房）向所有在线节点同时探活！
+    if (to !== '*') {
+      const knownIdx = this.peerBrokerMap.get(to);
+      if (knownIdx !== undefined) {
+        const knownLink = this.links[knownIdx];
+        if (knownLink && knownLink.ready) {
+          knownLink.publish(wire);
+          return;
+        }
+      }
+      for (const { link } of ready) {
+        link.publish(wire);
+      }
+      return;
+    }
+
+    // 2) 广播：仅在已知队友所在的最小互通节点集合上发送（2人同服时仅发 1 条链路，零冗余抖动！）
+    const activePeerBrokers = new Set<number>();
+    for (const [peerId, bIdx] of this.peerBrokerMap.entries()) {
+      if (exclude && peerId === exclude) continue;
+      if (this.links[bIdx]?.ready) {
+        activePeerBrokers.add(bIdx);
+      }
+    }
+    if (activePeerBrokers.size > 0) {
+      for (const bIdx of activePeerBrokers) {
+        this.links[bIdx]!.publish(wire);
+      }
+    } else {
+      ready[0].link.publish(wire);
+    }
+  }
+
+  public forgetPeer(peerId: string): void {
+    this.peerBrokerMap.delete(peerId);
   }
 
   public close(): void {
     this.closed = true;
-    window.clearTimeout(this.failoverTimer);
-    this.activeLink?.close();
-    this.activeLink = null;
+    window.clearTimeout(this.allFailTimer);
+    for (let i = 0; i < this.links.length; i++) {
+      window.clearTimeout(this.retryTimers[i]);
+      this.links[i]?.close();
+      this.links[i] = null;
+    }
+    this.peerBrokerMap.clear();
   }
 }
