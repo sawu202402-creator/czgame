@@ -59,6 +59,7 @@ const DEFAULT_SAVE: SaveData = {
   freeStarterUsedCount: 0,
   freeHqSupportUsed: false,
   autoBuyAmmo: false,
+  aiSquadCount: 2,
   daily: {
     dateKey: '',
     lastSignDate: '',
@@ -205,6 +206,10 @@ class SaveService {
             typeof parsed.tutorialDone === 'boolean'
               ? parsed.tutorialDone
               : (parsed.totalRuns || 0) > 0,
+          aiSquadCount:
+            typeof parsed.aiSquadCount === 'number'
+              ? Math.max(0, Math.min(3, Math.round(parsed.aiSquadCount)))
+              : 2,
           upgrades: {
             ...DEFAULT_SAVE.upgrades,
             ...(parsed.upgrades || {}),
@@ -251,6 +256,17 @@ class SaveService {
   public get(): SaveData {
     this.syncDailyDate();
     return this.data;
+  }
+
+  public getAiSquadCount(): number {
+    return typeof this.data.aiSquadCount === 'number'
+      ? Math.max(0, Math.min(3, Math.round(this.data.aiSquadCount)))
+      : 2;
+  }
+
+  public setAiSquadCount(count: number): void {
+    this.data.aiSquadCount = Math.max(0, Math.min(3, Math.round(count)));
+    this.save();
   }
 
   public save(): void {

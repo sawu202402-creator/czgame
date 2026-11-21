@@ -102,6 +102,17 @@ async function bootstrap() {
     }
 
     const portraitOnMobile = (isMobileTouchDevice() || input.usingTouch) && viewH > viewW;
+    const isDesktopCompact = !isMobileTouchDevice() && !input.usingTouch && (viewW < 1040 || viewH < 580);
+    if (isDesktopCompact) {
+      const uiScale = Math.min(1, Math.max(0.56, Math.min(viewW / 1060, viewH / 600)));
+      uiLayer.style.width = `${(100 / uiScale).toFixed(3)}%`;
+      uiLayer.style.height = `${(100 / uiScale).toFixed(3)}%`;
+      uiLayer.style.transform = `scale(${uiScale.toFixed(4)})`;
+    } else {
+      uiLayer.style.width = '100%';
+      uiLayer.style.height = '100%';
+      uiLayer.style.transform = 'none';
+    }
     landscapeGuard.classList.toggle('visible', portraitOnMobile);
     if (engine.landscapePaused !== portraitOnMobile) {
       engine.landscapePaused = portraitOnMobile;

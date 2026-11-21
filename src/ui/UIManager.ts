@@ -367,6 +367,13 @@ export class UIManager {
       };
     });
 
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-bot-pick]').forEach((btn) => {
+      btn.onclick = () => {
+        SaveManager.setAiSquadCount(Number(btn.dataset.botPick || '0'));
+        this.showHomeHub();
+      };
+    });
+
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-upg-sub]').forEach((btn) => {
       btn.onclick = () => {
         this.upgSubTab = btn.dataset.upgSub as 'core' | 'mastery' | 'endgame';
@@ -741,6 +748,15 @@ export class UIManager {
                 .map((t) => {
                   const tm = DIFFICULTY_TIERS[t];
                   return `<button class="seg-btn tier-btn-${t} ${this.selectedTier === t ? 'active' : ''}" data-tier-pick="${t}">${I18n.isZh() ? tm.zhName : tm.enName}</button>`;
+                })
+                .join('')}
+            </div>
+            <div class="seg-group bot-seg-group">
+              ${([0, 1, 2, 3] as const)
+                .map((bc) => {
+                  const curBots = SaveManager.getAiSquadCount();
+                  const lblKey = bc === 0 ? 'botSolo' : bc === 1 ? 'botSquad1' : bc === 2 ? 'botSquad2' : 'botSquad3';
+                  return `<button class="seg-btn ${curBots === bc ? 'active' : ''}" data-bot-pick="${bc}">${I18n.t(lblKey)}</button>`;
                 })
                 .join('')}
             </div>
@@ -1725,9 +1741,15 @@ export class UIManager {
           <span id="pc-armory-txt">${I18n.t('pcArmoryLabel')}</span>
         </button>
       </div>
+      <button class="door-trap-hud-btn" id="btn-door-trap" type="button" style="display:none"></button>
     `;
     this.uiLayer.appendChild(hud);
     this.hudRoot = hud;
+
+    const doorTrapBtn = hud.querySelector('#btn-door-trap') as HTMLButtonElement;
+    this.bindCombatTap(doorTrapBtn, () => {
+      this.engine.tryActivateNearestDoorTrap();
+    });
 
     const pauseBtn = hud.querySelector('#btn-pause') as HTMLButtonElement;
     pauseBtn.title = I18n.t('pcPauseHint');
@@ -2535,18 +2557,19 @@ export class UIManager {
       (this.hudRoot!.querySelector('#hud-wave') as HTMLElement).textContent = waveStr;
     });
 
-    const squadSig = s.isCoop
-      ? `${I18n.lang}|` +
-        s.remotePlayers
-          .map(
-            (rp) =>
-              `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}`
-          )
-          .join('|')
-      : '';
+    const squadSig =
+      s.remotePlayers.length > 0
+        ? `${I18n.lang}|` +
+          s.remotePlayers
+            .map(
+              (rp) =>
+                `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}:${rp.isBot ? 1 : 0}`
+            )
+            .join('|')
+        : '';
     setIfChanged('squadHud', squadSig, () => {
       const sqEl = this.hudRoot!.querySelector('#hud-squad-list') as HTMLElement;
-      if (!s.isCoop || s.remotePlayers.length === 0) {
+      if (s.remotePlayers.length === 0) {
         sqEl.innerHTML = '';
         return;
       }
@@ -2557,7 +2580,9 @@ export class UIManager {
             ? I18n.t('squadWaitWave')
             : rp.downed
               ? I18n.t('squadSOS', { s: Math.ceil(rp.bleedoutTimer) })
-              : `$${rp.cash}`;
+              : rp.isBot
+                ? I18n.t('botRoleTag')
+                : `$${rp.cash}`;
           return `
             <div class="squad-hud-chip ${rp.downed ? 'is-downed' : ''}">
               <span class="sq-dot" style="background:${rp.color}"></span>
@@ -2568,6 +2593,19 @@ export class UIManager {
           `;
         })
         .join('');
+    });
+
+    const readyTrap = this.engine.getNearestReadyDoorTrap();
+    const trapKey = readyTrap ? `${I18n.lang}:${readyTrap.door.id}:${readyTrap.cost}` : 'none';
+    setIfChanged('doorTrapBtn', trapKey, () => {
+      const tBtn = this.hudRoot!.querySelector('#btn-door-trap') as HTMLButtonElement | null;
+      if (!tBtn) return;
+      if (!readyTrap) {
+        tBtn.style.display = 'none';
+      } else {
+        tBtn.style.display = 'inline-flex';
+        tBtn.textContent = I18n.t('doorTrapBtn', { cost: readyTrap.cost });
+      }
     });
 
     const bossTarget =

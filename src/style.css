@@ -41,8 +41,33 @@ button {
 
 #ui-layer {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: top left;
   pointer-events: none;
+}
+
+/* 优雅极细深色滚动条（彻底消除小窗口嵌入时的刺眼白色系统滚动条） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.42) rgba(9, 14, 23, 0.55);
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: rgba(9, 14, 23, 0.55);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.44);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.68);
 }
 
 /* ==================== 通用干净按钮与胶囊切换器 ==================== */
@@ -1681,7 +1706,7 @@ button {
   border-radius: 18px;
   padding: 20px;
   width: 100%;
-  max-height: 90dvh;
+  max-height: 90%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -1789,7 +1814,7 @@ button {
   padding: 14px 16px;
   max-width: 780px;
   width: 100%;
-  max-height: 88dvh;
+  max-height: 89%;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2448,7 +2473,7 @@ button {
   /* 横屏矮视口弹窗与军火库三列紧凑排布 */
   .popup-box {
     padding: 12px 16px;
-    max-height: 92dvh;
+    max-height: 92%;
   }
   .compact-modal {
     max-width: 460px;
@@ -2467,7 +2492,7 @@ button {
   .armory-modal {
     padding: 8px 12px;
     gap: 7px;
-    max-height: 93dvh;
+    max-height: 93%;
   }
   .armory-header {
     padding: 5px 10px;
@@ -3712,11 +3737,11 @@ body.pc-combat-cursor #game-canvas {
     display: none;
   }
   .armory-modal {
-    max-height: 92vh;
+    max-height: 92%;
     padding: 10px 12px;
   }
   .popup-box {
-    max-height: 92vh;
+    max-height: 92%;
     overflow-y: auto;
     padding: 14px 16px;
   }
@@ -4061,6 +4086,36 @@ body.pc-combat-cursor #game-canvas {
   margin-top: 2px;
 }
 
+/* AI 特警小队切换器 & 门框高压电网快捷触发胶囊 */
+.bot-seg-group .seg-btn.active {
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
+  color: #ffffff;
+}
 
+.door-trap-hud-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  transform: translateX(-50%);
+  z-index: 12;
+  background: linear-gradient(180deg, rgba(14, 116, 144, 0.96), rgba(15, 23, 42, 0.96));
+  color: #e0f2fe;
+  border: 2px solid #38bdf8;
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.45), 0 4px 0 #020617;
+  white-space: nowrap;
+  transition: transform 0.1s ease, filter 0.12s ease;
+}
 
+.door-trap-hud-btn:hover {
+  filter: brightness(1.12);
+}
 
+.door-trap-hud-btn:active {
+  transform: translateX(-50%) translateY(1px);
+}

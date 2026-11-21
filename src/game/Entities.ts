@@ -33,6 +33,23 @@ export interface RuntimeDoor extends DoorConfig {
   unlocked: boolean;
   progress: number;
   paidAmount: number;
+  trapActiveTimer?: number;
+  trapCooldown?: number;
+  trapTickTimer?: number;
+}
+
+export interface DyingZombieFX {
+  kind: ZombieKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  angle: number;
+  spin: number;
+  color: string;
+  life: number;
+  maxLife: number;
 }
 
 export interface RuntimeStation extends StationConfig {
@@ -342,6 +359,7 @@ export interface RunSnapshot {
   walls: Rect[];
   barrels: BarrelEntity[];
   zombies: ZombieEntity[];
+  dyingZombies: DyingZombieFX[];
   bullets: BulletEntity[];
   grenadesThrown: GrenadeEntity[];
   explosions: ExplosionFX[];

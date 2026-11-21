@@ -102,6 +102,10 @@ export interface RemotePlayerState {
   invulnTimer: number;
   cash: number;
   kills: number;
+  isBot?: boolean;
+  botFireCd?: number;
+  botOrbitSeed?: number;
+  botStuckTimer?: number;
 }
 
 export interface PlayerSyncPayload {

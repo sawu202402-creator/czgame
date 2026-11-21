@@ -145,7 +145,8 @@ export class CartoonRenderer {
     // 7. 自动机枪塔与机械警犬伙伴
     this.drawTurretsAndDog(ctx, state);
 
-    // 8. 纯正俯视角动态步态僵尸群与酸液弹
+    // 8. 击杀滑退残影、纯正俯视角动态步态僵尸群与酸液弹
+    this.drawDyingZombies(ctx, state);
     this.drawZombies(ctx, state);
     this.drawSpits(ctx, state);
 
@@ -163,6 +164,8 @@ export class CartoonRenderer {
     // 10.5 断电夜战手电筒与夜视仪光束遮罩层（地铁站 / 核地堡 / 炼狱模式）
     if (state.blackoutTimer > 0) {
       this.drawBlackoutFlashlight(ctx, viewW, viewH, state, camX, camY, zoom);
+    } else {
+      this.drawScreenVignette(ctx, viewW, viewH);
     }
 
     // 11. 屏幕层：雷达小地图（手机端自动避让左拇指摇杆区）、屏幕外目标箭头、触屏双摇杆、PC战术准星
@@ -287,6 +290,26 @@ export class CartoonRenderer {
 
       for (const r of room.rects) {
         mctx.fillStyle = pat || '#475569';
+        mctx.fillRect(r.x, r.y, r.w, r.h);
+
+        // 压暗高亮度浅色地砖底色，拉高角色、曳光弹与光影的电影级明暗对比度！
+        const glazeAlpha =
+          room.floorTheme === 'mall' || room.floorTheme === 'hospital'
+            ? 0.25
+            : room.floorTheme === 'lobby'
+              ? 0.21
+              : 0.1;
+        mctx.fillStyle = `rgba(9, 14, 26, ${glazeAlpha})`;
+        mctx.fillRect(r.x, r.y, r.w, r.h);
+
+        // 房间四角柔和暗角聚光衬底
+        const cx = r.x + r.w * 0.5;
+        const cy = r.y + r.h * 0.5;
+        const maxR = Math.hypot(r.w * 0.5, r.h * 0.5);
+        const rVig = mctx.createRadialGradient(cx, cy, maxR * 0.36, cx, cy, maxR * 1.04);
+        rVig.addColorStop(0, 'rgba(2, 6, 23, 0)');
+        rVig.addColorStop(1, 'rgba(2, 6, 23, 0.34)');
+        mctx.fillStyle = rVig;
         mctx.fillRect(r.x, r.y, r.w, r.h);
 
         // 房间内侧战术装饰地垫/地砖缝隙/警戒标线/地漏格栅
@@ -1286,39 +1309,41 @@ export class CartoonRenderer {
   }
 
   private bakeWallAmbientOcclusion(mctx: CanvasRenderingContext2D, walls: Rect[]): void {
-    const aoSize = 30;
+    const aoSize = 50;
     for (const w of walls) {
       // 东南向主光源墙体厚投影
-      mctx.fillStyle = 'rgba(2, 6, 23, 0.34)';
-      mctx.fillRect(w.x + 7, w.y + 10, w.w, w.h);
+      mctx.fillStyle = 'rgba(2, 6, 23, 0.46)';
+      mctx.fillRect(w.x + 8, w.y + 11, w.w, w.h);
 
       // 南侧柔和墙根 AO
       const gs = mctx.createLinearGradient(0, w.y + w.h, 0, w.y + w.h + aoSize);
-      gs.addColorStop(0, 'rgba(2, 6, 23, 0.48)');
+      gs.addColorStop(0, 'rgba(2, 6, 23, 0.62)');
+      gs.addColorStop(0.45, 'rgba(2, 6, 23, 0.24)');
       gs.addColorStop(1, 'rgba(2, 6, 23, 0)');
       mctx.fillStyle = gs;
-      mctx.fillRect(w.x - 4, w.y + w.h, w.w + 8, aoSize);
+      mctx.fillRect(w.x - 6, w.y + w.h, w.w + 12, aoSize);
 
       // 北侧柔和墙根 AO
-      const gn = mctx.createLinearGradient(0, w.y, 0, w.y - aoSize * 0.72);
-      gn.addColorStop(0, 'rgba(2, 6, 23, 0.36)');
+      const gn = mctx.createLinearGradient(0, w.y, 0, w.y - aoSize * 0.78);
+      gn.addColorStop(0, 'rgba(2, 6, 23, 0.48)');
       gn.addColorStop(1, 'rgba(2, 6, 23, 0)');
       mctx.fillStyle = gn;
-      mctx.fillRect(w.x - 4, w.y - aoSize * 0.72, w.w + 8, aoSize * 0.72);
+      mctx.fillRect(w.x - 6, w.y - aoSize * 0.78, w.w + 12, aoSize * 0.78);
 
       // 东侧柔和墙根 AO
       const ge = mctx.createLinearGradient(w.x + w.w, 0, w.x + w.w + aoSize, 0);
-      ge.addColorStop(0, 'rgba(2, 6, 23, 0.44)');
+      ge.addColorStop(0, 'rgba(2, 6, 23, 0.56)');
+      ge.addColorStop(0.45, 'rgba(2, 6, 23, 0.2)');
       ge.addColorStop(1, 'rgba(2, 6, 23, 0)');
       mctx.fillStyle = ge;
-      mctx.fillRect(w.x + w.w, w.y - 4, aoSize, w.h + 8);
+      mctx.fillRect(w.x + w.w, w.y - 6, aoSize, w.h + 12);
 
       // 西侧柔和墙根 AO
-      const gw = mctx.createLinearGradient(w.x, 0, w.x - aoSize * 0.72, 0);
-      gw.addColorStop(0, 'rgba(2, 6, 23, 0.34)');
+      const gw = mctx.createLinearGradient(w.x, 0, w.x - aoSize * 0.78, 0);
+      gw.addColorStop(0, 'rgba(2, 6, 23, 0.46)');
       gw.addColorStop(1, 'rgba(2, 6, 23, 0)');
       mctx.fillStyle = gw;
-      mctx.fillRect(w.x - aoSize * 0.72, w.y - 4, aoSize * 0.72, w.h + 8);
+      mctx.fillRect(w.x - aoSize * 0.78, w.y - 6, aoSize * 0.78, w.h + 12);
     }
   }
 
@@ -2119,6 +2144,95 @@ export class CartoonRenderer {
             ctx.fillRect(door.x + 2, door.y + door.h - 10, door.w - 4, 10);
           }
         }
+
+        // 门框高压激光电网机关视觉表现（激活光束 / 充能倒计时 / 近身就绪提示）
+        if (!state.stage.isTutorial) {
+          const trapActive = door.trapActiveTimer || 0;
+          const trapCd = door.trapCooldown || 0;
+          const p1x = door.orientation === 'horizontal' ? door.x + 11 : cx;
+          const p1y = door.orientation === 'horizontal' ? cy : door.y + 11;
+          const p2x = door.orientation === 'horizontal' ? door.x + door.w - 11 : cx;
+          const p2y = door.orientation === 'horizontal' ? cy : door.y + door.h - 11;
+
+          if (trapActive > 0) {
+            const pulse = 0.72 + Math.sin(performance.now() * 0.025) * 0.24;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = `rgba(56, 189, 248, ${0.38 * pulse})`;
+            ctx.lineWidth = 14;
+            ctx.beginPath();
+            ctx.moveTo(p1x, p1y);
+            ctx.lineTo(p2x, p2y);
+            ctx.stroke();
+
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4.2;
+            ctx.beginPath();
+            ctx.moveTo(p1x, p1y);
+            ctx.lineTo(p2x, p2y);
+            ctx.stroke();
+
+            // 跳动高压电弧折线
+            ctx.strokeStyle = '#e0f2fe';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(p1x, p1y);
+            const segs = 5;
+            const tNow = performance.now() * 0.04;
+            for (let sIdx = 1; sIdx < segs; sIdx++) {
+              const frac = sIdx / segs;
+              const jiggle = Math.sin(tNow + sIdx * 2.7) * 7;
+              const jx = p1x + (p2x - p1x) * frac + (door.orientation === 'horizontal' ? 0 : jiggle);
+              const jy = p1y + (p2y - p1y) * frac + (door.orientation === 'horizontal' ? jiggle : 0);
+              ctx.lineTo(jx, jy);
+            }
+            ctx.lineTo(p2x, p2y);
+            ctx.stroke();
+
+            this.drawCachedLabel(
+              ctx,
+              I18n.t('doorTrapActive', { s: Math.ceil(trapActive) }),
+              cx,
+              cy - 18,
+              '#67e8f9',
+              10.5
+            );
+          } else {
+            // 两侧门柱能量发射端节点指示灯
+            const readyCol = trapCd > 0 ? '#64748b' : '#38bdf8';
+            for (const [ex, ey] of [
+              [p1x, p1y],
+              [p2x, p2y],
+            ]) {
+              ctx.beginPath();
+              ctx.arc(ex, ey, 4.2, 0, Math.PI * 2);
+              ctx.fillStyle = readyCol;
+              ctx.fill();
+            }
+            const distPlayer = Math.hypot(state.player.x - cx, state.player.y - cy);
+            if (distPlayer < 108) {
+              if (trapCd > 0) {
+                this.drawCachedLabel(
+                  ctx,
+                  I18n.t('doorTrapCd', { s: Math.ceil(trapCd) }),
+                  cx,
+                  cy - 16,
+                  '#94a3b8',
+                  10
+                );
+              } else {
+                const trapCost = 80 + (state.stage.index - 1) * 15;
+                this.drawCachedLabel(
+                  ctx,
+                  I18n.t('doorTrapWorldReady', { cost: trapCost }),
+                  cx,
+                  cy - 16,
+                  '#7dd3fc',
+                  10.5
+                );
+              }
+            }
+          }
+        }
         ctx.restore();
         continue;
       }
@@ -2298,6 +2412,22 @@ export class CartoonRenderer {
   }
 
   // ==================== 写实俯视僵尸群 ====================
+
+  private drawDyingZombies(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    if (!state.dyingZombies || state.dyingZombies.length === 0) return;
+    for (const dz of state.dyingZombies) {
+      if (!this.inView(dz.x, dz.y, 90)) continue;
+      const spKey = ZOMBIE_SPRITE_BY_KIND[dz.kind] || 'zombie_walker';
+      const pct = Math.max(0, Math.min(1, dz.life / Math.max(0.01, dz.maxLife)));
+      const drawSize = dz.radius * 3.55 * (0.9 + pct * 0.16);
+      ctx.save();
+      ctx.translate(dz.x, dz.y);
+      ctx.globalAlpha = Math.min(1, pct * 1.35);
+      ctx.rotate(dz.angle);
+      this.drawEntitySpriteWithFlash(ctx, spKey, drawSize, 0, 1.08, 0.92, pct > 0.68);
+      ctx.restore();
+    }
+  }
 
   private drawZombies(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
     const frozen = state.powerUpTimers.freeze > 0;
@@ -2521,7 +2651,7 @@ export class CartoonRenderer {
   // ==================== 联机队友渲染与全身骨骼特种兵主角 ====================
 
   private drawRemotePlayers(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
-    if (!state.isCoop || state.remotePlayers.length === 0) return;
+    if (state.remotePlayers.length === 0) return;
     const now = performance.now();
     const rigScale = 0.68;
 
@@ -2799,7 +2929,7 @@ export class CartoonRenderer {
         '#fca5a5',
         11
       );
-    } else if (state.isCoop) {
+    } else if (state.isCoop || state.remotePlayers.length > 0) {
       this.drawCachedLabel(ctx, `${state.localCallsign}${I18n.t('meSuffix')}`, 0, -p.radius - 28, '#bae6fd', 10);
     }
 
@@ -3682,6 +3812,20 @@ export class CartoonRenderer {
 
   // ==================== 屏幕层紧凑战术雷达与指示器 ====================
 
+  private drawScreenVignette(ctx: CanvasRenderingContext2D, viewW: number, viewH: number): void {
+    const cx = viewW * 0.5;
+    const cy = viewH * 0.5;
+    const outerR = Math.hypot(cx, cy);
+    const g = ctx.createRadialGradient(cx, cy, outerR * 0.54, cx, cy, outerR * 1.04);
+    g.addColorStop(0, 'rgba(2, 6, 23, 0)');
+    g.addColorStop(0.76, 'rgba(2, 6, 23, 0.14)');
+    g.addColorStop(1, 'rgba(2, 6, 23, 0.44)');
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, viewW, viewH);
+    ctx.restore();
+  }
+
   private drawTacticalMinimap(
     ctx: CanvasRenderingContext2D,
     viewW: number,
@@ -3751,8 +3895,8 @@ export class CartoonRenderer {
       ctx.fillRect(ox + z.x * scale - sz / 2, oy + z.y * scale - sz / 2, sz, sz);
     }
 
-    // 小地图联机队友点位
-    if (state.isCoop) {
+    // 小地图联机与 AI 特警队友点位
+    if (state.remotePlayers.length > 0) {
       for (const rp of state.remotePlayers) {
         if (rp.spectating) continue;
         ctx.fillStyle = rp.downed ? '#ef4444' : rp.color;
@@ -3786,7 +3930,7 @@ export class CartoonRenderer {
   ): void {
     const zoom = state.camera.zoom;
     const targets: { x: number; y: number; sp: SpriteKey; color: string }[] = [];
-    if (state.isCoop) {
+    if (state.remotePlayers.length > 0) {
       for (const rp of state.remotePlayers) {
         if (rp.downed && !rp.spectating) {
           targets.push({ x: rp.x, y: rp.y, sp: 'item_medkit', color: '#ef4444' });

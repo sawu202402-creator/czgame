@@ -120,6 +120,9 @@ export class GameEngine {
       },
       () => {
         this.useActiveClassSkill();
+      },
+      () => {
+        this.tryActivateNearestDoorTrap();
       }
     );
   }
@@ -151,8 +154,12 @@ export class GameEngine {
     const tierMeta = getDifficultyMeta(effTier);
     const stageEco = getStageEcology(stage.id);
     const lobby = CoopManager.lobby;
-    const squadCount = isCoop ? CoopManager.getSquadCount() : 1;
+    const soloBotCount = !isCoop && !stage.isTutorial ? SaveManager.getAiSquadCount() : 0;
+    const squadCount = isCoop
+      ? CoopManager.getSquadCount()
+      : Math.min(4, 1 + Math.round(soloBotCount * 0.55));
     const scaling = getCoopScaling(squadCount);
+    const doorCostMult = isCoop ? scaling.doorCostMult : 1;
     const localSlot = isCoop ? CoopManager.mySlot : 0;
     const localCallsign = CoopManager.getCallsign();
 
@@ -162,7 +169,11 @@ export class GameEngine {
       { dx: -26, dy: 22 },
       { dx: 26, dy: 22 },
     ];
-    const myOff = isCoop ? spawnOffsets[localSlot % 4] : { dx: 0, dy: 0 };
+    const myOff = isCoop || soloBotCount > 0 ? spawnOffsets[localSlot % 4] : { dx: 0, dy: 0 };
+
+    const botCallsigns = ['ALPHA', 'BRAVO', 'DELTA'];
+    const botColors = ['#38bdf8', '#facc15', '#f472b6'];
+    const botInitGuns = ['smg', 'shotgun', 'rifle'];
 
     const remotePlayers: RemotePlayerState[] =
       isCoop && lobby
@@ -209,7 +220,52 @@ export class GameEngine {
                 kills: 0,
               };
             })
-        : [];
+        : Array.from({ length: soloBotCount }, (_, bIdx) => {
+            const slot = bIdx + 1;
+            const off = spawnOffsets[slot % 4];
+            const sx = stage.playerSpawn.x + off.dx;
+            const sy = stage.playerSpawn.y + off.dy;
+            const botMaxHp = Math.round(pStats.maxHp * 1.12);
+            return {
+              peerId: `bot_${slot}`,
+              slot,
+              callsign: botCallsigns[bIdx] || `BOT-${slot}`,
+              color: botColors[bIdx] || '#38bdf8',
+              x: sx,
+              y: sy,
+              netTx: sx,
+              netTy: sy,
+              vx: 0,
+              vy: 0,
+              extrapAge: 0,
+              lastSeq: 0,
+              angle: 0,
+              netAngle: 0,
+              legAngle: 0,
+              walkPhase: bIdx * 1.6,
+              isMoving: false,
+              hp: botMaxHp,
+              maxHp: botMaxHp,
+              armor: 45,
+              maxArmor: 100,
+              downed: false,
+              spectating: false,
+              bleedoutTimer: 0,
+              reviveProgress: 0,
+              activeWepId: botInitGuns[bIdx % botInitGuns.length],
+              evolved: false,
+              muzzleFlashTimer: 0,
+              recoilOffset: 0,
+              repairProgress: 0,
+              hitFlashTimer: 0,
+              invulnTimer: 2.0,
+              cash: 0,
+              kills: 0,
+              isBot: true,
+              botFireCd: 0.2 + bIdx * 0.12,
+              botOrbitSeed: bIdx * 2.094,
+            };
+          });
 
     const pistolDef = WEAPONS.pistol;
     this.nextEntityId = 1;
@@ -372,16 +428,20 @@ export class GameEngine {
       }),
       doors: stage.doors.map((d) => ({
         ...d,
-        cost: Math.round((d.cost * scaling.doorCostMult) / 10) * 10,
+        cost: Math.round((d.cost * doorCostMult) / 10) * 10,
         unlocked: false,
         progress: 0,
         paidAmount: 0,
+        trapActiveTimer: 0,
+        trapCooldown: 0,
+        trapTickTimer: 0,
       })),
       props: stage.props,
       stations: stage.stations.map((s) => ({ ...s, used: false, progress: 0, activeTimer: 0 })),
       walls: stage.walls,
       barrels: stage.barrels.map((b) => ({ ...b, alive: true, respawnWaves: 0 })),
       zombies: [],
+      dyingZombies: [],
       bullets: [],
       grenadesThrown: [],
       explosions: [],
@@ -559,14 +619,36 @@ export class GameEngine {
   private inflictDamageOnCombatant(targetId: string, damage: number, invulnDur = 0.32): void {
     const s = this.state;
     if (!s) return;
-    if (!s.isCoop || targetId === CoopManager.myPeerId) {
+    if (targetId === CoopManager.myPeerId) {
       this.damagePlayer(damage, invulnDur);
       return;
     }
     const rp = s.remotePlayers.find((item) => item.peerId === targetId);
-    if (!rp || rp.downed || rp.spectating || rp.invulnTimer > 0) return;
+    if (!rp) {
+      if (!s.isCoop) this.damagePlayer(damage, invulnDur);
+      return;
+    }
+    if (rp.downed || rp.spectating || rp.invulnTimer > 0) return;
     rp.invulnTimer = invulnDur;
     rp.hitFlashTimer = 0.24;
+    if (rp.isBot) {
+      const effDmg = Math.max(4, Math.round(damage * 0.72));
+      if (rp.armor > 0) {
+        const ab = Math.min(rp.armor, Math.round(effDmg * 0.6));
+        rp.armor -= ab;
+        rp.hp = Math.max(0, rp.hp - (effDmg - ab));
+      } else {
+        rp.hp = Math.max(0, rp.hp - effDmg);
+      }
+      if (rp.hp <= 0) {
+        rp.downed = true;
+        rp.bleedoutTimer = 28;
+        rp.reviveProgress = 0;
+        rp.isMoving = false;
+        SoundFX.alarm();
+      }
+      return;
+    }
     if (CoopManager.role === 'host') {
       CoopManager.sendToClient(rp.peerId, { type: 'evt_player_hit', targetId: rp.peerId, damage });
     }
@@ -1505,8 +1587,23 @@ export class GameEngine {
     this.paused = false;
     this.modalPaused = false;
     s.reviveUsed = true;
+    s.player.downed = false;
+    s.player.spectating = false;
+    s.player.bleedoutTimer = 0;
+    s.player.reviveProgress = 0;
     s.player.hp = s.player.maxHp;
     s.player.invulnTimer = 4.5;
+    for (const rp of s.remotePlayers) {
+      if (rp.isBot) {
+        rp.downed = false;
+        rp.spectating = false;
+        rp.bleedoutTimer = 0;
+        rp.reviveProgress = 0;
+        rp.hp = rp.maxHp;
+        rp.armor = 50;
+        rp.invulnTimer = 4.0;
+      }
+    }
     s.player.grenades += 2;
     s.spits = [];
     s.acidPools = [];
@@ -1604,7 +1701,11 @@ export class GameEngine {
       return true;
     }
     if (!this.state.isCoop) {
-      return this.paused || this.modalPaused || this.state.player.hp <= 0;
+      return (
+        this.paused ||
+        this.modalPaused ||
+        (!this.state.player.downed && this.state.player.hp <= 0)
+      );
     }
     return false;
   }
@@ -1620,10 +1721,10 @@ export class GameEngine {
       return;
     }
 
-    // 专注桌面与手机横屏宽幅视野缩放（16:9 ~ 21:9 全面屏自适应）
+    // 专注桌面与手机横屏宽幅视野缩放（兼容 640x360 小窗嵌入至 21:9 全面屏自适应）
     const fitZoom =
-      viewH < 520 ? Math.min(viewW / 1040, viewH / 540) : Math.min(viewW / 1180, viewH / 680);
-    s.camera.zoom = Math.max(0.66, Math.min(1.1, fitZoom));
+      viewH < 520 ? Math.min(viewW / 1080, viewH / 580) : Math.min(viewW / 1180, viewH / 680);
+    s.camera.zoom = Math.max(0.54, Math.min(1.1, fitZoom));
 
     if (s.bannerTimer > 0) s.bannerTimer -= dt;
     if (s.lootToast) {
@@ -1679,10 +1780,15 @@ export class GameEngine {
       if (this.isRunHalted()) return;
 
       this.updatePlayer(dt, viewW, viewH);
+      if (this.isRunHalted()) return;
       if (s.isCoop) {
         this.updateCoopRevive(dt);
+      } else if (s.remotePlayers.length > 0) {
+        this.updateSquadBots(dt);
+        if (this.isRunHalted()) return;
       }
       this.updateInteractions(dt);
+      this.updateDoorTraps(dt);
       if (this.isRunHalted()) return;
 
       this.updateTurretsAndDog(dt);
@@ -1773,8 +1879,8 @@ export class GameEngine {
         if (s.electricFortifyWaves > 0) s.electricFortifyWaves -= 1;
         this.onWaveSurvivedLocal(s.wave);
 
-        // 波次清空时立刻拉起所有倒地/观战队友！
-        if (s.isCoop) {
+        // 波次清空时立刻拉起所有倒地/观战队友与 AI 特警！
+        if (s.isCoop || s.remotePlayers.length > 0) {
           const now = performance.now();
           this.reviveLocalPlayerFromWaveOrTeammate();
           for (const rp of s.remotePlayers) {
@@ -1783,12 +1889,18 @@ export class GameEngine {
               rp.spectating = false;
               rp.bleedoutTimer = 0;
               rp.reviveProgress = 0;
-              rp.hp = Math.round(rp.maxHp * 0.55);
+              rp.hp = Math.round(rp.maxHp * 0.65);
               rp.invulnTimer = 3.2;
-              this.reviveSyncGraceUntil.set(rp.peerId, now + 2200);
+              if (s.isCoop) {
+                this.reviveSyncGraceUntil.set(rp.peerId, now + 2200);
+              }
+            } else if (rp.isBot) {
+              rp.hp = Math.min(rp.maxHp, rp.hp + Math.round(rp.maxHp * 0.25));
             }
           }
-          CoopManager.broadcastToClients({ type: 'evt_team_reward', waveAutoRevive: true });
+          if (s.isCoop) {
+            CoopManager.broadcastToClients({ type: 'evt_team_reward', waveAutoRevive: true });
+          }
         }
 
         if (s.relicIds.includes('piggy_bank') && s.cash > 0) {
@@ -2312,6 +2424,10 @@ export class GameEngine {
       p.repairProgress = 0;
       p.bleedoutTimer = Math.max(0, p.bleedoutTimer - dt);
       if (p.bleedoutTimer <= 0) {
+        if (!s.isCoop) {
+          this.triggerSoloSquadWipe();
+          return;
+        }
         p.spectating = true;
         p.isMoving = false;
         this.showBanner(I18n.t('bannerBledOut'), 3.4);
@@ -3689,6 +3805,37 @@ export class GameEngine {
       this.deadZombieIds.add(z.id);
     }
 
+    // 致命一击击飞滑行残影（顺着子弹受击方向惯性滑退翻滚 + 高亮闪白渐隐）
+    if (s.dyingZombies.length >= 26) {
+      s.dyingZombies.shift();
+    }
+    let dirX = z.recoilVx;
+    let dirY = z.recoilVy;
+    const rLen = Math.hypot(dirX, dirY);
+    if (rLen > 12) {
+      dirX /= rLen;
+      dirY /= rLen;
+    } else {
+      const awayAng = Math.atan2(z.y - s.player.y, z.x - s.player.x);
+      dirX = Math.cos(awayAng);
+      dirY = Math.sin(awayAng);
+    }
+    const launchSpd = isBossKind(z.kind) ? 145 : 275;
+    const dLife = isBossKind(z.kind) ? 0.36 : 0.25;
+    s.dyingZombies.push({
+      kind: z.kind,
+      x: z.x,
+      y: z.y,
+      vx: dirX * launchSpd,
+      vy: dirY * launchSpd,
+      radius: z.radius,
+      angle: z.facingAngle,
+      spin: (Math.random() < 0.5 ? -1 : 1) * (isBossKind(z.kind) ? 2.4 : 6.2),
+      color: z.color,
+      life: dLife,
+      maxLife: dLife,
+    });
+
     s.kills += 1;
     SaveManager.addDailyProgress('kills', 1);
     const activeWepKill = s.player.weapons[s.player.activeSlot];
@@ -4882,14 +5029,19 @@ export class GameEngine {
         return;
       }
 
-      PlatformSDK.gameplayStop();
-      if (s.mode === 'endless') {
-        SaveManager.recordEndlessWave(s.stage.id, s.wave);
+      const saviorBot = s.remotePlayers.find((rp) => rp.isBot && !rp.downed && !rp.spectating && rp.hp > 0);
+      if (saviorBot) {
+        p.downed = true;
+        p.bleedoutTimer = 24;
+        p.reviveProgress = 0;
+        p.reloadTimer = 0;
+        this.input.resetStates();
+        SoundFX.alarm();
+        this.showBanner(I18n.t('botSavingYou', { name: saviorBot.callsign }), 3.2);
+        return;
       }
-      this.flushRunTelemetry(false);
-      this.modalPaused = true;
-      this.input.resetStates();
-      this.callbacks.onPlayerDowned(!s.reviveUsed);
+
+      this.triggerSoloSquadWipe();
     }
   }
 
@@ -5283,6 +5435,456 @@ export class GameEngine {
     for (let i = s.lightnings.length - 1; i >= 0; i--) {
       s.lightnings[i].life -= dt;
       if (s.lightnings[i].life <= 0) s.lightnings.splice(i, 1);
+    }
+    for (let i = s.dyingZombies.length - 1; i >= 0; i--) {
+      const dz = s.dyingZombies[i];
+      dz.life -= dt;
+      dz.x += dz.vx * dt;
+      dz.y += dz.vy * dt;
+      dz.vx *= 0.87;
+      dz.vy *= 0.87;
+      dz.angle += dz.spin * dt;
+      if (dz.life <= 0) s.dyingZombies.splice(i, 1);
+    }
+  }
+
+  private triggerSoloSquadWipe(): void {
+    const s = this.state;
+    if (!s || this.modalPaused) return;
+    PlatformSDK.gameplayStop();
+    if (s.mode === 'endless') {
+      SaveManager.recordEndlessWave(s.stage.id, s.wave);
+    }
+    this.flushRunTelemetry(false);
+    this.modalPaused = true;
+    this.input.resetStates();
+    this.callbacks.onPlayerDowned(!s.reviveUsed);
+  }
+
+  // ==================== AI 特警战术小队（自动掩护集火 / 倒地互救 / 撤离集结） ====================
+
+  private updateSquadBots(dt: number): void {
+    const s = this.state;
+    if (!s || s.isCoop) return;
+    const p = s.player;
+    const bots = s.remotePlayers.filter((rp) => rp.isBot);
+    if (bots.length === 0) return;
+
+    // 1. 若主角已倒地且所有 AI 特警也全部倒地，立即触发救援/结算弹窗
+    const anyBotAlive = bots.some((b) => !b.downed && !b.spectating && b.hp > 0);
+    if (p.downed && !anyBotAlive) {
+      this.triggerSoloSquadWipe();
+      return;
+    }
+
+    // 2. 主角站立时靠近倒地 AI 队友（68px 内）可自动扶起 AI 队友
+    if (!p.downed && !p.spectating && p.hp > 0) {
+      for (const b of bots) {
+        if (!b.downed) continue;
+        if (Math.hypot(p.x - b.x, p.y - b.y) <= 68) {
+          b.reviveProgress = Math.min(1, b.reviveProgress + dt / 2.0);
+          if (b.reviveProgress >= 1) {
+            b.downed = false;
+            b.bleedoutTimer = 0;
+            b.reviveProgress = 0;
+            b.hp = Math.round(b.maxHp * 0.65);
+            b.armor = 35;
+            b.invulnTimer = 2.8;
+            SoundFX.fanfare();
+            this.spawnHitSparks(b.x, b.y, '#4ade80', 12);
+          }
+        }
+      }
+    }
+
+    const nowSec = performance.now() * 0.001;
+
+    for (let idx = 0; idx < bots.length; idx++) {
+      const bot = bots[idx];
+      if (bot.invulnTimer > 0) bot.invulnTimer = Math.max(0, bot.invulnTimer - dt);
+      if (bot.hitFlashTimer > 0) bot.hitFlashTimer = Math.max(0, bot.hitFlashTimer - dt);
+      if (bot.muzzleFlashTimer > 0) bot.muzzleFlashTimer = Math.max(0, bot.muzzleFlashTimer - dt);
+      if (bot.recoilOffset > 0) bot.recoilOffset = Math.max(0, bot.recoilOffset - dt * 24);
+
+      if (bot.downed) {
+        bot.isMoving = false;
+        bot.bleedoutTimer = Math.max(0, bot.bleedoutTimer - dt);
+        if (bot.bleedoutTimer <= 0) {
+          // 失血耗尽后等待本波结束自动归队
+          bot.bleedoutTimer = 0;
+          bot.spectating = true;
+          bot.downed = false;
+        }
+        continue;
+      }
+      if (bot.spectating) continue;
+
+      // 随波次推进自动升级 AI 特警武器与超武觉醒
+      const tierGuns =
+        s.wave >= 8
+          ? ['minigun', 'plasma', 'tesla']
+          : s.wave >= 6
+            ? ['tesla', 'autoshotgun', 'flamethrower']
+            : s.wave >= 3
+              ? ['rifle', 'autoshotgun', 'smg']
+              : ['smg', 'shotgun', 'rifle'];
+      bot.activeWepId = tierGuns[idx % tierGuns.length];
+      bot.evolved = s.wave >= 6;
+
+      // 决策移动目标：1) 优先抢救倒地主角 -> 2) 抢救倒地同伴 -> 3) 直升机撤离停机坪集结 -> 4) 战术侧翼阵型与拉扯
+      let goalX = p.x;
+      let goalY = p.y;
+      let moveSpd = 205;
+
+      const downedPeer = !p.downed ? bots.find((ob) => ob !== bot && ob.downed) : null;
+
+      if (p.downed) {
+        goalX = p.x;
+        goalY = p.y;
+        moveSpd = 248;
+        if (Math.hypot(bot.x - p.x, bot.y - p.y) <= 64) {
+          p.reviveProgress = Math.min(1, p.reviveProgress + dt / 2.1);
+          moveSpd = 40;
+          if (p.reviveProgress >= 1) {
+            p.downed = false;
+            p.spectating = false;
+            p.bleedoutTimer = 0;
+            p.reviveProgress = 0;
+            p.hp = Math.round(p.maxHp * 0.55);
+            p.invulnTimer = 3.2;
+            SoundFX.fanfare();
+            this.showBanner(I18n.t('botRevivedYou', { name: bot.callsign }), 2.8);
+            this.spawnHitSparks(p.x, p.y, '#4ade80', 16);
+            // 救援震退周围贴脸丧尸，防止刚起身瞬间再次暴毙
+            for (const z of s.zombies) {
+              const d = Math.hypot(z.x - p.x, z.y - p.y);
+              if (d < 135 && d > 0.1) {
+                z.recoilVx += ((z.x - p.x) / d) * 320;
+                z.recoilVy += ((z.y - p.y) / d) * 320;
+                z.stunTimer = Math.max(z.stunTimer, 0.55);
+              }
+            }
+          }
+        }
+      } else if (downedPeer) {
+        goalX = downedPeer.x;
+        goalY = downedPeer.y;
+        moveSpd = 232;
+        if (Math.hypot(bot.x - downedPeer.x, bot.y - downedPeer.y) <= 64) {
+          downedPeer.reviveProgress = Math.min(1, downedPeer.reviveProgress + dt / 2.2);
+          moveSpd = 35;
+          if (downedPeer.reviveProgress >= 1) {
+            downedPeer.downed = false;
+            downedPeer.bleedoutTimer = 0;
+            downedPeer.reviveProgress = 0;
+            downedPeer.hp = Math.round(downedPeer.maxHp * 0.6);
+            downedPeer.invulnTimer = 2.6;
+            this.spawnHitSparks(downedPeer.x, downedPeer.y, '#38bdf8', 12);
+          }
+        }
+      } else if (s.waveState === 'extraction') {
+        const padAng = (bot.botOrbitSeed || 0) + nowSec * 0.45;
+        goalX = s.stage.helipadPos.x + Math.cos(padAng) * 44;
+        goalY = s.stage.helipadPos.y + Math.sin(padAng) * 44;
+        moveSpd = 235;
+      } else {
+        const orbitAng = (bot.botOrbitSeed || 0) + nowSec * 0.38;
+        const orbitR = 112 + (idx % 2) * 28;
+        goalX = p.x + Math.cos(orbitAng) * orbitR;
+        goalY = p.y + Math.sin(orbitAng) * orbitR;
+      }
+
+      // 近身防贴脸拉扯排斥力 + 队友间柔和防重叠分离力
+      let repX = 0;
+      let repY = 0;
+      if (!p.downed) {
+        for (const z of s.zombies) {
+          const d = Math.hypot(bot.x - z.x, bot.y - z.y);
+          if (d < 92 && d > 0.1) {
+            const push = (92 - d) / 92;
+            repX += ((bot.x - z.x) / d) * push * 165;
+            repY += ((bot.y - z.y) / d) * push * 165;
+          }
+        }
+      }
+      for (const ob of bots) {
+        if (ob === bot || ob.spectating) continue;
+        const d = Math.hypot(bot.x - ob.x, bot.y - ob.y);
+        if (d < 46 && d > 0.1) {
+          repX += ((bot.x - ob.x) / d) * 85;
+          repY += ((bot.y - ob.y) / d) * 85;
+        }
+      }
+
+      // 若离目标隔墙，优先导航至最近已解锁门框中心穿门而过；若仍受阻超过 1.1s 自动战术翻越归队！
+      const distToPlayer = Math.hypot(bot.x - p.x, bot.y - p.y);
+      if (distToPlayer > 560 && s.waveState !== 'extraction') {
+        const reloc = { x: p.x + (idx - 1) * 28, y: p.y + 24, radius: 15 };
+        this.resolveEntityInsideWalls(reloc);
+        bot.x = reloc.x;
+        bot.y = reloc.y;
+        bot.botStuckTimer = 0;
+      } else {
+        let navX = goalX + repX;
+        let navY = goalY + repY;
+        const wallBetween =
+          this.findBlockingWallOrLockedDoor(bot.x + (goalX - bot.x) * 0.25, bot.y + (goalY - bot.y) * 0.25, 10) ||
+          this.findBlockingWallOrLockedDoor(bot.x + (goalX - bot.x) * 0.5, bot.y + (goalY - bot.y) * 0.5, 10) ||
+          this.findBlockingWallOrLockedDoor(bot.x + (goalX - bot.x) * 0.75, bot.y + (goalY - bot.y) * 0.75, 10);
+        if (wallBetween) {
+          // 隔墙时自动取道最近已开启门框中心穿门而过
+          let bestDoorScore = 1e9;
+          for (const d of s.doors) {
+            if (!d.unlocked) continue;
+            const dcx = d.x + d.w * 0.5;
+            const dcy = d.y + d.h * 0.5;
+            const score = Math.hypot(bot.x - dcx, bot.y - dcy) + Math.hypot(goalX - dcx, goalY - dcy);
+            if (score < bestDoorScore && Math.hypot(bot.x - dcx, bot.y - dcy) > 20) {
+              bestDoorScore = score;
+              navX = dcx;
+              navY = dcy;
+            }
+          }
+        }
+
+        const prevGoalDist = Math.hypot(goalX - bot.x, goalY - bot.y);
+        const dx = navX - bot.x;
+        const dy = navY - bot.y;
+        const dist = Math.hypot(dx, dy);
+        const ox = bot.x;
+        const oy = bot.y;
+        if (dist > 14) {
+          const step = Math.min(dist, moveSpd * dt);
+          const baseAng = Math.atan2(dy, dx);
+          const steerOffsets = [0, 0.65, -0.65, 1.25, -1.25];
+          for (const offA of steerOffsets) {
+            const tx = bot.x + Math.cos(baseAng + offA) * step;
+            const ty = bot.y + Math.sin(baseAng + offA) * step;
+            if (!this.findBlockingWallOrLockedDoor(tx, ty, 15)) {
+              const probe = { x: tx, y: ty, radius: 15 };
+              this.resolveEntityInsideWalls(probe);
+              bot.x = probe.x;
+              bot.y = probe.y;
+              break;
+            }
+          }
+        }
+        const moved = Math.hypot(bot.x - ox, bot.y - oy);
+        const newGoalDist = Math.hypot(goalX - bot.x, goalY - bot.y);
+        const expectedProgress = moveSpd * dt * 0.55;
+        if (prevGoalDist > 62 && prevGoalDist - newGoalDist < expectedProgress) {
+          bot.botStuckTimer = (bot.botStuckTimer || 0) + dt;
+          if (bot.botStuckTimer >= 0.95) {
+            const reloc = { x: goalX + (idx - 1) * 22, y: goalY + 18, radius: 15 };
+            this.resolveEntityInsideWalls(reloc);
+            bot.x = reloc.x;
+            bot.y = reloc.y;
+            bot.botStuckTimer = 0;
+          }
+        } else {
+          bot.botStuckTimer = Math.max(0, (bot.botStuckTimer || 0) - dt * 0.5);
+        }
+        bot.isMoving = moved > 0.3;
+        if (bot.isMoving) {
+          bot.walkPhase += moved * 0.115;
+          bot.legAngle = this.lerpAngle(bot.legAngle, Math.atan2(bot.y - oy, bot.x - ox), Math.min(1, dt * 12));
+        }
+      }
+      bot.netTx = bot.x;
+      bot.netTy = bot.y;
+
+      // 波间休整时顺手帮忙修补附近破损窗户
+      if (s.waveState === 'intermission') {
+        const brokenWin = s.windows.find(
+          (w) =>
+            w.planks < w.maxPlanks &&
+            Math.hypot(bot.x - (w.x + w.w / 2), bot.y - (w.y + w.h / 2)) < 95
+        );
+        if (brokenWin) {
+          bot.repairProgress += dt * 1.4;
+          if (bot.repairProgress >= 1) {
+            bot.repairProgress = 0;
+            brokenWin.planks = Math.min(brokenWin.maxPlanks, brokenWin.planks + 1);
+          }
+        }
+      }
+
+      // 自动索敌瞄准与压制射击（520px 射程内优先锁定最近威胁）
+      let bestTarget: ZombieEntity | null = null;
+      let bestScore = 520;
+      for (const z of s.zombies) {
+        if (z.hp <= 0) continue;
+        const d = Math.hypot(z.x - bot.x, z.y - bot.y);
+        if (d > 520) continue;
+        // 简单视线掩体遮挡检测（中点不穿实心厚墙）
+        const midBlocked = this.findBulletBlocker((bot.x + z.x) * 0.5, (bot.y + z.y) * 0.5, 3);
+        if (midBlocked) continue;
+        const score = isBossKind(z.kind) ? d * 0.72 : d;
+        if (score < bestScore) {
+          bestScore = score;
+          bestTarget = z;
+        }
+      }
+
+      if (bestTarget) {
+        const aimAng = Math.atan2(bestTarget.y - bot.y, bestTarget.x - bot.x);
+        bot.angle = this.lerpAngle(bot.angle, aimAng, Math.min(1, dt * 14));
+        bot.netAngle = bot.angle;
+
+        bot.botFireCd = (bot.botFireCd || 0) - dt;
+        const wepDef = WEAPONS[bot.activeWepId] || WEAPONS.smg;
+        if (bot.botFireCd <= 0) {
+          const interval = Math.max(0.11, (1 / wepDef.fireRate) * 1.38);
+          bot.botFireCd = interval;
+          bot.muzzleFlashTimer = 0.065;
+          bot.recoilOffset = 4.2;
+
+          const pellets = Math.min(4, wepDef.pellets || 1);
+          const baseDmg =
+            wepDef.damage *
+            (bot.evolved ? 1.55 : 1) *
+            0.44 *
+            s.modifiers.damageMult;
+          for (let k = 0; k < pellets; k++) {
+            const sp = (Math.random() - 0.5) * (wepDef.spread || 0.08);
+            const shotAng = bot.angle + sp;
+            s.bullets.push({
+              x: bot.x + Math.cos(bot.angle) * 24,
+              y: bot.y + Math.sin(bot.angle) * 24,
+              vx: Math.cos(shotAng) * wepDef.bulletSpeed,
+              vy: Math.sin(shotAng) * wepDef.bulletSpeed,
+              radius: wepDef.flame ? 9 : bot.evolved ? 5.2 : 4.2,
+              damage: Math.max(6, Math.round(baseDmg)),
+              knockback: wepDef.knockback * 0.55,
+              pierceLeft: wepDef.pierce,
+              bouncesLeft: wepDef.bounces || 0,
+              explosiveRadius: wepDef.explosiveRadius ? wepDef.explosiveRadius * 0.65 : 0,
+              color: bot.evolved ? wepDef.superColor : wepDef.color,
+              isCrit: false,
+              flame: Boolean(wepDef.flame),
+              cryo: Boolean(wepDef.cryo),
+              electric: Boolean(wepDef.electric),
+              laser: Boolean(wepDef.laser),
+              sawblade: Boolean(wepDef.sawblade),
+              hitIds: new Set<number>(),
+              life: wepDef.flame ? 0.34 : 0.72,
+              weaponId: wepDef.id,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // ==================== 走廊门框高压激光电网机关（Tactical Doorway Shock-Gates） ====================
+
+  public getDoorTrapCost(): number {
+    const s = this.state;
+    if (!s) return 90;
+    return 80 + (s.stage.index - 1) * 15;
+  }
+
+  public getNearestReadyDoorTrap(): { door: RunSnapshot['doors'][number]; cost: number } | null {
+    const s = this.state;
+    if (!s || s.stage.isTutorial || s.player.downed || s.player.spectating) return null;
+    const cost = this.getDoorTrapCost();
+    let bestDoor: RunSnapshot['doors'][number] | null = null;
+    let bestDist = 112;
+    for (const d of s.doors) {
+      if (!d.unlocked) continue;
+      if ((d.trapActiveTimer || 0) > 0 || (d.trapCooldown || 0) > 0) continue;
+      const cx = d.x + d.w * 0.5;
+      const cy = d.y + d.h * 0.5;
+      const dist = Math.hypot(s.player.x - cx, s.player.y - cy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestDoor = d;
+      }
+    }
+    return bestDoor ? { door: bestDoor, cost } : null;
+  }
+
+  public tryActivateNearestDoorTrap(): boolean {
+    const s = this.state;
+    if (!s || this.paused || this.modalPaused) return false;
+    const ready = this.getNearestReadyDoorTrap();
+    if (!ready) return false;
+    if (s.cash < ready.cost) {
+      this.spawnFloatingText(
+        s.player.x,
+        s.player.y - 34,
+        I18n.t('msgNoCash', { c: ready.cost }),
+        '#f87171',
+        1.05
+      );
+      SoundFX.emptyClip();
+      return false;
+    }
+    s.cash -= ready.cost;
+    ready.door.trapActiveTimer = 16;
+    ready.door.trapCooldown = 0;
+    ready.door.trapTickTimer = 0.05;
+    SoundFX.fanfare();
+    const cx = ready.door.x + ready.door.w * 0.5;
+    const cy = ready.door.y + ready.door.h * 0.5;
+    this.spawnHitSparks(cx, cy, '#38bdf8', 14);
+    this.spawnFloatingText(cx, cy - 22, I18n.t('doorTrapActivated'), '#38bdf8', 1.15);
+    return true;
+  }
+
+  private updateDoorTraps(dt: number): void {
+    const s = this.state;
+    if (!s) return;
+    const stageEco = getStageEcology(s.stage.id);
+    for (const d of s.doors) {
+      if (!d.unlocked) continue;
+      if ((d.trapCooldown || 0) > 0) {
+        d.trapCooldown = Math.max(0, (d.trapCooldown || 0) - dt);
+      }
+      if ((d.trapActiveTimer || 0) > 0) {
+        d.trapActiveTimer = Math.max(0, (d.trapActiveTimer || 0) - dt);
+        if (d.trapActiveTimer <= 0) {
+          d.trapCooldown = 10;
+          continue;
+        }
+        d.trapTickTimer = (d.trapTickTimer || 0) - dt;
+        if (d.trapTickTimer <= 0) {
+          d.trapTickTimer = 0.22;
+          const pad = 20;
+          const x0 = d.x - pad;
+          const y0 = d.y - pad;
+          const x1 = d.x + d.w + pad;
+          const y1 = d.y + d.h + pad;
+          const zapDmg = Math.round((44 + s.wave * 15) * stageEco.hpMult * s.modifiers.damageMult);
+
+          for (let zi = s.zombies.length - 1; zi >= 0; zi--) {
+            const z = s.zombies[zi];
+            if (!z || z.hp <= 0) continue;
+            if (z.x + z.radius >= x0 && z.x - z.radius <= x1 && z.y + z.radius >= y0 && z.y - z.radius <= y1) {
+              z.hp -= zapDmg;
+              z.hitFlash = 0.14;
+              z.slowTimer = Math.max(z.slowTimer, 0.75);
+              this.spawnHitSparks(z.x, z.y, '#38bdf8', 4);
+              if (s.floatingTexts.length < 18) {
+                this.spawnFloatingText(z.x, z.y - z.radius - 10, `⚡${zapDmg}`, '#67e8f9', 0.95);
+              }
+              if (s.lightnings.length < 14) {
+                s.lightnings.push({
+                  points: [
+                    { x: d.x + d.w * 0.5, y: d.y + d.h * 0.5 },
+                    { x: z.x + (Math.random() - 0.5) * 14, y: z.y + (Math.random() - 0.5) * 14 },
+                  ],
+                  color: '#38bdf8',
+                  life: 0.14,
+                });
+              }
+              if (z.hp <= 0) {
+                this.killZombie(z);
+              }
+            }
+          }
+        }
+      }
     }
   }
 

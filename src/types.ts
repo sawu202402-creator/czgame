@@ -283,6 +283,7 @@ export interface SaveData {
   freeStarterUsedCount: number;
   freeHqSupportUsed: boolean;
   autoBuyAmmo: boolean;
+  aiSquadCount?: number;
   daily: DailyState;
   coopRivals: CoopRivalRecord[];
 }
