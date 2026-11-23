@@ -1,6 +1,6 @@
 const BROKER_URLS = [
-  'wss://broker.emqx.io:8084/mqtt',
   'wss://broker-cn.emqx.io:8084/mqtt',
+  'wss://broker.emqx.io:8084/mqtt',
   'wss://mqtt.eclipseprojects.io:443/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
 ];
@@ -370,9 +370,6 @@ export class MqttWsRoomBus<T extends { type?: string }> {
         if (env.exclude && env.exclude === this.myPeerId) continue;
         if (env.to !== '*' && env.to !== this.myPeerId) continue;
 
-        // 锁定该对端最新可达的互通 Broker 索引，后续发往该对端的包直接走此互通节点！
-        this.peerBrokerMap.set(env.from, sourceBrokerIdx);
-
         if (this.seenIds.has(env.id)) continue;
         this.seenIds.add(env.id);
         this.seenQueue.push(env.id);
@@ -380,6 +377,10 @@ export class MqttWsRoomBus<T extends { type?: string }> {
           const oldest = this.seenQueue.shift()!;
           this.seenIds.delete(oldest);
         }
+
+        // 仅在首次收到某包 ID 时记录来源 Broker：多节点并发心跳/信令永远是延迟最低的最快节点最先抵达，
+        // 慢速跨国节点的重复包在上方 seenIds 已被拦截，从而确保始终锁定双方之间 RTT 最低的极速节点！
+        this.peerBrokerMap.set(env.from, sourceBrokerIdx);
 
         const outIdx = parsed.length;
         parsed.push(env);
@@ -441,7 +442,14 @@ export class MqttWsRoomBus<T extends { type?: string }> {
 
     const t = msg?.type;
     const isHighFreqData =
-      t === 'world_sync' || t === 'players_fast' || t === 'player_sync' || t === 'cmd_fire';
+      t === 'world_sync' ||
+      t === 'players_fast' ||
+      t === 'player_sync' ||
+      t === 'cmd_fire' ||
+      t === 'evt_fx' ||
+      t === 'cmd_revive_tick' ||
+      t === '__ping' ||
+      t === '__pong';
 
     // 控制面信令（进房握手 join_req / join_ack、大厅列表 lobby_state、开局 start_game、心跳 __hb 等）
     // 一律跨所有在线节点冗余并发投递（接收端按 seenIds 严格幂等去重），彻底根除单节点半死/单向丢包导致加房失败！

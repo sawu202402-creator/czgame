@@ -157,6 +157,7 @@ export class CartoonRenderer {
     // 10. 抛物线手雷、流光曳光弹、闪电链、粒子、跳字与高空悬停救援黑鹰直升机
     this.drawGrenades(ctx, state);
     this.drawBulletsAndFX(ctx, state);
+    this.drawTacticalPings(ctx, state);
     this.drawExtractionHelicopterOverhead(ctx, state);
 
     ctx.restore();
@@ -3922,6 +3923,49 @@ export class CartoonRenderer {
     ctx.restore();
   }
 
+  private drawTacticalPings(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    if (!state.tacticalPings || state.tacticalPings.length === 0) return;
+    const now = performance.now();
+    for (const tp of state.tacticalPings) {
+      if (!this.inView(tp.x, tp.y, 180)) continue;
+      const alpha = Math.min(1, tp.timer / 0.7);
+      const pulse = ((now * 0.0022) % 1);
+      const bounce = Math.sin(now * 0.009) * 4;
+
+      ctx.save();
+      ctx.translate(tp.x, tp.y);
+      ctx.globalAlpha = alpha;
+
+      // 地面双层扩散战术雷达波纹
+      ctx.strokeStyle = tp.color;
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, 14 + pulse * 38, 0, Math.PI * 2);
+      ctx.globalAlpha = alpha * (1 - pulse);
+      ctx.stroke();
+
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+
+      // 悬浮倒三角定位标 + 战术文字铭牌
+      ctx.fillStyle = tp.color;
+      ctx.beginPath();
+      ctx.moveTo(0, -10 + bounce);
+      ctx.lineTo(-7, -22 + bounce);
+      ctx.lineTo(7, -22 + bounce);
+      ctx.closePath();
+      ctx.fill();
+
+      this.drawCachedLabel(ctx, tp.label, 0, -34 + bounce, '#f8fafc', 11.5);
+      ctx.restore();
+    }
+  }
+
   private drawOffscreenIndicators(
     ctx: CanvasRenderingContext2D,
     viewW: number,
@@ -3929,12 +3973,27 @@ export class CartoonRenderer {
     state: RunSnapshot
   ): void {
     const zoom = state.camera.zoom;
-    const targets: { x: number; y: number; sp: SpriteKey; color: string }[] = [];
+    const targets: { x: number; y: number; sp: SpriteKey; color: string; tag?: string; urgent?: boolean }[] = [];
     if (state.remotePlayers.length > 0) {
       for (const rp of state.remotePlayers) {
-        if (rp.downed && !rp.spectating) {
-          targets.push({ x: rp.x, y: rp.y, sp: 'item_medkit', color: '#ef4444' });
+        if (rp.spectating) continue;
+        if (rp.downed) {
+          targets.push({ x: rp.x, y: rp.y, sp: 'item_medkit', color: '#ef4444', tag: `SOS ${rp.callsign}`, urgent: true });
+        } else if (state.isCoop && !rp.isBot) {
+          targets.push({ x: rp.x, y: rp.y, sp: 'player_hero', color: rp.color, tag: rp.callsign });
         }
+      }
+    }
+    if (state.tacticalPings) {
+      for (const tp of state.tacticalPings) {
+        targets.push({
+          x: tp.x,
+          y: tp.y,
+          sp: tp.kind === 'sos' ? 'item_medkit' : tp.kind === 'evac' ? 'prop_helipad' : 'prop_chest',
+          color: tp.color,
+          tag: tp.label,
+          urgent: tp.kind === 'sos',
+        });
       }
     }
     for (const c of state.chests) {
@@ -3958,15 +4017,19 @@ export class CartoonRenderer {
 
     const halfW = viewW / (2 * zoom) - 40;
     const halfH = viewH / (2 * zoom) - 50;
+    const pulseScale = 1 + Math.sin(performance.now() * 0.012) * 0.12;
     for (const t of targets) {
       const dx = t.x - state.camera.x;
       const dy = t.y - state.camera.y;
       if (Math.abs(dx) <= halfW && Math.abs(dy) <= halfH) continue;
       const angle = Math.atan2(dy, dx);
-      const ix = viewW / 2 + Math.cos(angle) * Math.min(viewW / 2 - 48, 320);
-      const iy = viewH / 2 + Math.sin(angle) * Math.min(viewH / 2 - 62, 195);
+      const ix = viewW / 2 + Math.cos(angle) * Math.min(viewW / 2 - 52, 330);
+      const iy = viewH / 2 + Math.sin(angle) * Math.min(viewH / 2 - 66, 200);
       ctx.save();
       ctx.translate(ix, iy);
+      if (t.urgent) {
+        ctx.scale(pulseScale, pulseScale);
+      }
 
       // 方向三角尖角指针
       ctx.save();
@@ -3994,6 +4057,9 @@ export class CartoonRenderer {
       const spImg = Assets.getSprite(t.sp);
       if (spImg) {
         ctx.drawImage(spImg, -12, -12, 24, 24);
+      }
+      if (t.tag) {
+        this.drawCachedLabel(ctx, t.tag, 0, 24, t.color, 9.5);
       }
       ctx.restore();
     }

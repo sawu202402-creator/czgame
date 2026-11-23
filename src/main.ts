@@ -75,6 +75,7 @@ async function bootstrap() {
   let ui!: UIManager;
   const engine = new GameEngine(canvas, ctx, input, {
     onToggleArmoryShop: () => ui.toggleArmoryShop(),
+    isArmoryOpen: () => ui.isArmoryShopOpen(),
     onTogglePauseMenu: () => ui.togglePauseMenu(),
     onPlayerDowned: (canRevive) => ui.showReviveModal(canRevive),
     onRunFinished: (victory, snapshot) => ui.showSettlementModal(victory, snapshot),

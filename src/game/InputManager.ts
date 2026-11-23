@@ -32,6 +32,7 @@ export class InputManager {
   private onQuickBuyAmmoCb: (() => void) | null = null;
   private onUseClassSkillCb: (() => void) | null = null;
   private onActivateTrapCb: (() => void) | null = null;
+  private onTacticalPingCb: (() => void) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     if (PlatformSDK.isMobileOrTablet()) {
@@ -91,6 +92,8 @@ export class InputManager {
         this.onUseClassSkillCb?.();
       } else if (code === 'KeyE') {
         this.onActivateTrapCb?.();
+      } else if (code === 'KeyT' || code === 'KeyC') {
+        this.onTacticalPingCb?.();
       }
     });
 
@@ -138,6 +141,9 @@ export class InputManager {
         this.mouseScreenY = e.clientY - rect.top;
         this.mouseDown = true;
         this.usingTouch = false;
+      } else if (e.button === 1) {
+        e.preventDefault();
+        this.onTacticalPingCb?.();
       }
     });
 
@@ -244,7 +250,8 @@ export class InputManager {
     onEscape?: () => void,
     onQuickBuyAmmo?: () => void,
     onUseClassSkill?: () => void,
-    onActivateTrap?: () => void
+    onActivateTrap?: () => void,
+    onTacticalPing?: () => void
   ): void {
     this.onSwitchWeaponCb = onSwitchWeapon;
     this.onReloadCb = onReload;
@@ -254,6 +261,7 @@ export class InputManager {
     this.onQuickBuyAmmoCb = onQuickBuyAmmo || null;
     this.onUseClassSkillCb = onUseClassSkill || null;
     this.onActivateTrapCb = onActivateTrap || null;
+    this.onTacticalPingCb = onTacticalPing || null;
   }
 
   public getMoveVector(): { x: number; y: number } {

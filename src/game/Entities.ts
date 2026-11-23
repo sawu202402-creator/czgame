@@ -264,6 +264,17 @@ export interface StageHazardZone {
   detonated?: boolean;
 }
 
+export interface TacticalPingFX {
+  id: number;
+  x: number;
+  y: number;
+  color: string;
+  label: string;
+  kind: 'rally' | 'door' | 'sos' | 'evac';
+  timer: number;
+  maxTimer: number;
+}
+
 export interface RunSnapshot {
   stage: StageDef;
   mode: GameMode;
@@ -373,6 +384,7 @@ export interface RunSnapshot {
   particles: Particle[];
   floatingTexts: FloatingText[];
   lightnings: LightningArc[];
+  tacticalPings: TacticalPingFX[];
   bannerText: string;
   bannerTimer: number;
   reviveUsed: boolean;

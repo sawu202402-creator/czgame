@@ -164,6 +164,99 @@ export interface SerializedBullet {
   life: number;
 }
 
+export type SerializedBulletTuple = [
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  radius: number,
+  damage: number,
+  knockback: number,
+  pierceLeft: number,
+  bouncesLeft: number,
+  explosiveRadius: number,
+  life: number,
+  flags: number, // bit0: crit, bit1: flame, bit2: cryo, bit3: electric, bit4: laser, bit5: sawblade
+  color: string,
+];
+
+export function packNetBullet(b: SerializedBullet): SerializedBulletTuple {
+  const flags =
+    (b.isCrit ? 1 : 0) |
+    (b.flame ? 2 : 0) |
+    (b.cryo ? 4 : 0) |
+    (b.electric ? 8 : 0) |
+    (b.laser ? 16 : 0) |
+    (b.sawblade ? 32 : 0);
+  return [
+    Math.round(b.x),
+    Math.round(b.y),
+    Math.round(b.vx),
+    Math.round(b.vy),
+    +b.radius.toFixed(1),
+    +b.damage.toFixed(1),
+    Math.round(b.knockback),
+    b.pierceLeft,
+    b.bouncesLeft,
+    Math.round(b.explosiveRadius),
+    +b.life.toFixed(2),
+    flags,
+    b.color,
+  ];
+}
+
+export function unpackNetBullet(raw: SerializedBulletTuple | SerializedBullet): SerializedBullet {
+  if (!Array.isArray(raw)) return raw;
+  const [x, y, vx, vy, radius, damage, knockback, pierceLeft, bouncesLeft, explosiveRadius, life, flags, color] = raw;
+  return {
+    x,
+    y,
+    vx,
+    vy,
+    radius,
+    damage,
+    knockback,
+    pierceLeft,
+    bouncesLeft,
+    explosiveRadius,
+    color,
+    isCrit: Boolean(flags & 1),
+    flame: Boolean(flags & 2),
+    cryo: Boolean(flags & 4),
+    electric: Boolean(flags & 8),
+    laser: Boolean(flags & 16),
+    sawblade: Boolean(flags & 32),
+    life,
+  };
+}
+
+export const ZOMBIE_KIND_NET_TABLE: ZombieKind[] = [
+  'walker',
+  'runner',
+  'spitter',
+  'boomer',
+  'riot',
+  'frost',
+  'necro',
+  'thief',
+  'miniboss',
+  'boss_warden',
+  'boss_chainsaw',
+  'boss_venom',
+  'boss_surgeon',
+  'boss_kraken',
+  'boss_tesla',
+  'boss_cryo',
+  'boss_overlord',
+];
+
+export const ATK_STATE_NET_TABLE: ('none' | 'windup' | 'slash' | 'recover')[] = [
+  'none',
+  'windup',
+  'slash',
+  'recover',
+];
+
 export interface SerializedGrenade {
   x: number;
   y: number;
@@ -179,7 +272,7 @@ export interface SerializedGrenade {
 
 export type ZombieNetTuple = [
   id: number,
-  kind: ZombieKind,
+  kindCode: number | ZombieKind,
   x: number,
   y: number,
   vx: number,
@@ -187,11 +280,17 @@ export type ZombieNetTuple = [
   hp: number,
   maxHp: number,
   facing: number,
-  atkState: 'none' | 'windup' | 'slash' | 'recover',
-  atkAnim: number,
-  slashAng: number,
-  flags: number, // bit0: hitFlash, bit1: burn, bit2: slow, bit3: insideBuilding
-  fleeTimer: number,
+  flags: number, // bit0: hitFlash, bit1: burn, bit2: slow, bit3: insideBuilding, bits4..5: atkState (0..3)
+  atkAnim?: number,
+  slashAng?: number,
+  fleeTimer?: number,
+];
+
+export const HAZARD_KIND_NET_TABLE: ('cryo_vent' | 'bio_spore' | 'bomb_strike' | 'plasma_strike')[] = [
+  'cryo_vent',
+  'bio_spore',
+  'bomb_strike',
+  'plasma_strike',
 ];
 
 export interface WorldSyncPayload {
@@ -207,13 +306,16 @@ export interface WorldSyncPayload {
   electricFortifyWaves: number;
   powerUpTimers: Record<PowerUpType, number>;
   squadCount: number;
+  blackoutTenths?: number;
+  neonTenths?: number;
   wins: number[];
-  doors: [unlocked: number, paidAmount: number, progressPct: number][];
+  doors: [unlocked: number, paidAmount: number, progressPct: number, trapActiveTenths?: number][];
   stations: [used: number, progressPct: number, activeTimerTenths: number][];
   barrels: number[];
   chests: [id: number, x: number, y: number, roomId: string, progressPct: number][];
   turrets: [x: number, y: number, angle: number, life: number][];
   mechDog: [active: number, x: number, y: number, angle: number];
+  hazards?: [id: number, kindIdx: number, x: number, y: number, radius: number, timerTenths: number, maxTimerTenths: number][];
   zombies: ZombieNetTuple[];
   spits: [x: number, y: number, vx: number, vy: number, radius: number, pKind?: number][];
   pools: [x: number, y: number, radius: number, life: number, isBoss: number][];
@@ -230,11 +332,14 @@ export type CoopNetMessage =
   | { type: 'player_sync'; p: PlayerSyncPayload }
   | { type: 'players_fast'; list: PlayerSyncPayload[] }
   | { type: 'world_sync'; w: WorldSyncPayload }
-  | { type: 'cmd_fire'; ownerId: string; bullets: SerializedBullet[]; sfxKey: string; evolved: boolean }
+  | { type: 'cmd_fire'; ownerId: string; bullets: (SerializedBulletTuple | SerializedBullet)[]; sfxKey: string; evolved: boolean }
   | { type: 'cmd_grenade'; ownerId: string; g: SerializedGrenade }
   | { type: 'cmd_repair_win'; ownerId: string; winId: string }
   | { type: 'cmd_fortify_win'; ownerId: string; winId: string }
   | { type: 'cmd_fund_door'; ownerId: string; doorId: string; amount: number }
+  | { type: 'cmd_door_trap'; ownerId: string; doorId: string }
+  | { type: 'cmd_ping'; ownerId: string; x: number; y: number; color: string; label: string; kind: 'rally' | 'door' | 'sos' | 'evac' }
+  | { type: 'cmd_gift_cash'; fromId: string; fromName: string; targetId: string; amount: number }
   | { type: 'cmd_use_station'; ownerId: string; stationId: string }
   | { type: 'cmd_open_chest'; ownerId: string; chestId: number }
   | { type: 'cmd_deploy_turret'; ownerId: string; x: number; y: number; life: number }

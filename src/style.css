@@ -2021,11 +2021,207 @@ button {
 .armory-gun-img {
   width: 52px;
   height: 40px;
+  max-width: 52px;
+  max-height: 40px;
+  flex-shrink: 0;
   object-fit: contain;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   padding: 2px;
+}
+.armory-modal img,
+.hud-overlay img {
+  max-width: 100%;
+}
+.sup-inline-icon {
+  max-width: 24px;
+  max-height: 24px;
+  flex-shrink: 0;
+}
+
+/* ==================== 多人联机紧凑半透明实战快购浮窗（不暂停、不挡摇杆、不糊全屏大图） ==================== */
+.popup-backdrop.is-coop-shop {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(38px, calc(env(safe-area-inset-top, 0px) + 34px)) 10px 8px;
+}
+
+.armory-modal.is-coop-shop {
+  pointer-events: auto;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1.5px solid rgba(56, 189, 248, 0.48);
+  border-radius: 14px;
+  padding: 7px 10px;
+  max-width: 560px;
+  width: min(92vw, 560px);
+  max-height: min(68vh, 360px);
+  gap: 6px;
+  color: #f8fafc;
+  box-shadow: 0 10px 28px rgba(2, 6, 23, 0.65);
+}
+
+.armory-modal.is-coop-shop .armory-header {
+  background: rgba(2, 6, 23, 0.62);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 4px 8px;
+  border-radius: 9px;
+  gap: 6px;
+}
+
+.armory-modal.is-coop-shop .armory-left-head {
+  gap: 8px;
+}
+
+.armory-modal.is-coop-shop .armory-left-head h2 {
+  font-size: 13.5px;
+}
+
+.armory-modal.is-coop-shop .seg-btn {
+  padding: 3px 9px;
+  font-size: 11.5px;
+}
+
+.armory-modal.is-coop-shop .shop-room-tag {
+  font-size: 11px;
+}
+
+.armory-modal.is-coop-shop .shop-close-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  background: rgba(239, 68, 68, 0.28);
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
+.armory-modal.is-coop-shop .armory-toast {
+  background: rgba(234, 179, 8, 0.2);
+  border: 1px solid rgba(250, 204, 21, 0.55);
+  color: #fef08a;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.armory-modal.is-coop-shop .armory-body {
+  gap: 6px;
+}
+
+.coop-shop-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(30, 41, 59, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 8px;
+  padding: 3px 6px;
+}
+
+.coop-shop-toolbar .btn-mini {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.coop-evo-done {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #d8b4fe;
+  padding-left: 4px;
+}
+
+.armory-modal.is-coop-shop .armory-gun-grid,
+.armory-modal.is-coop-shop .supply-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.armory-modal.is-coop-shop .armory-gun-card,
+.armory-modal.is-coop-shop .supply-card {
+  background: rgba(30, 41, 59, 0.78);
+  border: 1.5px solid rgba(148, 163, 184, 0.28);
+  border-radius: 9px;
+  padding: 5px 6px;
+  gap: 4px;
+  color: #f1f5f9;
+}
+
+.armory-modal.is-coop-shop .armory-gun-card.owned {
+  background: rgba(14, 116, 144, 0.3);
+  border-color: rgba(56, 189, 248, 0.6);
+}
+
+.armory-modal.is-coop-shop .armory-gun-card.equipped {
+  background: rgba(21, 128, 61, 0.32);
+  border-color: rgba(74, 222, 128, 0.75);
+}
+
+.armory-modal.is-coop-shop .armory-gun-card.locked {
+  background: rgba(15, 23, 42, 0.62);
+  opacity: 0.6;
+}
+
+.armory-modal.is-coop-shop .supply-card.support-highlight {
+  background: rgba(120, 53, 15, 0.34);
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.armory-modal.is-coop-shop .gun-card-head {
+  gap: 5px;
+}
+
+.armory-modal.is-coop-shop .armory-gun-img {
+  width: 34px;
+  height: 24px;
+  max-width: 34px;
+  max-height: 24px;
+  background: rgba(9, 14, 23, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 6px;
+  padding: 1px;
+}
+
+.armory-modal.is-coop-shop .gun-title,
+.armory-modal.is-coop-shop .sup-name {
+  font-size: 11.5px;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.armory-modal.is-coop-shop .gun-owned-pill {
+  font-size: 9px;
+  padding: 0 4px;
+}
+
+.armory-modal.is-coop-shop .gun-tag,
+.armory-modal.is-coop-shop .sup-meta {
+  font-size: 9.5px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.armory-modal.is-coop-shop .gun-card-actions .btn-mini,
+.armory-modal.is-coop-shop .supply-card .btn-mini {
+  padding: 3px 6px;
+  font-size: 11px;
+  border-radius: 7px;
+}
+
+@media (max-width: 520px) {
+  .armory-modal.is-coop-shop .armory-gun-grid,
+  .armory-modal.is-coop-shop .supply-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .gun-title {
   font-weight: 800;
@@ -4118,4 +4314,70 @@ body.pc-combat-cursor #game-canvas {
 
 .door-trap-hud-btn:active {
   transform: translateX(-50%) translateY(1px);
+}
+
+/* 多人联机实时延迟胶囊、一键战术信号标与队友军费支援按钮 */
+.coop-net-pill,
+.hud-coop-net {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 800;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1.5px solid rgba(56, 189, 248, 0.55);
+  color: #7dd3fc;
+  white-space: nowrap;
+}
+
+.coop-net-pill.is-p2p,
+.hud-coop-net.is-p2p {
+  border-color: rgba(74, 222, 128, 0.72);
+  color: #86efac;
+  background: rgba(6, 78, 59, 0.48);
+}
+
+.coop-midjoin-note {
+  color: #7dd3fc;
+  font-weight: 700;
+}
+
+.hud-coop-ping-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(30, 58, 138, 0.92), rgba(15, 23, 42, 0.94));
+  color: #bae6fd;
+  border: 1.5px solid #38bdf8;
+  border-radius: 10px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 3px 0 #020617;
+}
+
+.hud-coop-ping-btn:hover {
+  filter: brightness(1.14);
+}
+
+.sq-gift-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  background: linear-gradient(180deg, #22c55e, #15803d);
+  color: #ffffff;
+  border: 1px solid #86efac;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  font-weight: 900;
+  margin-left: 3px;
+}
+
+.sq-gift-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  filter: grayscale(0.6);
 }

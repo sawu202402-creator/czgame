@@ -1419,13 +1419,14 @@ export class UIManager {
               <strong class="rc-val">${lobby.roomCode}</strong>
               <button class="btn-cartoon btn-mini btn-yellow" id="btn-copy-code" type="button">${I18n.t('copyCodeBtn')}</button>
               <button class="btn-cartoon btn-mini btn-blue" id="btn-copy-link" type="button">${I18n.t('copyLinkBtn')}</button>
+              <span class="coop-net-pill ${CoopManager.hasDirectP2P() ? 'is-p2p' : ''}">${CoopManager.getNetStatusLabel()}</span>
             </div>
             <button class="btn-cartoon btn-mini btn-gray" id="btn-coop-leave" type="button">${I18n.t('leaveRoomBtn')}</button>
           </div>
 
           <div class="coop-slots-grid">${slotsHtml}</div>
 
-          <div class="coop-scale-banner">⚖️ ${scaleInfo}</div>
+          <div class="coop-scale-banner">⚖️ ${scaleInfo} · <span class="coop-midjoin-note">${I18n.t('coopMidJoinTip')}</span></div>
 
           ${hostControls}
         </div>
@@ -1640,15 +1641,17 @@ export class UIManager {
 
         <div class="hud-right-stack">
           <div class="hud-right">
+            <span class="hud-coop-net" id="hud-coop-net" style="display:none"></span>
             <button class="cash-pill" id="hud-cash" type="button">$80</button>
             <button class="hud-icon-btn" id="btn-pause" type="button">⏸</button>
           </div>
           <button class="moba-shop-btn" id="btn-open-armory" type="button">
-            <img class="moba-shop-sprite" src="./assets/prop_armory_kiosk.png" alt="" />
+            <img class="moba-shop-sprite" src="./assets/prop_armory_kiosk.png" width="18" height="18" alt="" />
             <span id="hud-shop-label">${I18n.t('shopBtn')}</span>
           </button>
+          <button class="hud-coop-ping-btn" id="btn-coop-ping" type="button" style="display:none">${I18n.t('coopPingBtn')}</button>
           <button class="quick-ammo-btn" id="btn-quick-ammo" type="button" style="display:none">
-            <img class="quick-ammo-gun" id="quick-ammo-icon" src="./assets/gun_smg.png" alt="" />
+            <img class="quick-ammo-gun" id="quick-ammo-icon" src="./assets/gun_smg.png" width="22" height="22" alt="" />
             <span class="quick-ammo-text" id="quick-ammo-label"></span>
             <kbd class="quick-ammo-key" id="quick-ammo-key">V</kbd>
           </button>
@@ -1657,7 +1660,7 @@ export class UIManager {
 
       <div class="hud-banner" id="hud-banner"></div>
       <div class="hud-loot-toast" id="hud-loot-toast">
-        <img class="loot-toast-img" id="loot-toast-img" src="./assets/gun_rifle.png" alt="" />
+        <img class="loot-toast-img" id="loot-toast-img" src="./assets/gun_rifle.png" width="36" height="36" alt="" />
         <div class="loot-toast-body">
           <div class="loot-toast-head">
             <span class="loot-toast-badge" id="loot-toast-badge">Lv.2</span>
@@ -1669,29 +1672,29 @@ export class UIManager {
 
       <div class="moba-wheel-zone">
         <button class="moba-arc-btn arc-pos-1 empty-slot" id="btn-arc-switch" type="button">
-          <img class="moba-arc-img" id="arc-switch-icon" src="./assets/gun_smg.png" alt="" />
+          <img class="moba-arc-img" id="arc-switch-icon" src="./assets/gun_smg.png" width="28" height="28" alt="" />
           <span class="moba-arc-badge" id="arc-switch-badge">${I18n.t('subWepBadge')}</span>
         </button>
 
         <button class="moba-arc-btn arc-pos-4 moba-skill-btn" id="btn-arc-skill" type="button">
-          <img class="moba-arc-img" id="arc-skill-icon" src="./assets/prop_ammo_box.png" alt="" />
+          <img class="moba-arc-img" id="arc-skill-icon" src="./assets/prop_ammo_box.png" width="28" height="28" alt="" />
           <span class="moba-arc-badge" id="arc-skill-badge">F</span>
         </button>
 
         <button class="moba-arc-btn arc-pos-2 moba-gren-btn" id="btn-grenade" type="button">
-          <img class="moba-arc-img" src="./assets/prop_grenade.png" alt="" />
+          <img class="moba-arc-img" src="./assets/prop_grenade.png" width="28" height="28" alt="" />
           <span class="moba-arc-badge" id="hud-gren-count">2</span>
         </button>
 
         <button class="moba-arc-btn arc-pos-3 moba-reload-btn" id="btn-arc-reload" type="button">
-          <img class="moba-reload-ico" src="./assets/prop_ammo_box.png" alt="" />
+          <img class="moba-reload-ico" src="./assets/prop_ammo_box.png" width="22" height="22" alt="" />
           <span class="moba-arc-badge" id="arc-reload-glyph">↻</span>
         </button>
 
         <button class="moba-main-atk" id="btn-main-attack" type="button">
           <span class="moba-atk-ring"></span>
           <span class="moba-atk-knob" id="main-atk-knob"></span>
-          <img class="moba-atk-gun" id="main-atk-icon" src="./assets/gun_pistol.png" alt="" />
+          <img class="moba-atk-gun" id="main-atk-icon" src="./assets/gun_pistol.png" width="42" height="42" alt="" />
           <span class="moba-atk-ammo" id="main-atk-ammo">14/∞</span>
         </button>
       </div>
@@ -1699,7 +1702,7 @@ export class UIManager {
       <div class="pc-hotbar" id="pc-hotbar">
         <button class="pc-wep-slot is-active" id="pc-slot-0" type="button">
           <kbd class="pc-key">1</kbd>
-          <img class="pc-wep-ico" id="pc-slot-0-ico" src="./assets/gun_pistol.png" alt="" />
+          <img class="pc-wep-ico" id="pc-slot-0-ico" src="./assets/gun_pistol.png" width="30" height="24" alt="" />
           <div class="pc-wep-meta">
             <span class="pc-wep-name" id="pc-slot-0-name">Pistol</span>
             <span class="pc-wep-ammo" id="pc-slot-0-ammo">14/∞</span>
@@ -1708,7 +1711,7 @@ export class UIManager {
 
         <button class="pc-wep-slot is-empty" id="pc-slot-1" type="button">
           <kbd class="pc-key" id="pc-slot-1-key">2</kbd>
-          <img class="pc-wep-ico" id="pc-slot-1-ico" src="./assets/gun_smg.png" alt="" />
+          <img class="pc-wep-ico" id="pc-slot-1-ico" src="./assets/gun_smg.png" width="30" height="24" alt="" />
           <div class="pc-wep-meta">
             <span class="pc-wep-name" id="pc-slot-1-name">${I18n.t('pcSlotEmpty')}</span>
             <span class="pc-wep-ammo" id="pc-slot-1-ammo">Q</span>
@@ -1749,6 +1752,21 @@ export class UIManager {
     const doorTrapBtn = hud.querySelector('#btn-door-trap') as HTMLButtonElement;
     this.bindCombatTap(doorTrapBtn, () => {
       this.engine.tryActivateNearestDoorTrap();
+    });
+
+    const coopPingBtn = hud.querySelector('#btn-coop-ping') as HTMLButtonElement;
+    this.bindCombatTap(coopPingBtn, () => {
+      this.engine.triggerTacticalPing();
+    });
+
+    const sqListEl = hud.querySelector('#hud-squad-list') as HTMLElement;
+    sqListEl.addEventListener('click', (ev) => {
+      const btn = (ev.target as HTMLElement).closest('[data-gift-peer]') as HTMLButtonElement | null;
+      if (btn?.dataset.giftPeer) {
+        ev.stopPropagation();
+        this.engine.sendCashAidToTeammate(btn.dataset.giftPeer, 100);
+        this.syncHUD();
+      }
     });
 
     const pauseBtn = hud.querySelector('#btn-pause') as HTMLButtonElement;
@@ -2125,15 +2143,20 @@ export class UIManager {
     if (!s.isCoop) {
       this.engine.modalPaused = true;
       PlatformSDK.gameplayStop();
+      this.engine.input.resetStates();
     }
-    this.engine.input.resetStates();
     this.renderArmoryShop('');
+  }
+
+  public isArmoryShopOpen(): boolean {
+    return this.armoryOpen;
   }
 
   private renderArmoryShop(toastMsg: string): void {
     const s = this.engine.state;
     if (!s) return;
 
+    const isCoopShop = Boolean(s.isCoop);
     const unlockedRooms = this.engine.getUnlockedExtraRoomsCount();
     const activeWep = s.player.weapons[s.player.activeSlot];
     const activeDef = WEAPONS[activeWep.defId];
@@ -2155,6 +2178,8 @@ export class UIManager {
             </button>
           </div>`;
 
+      const gunImgW = isCoopShop ? 34 : 52;
+      const gunImgH = isCoopShop ? 24 : 40;
       const gunCards = WEAPON_LIST.map((w) => {
         const owned = s.player.weapons.find((inst) => inst.defId === w.id);
         const isPermanent = !!owned && owned.tempWavesLeft === undefined;
@@ -2214,7 +2239,7 @@ export class UIManager {
         return `
           <div class="armory-gun-card ${isEquipped ? 'equipped' : isPermanent ? 'owned' : ''} ${locked ? 'locked' : ''}">
             <div class="gun-card-head">
-              <img src="./assets/gun_${w.id}.png" alt="${wTitle}" class="armory-gun-img" />
+              <img src="./assets/gun_${w.id}.png" width="${gunImgW}" height="${gunImgH}" alt="${wTitle}" class="armory-gun-img" />
               <div class="gun-head-info">
                 <div class="gun-title-row">
                   <span class="gun-title">${wTitle}</span>
@@ -2234,19 +2259,36 @@ export class UIManager {
       }).join('');
 
       const autoAmmoOn = Boolean(save.autoBuyAmmo);
-      const autoAmmoStrip = `
-        <div class="auto-ammo-strip ${autoAmmoOn ? 'active' : ''}">
-          <div class="auto-ammo-copy">
-            <strong>${I18n.t('autoAmmoTitle')}</strong>
-            <span>${I18n.t('autoAmmoDesc')}</span>
+      if (isCoopShop) {
+        const coopEvolveHtml = activeWep.evolved
+          ? `<span class="coop-evo-done">⚡ ${activeSupName}</span>`
+          : `<button class="btn-cartoon btn-mini ${canEvolve ? 'btn-purple' : 'btn-disabled'}" id="btn-shop-evolve" type="button">
+               ⚡ ${activeSupName} · ${isTut ? I18n.t('tutFreeEvoBtn') : I18n.t('evolveBtn', { cost: evoCost })}
+             </button>`;
+        const coopToolbar = `
+          <div class="coop-shop-toolbar">
+            ${coopEvolveHtml}
+            <button class="btn-cartoon btn-mini ${autoAmmoOn ? 'btn-green' : 'btn-gray'}" id="btn-toggle-auto-ammo" type="button">
+              ${autoAmmoOn ? I18n.t('autoAmmoOn') : I18n.t('autoAmmoOff')}
+            </button>
           </div>
-          <button class="btn-cartoon btn-mini ${autoAmmoOn ? 'btn-green' : 'btn-gray'}" id="btn-toggle-auto-ammo" type="button">
-            ${autoAmmoOn ? I18n.t('autoAmmoOn') : I18n.t('autoAmmoOff')}
-          </button>
-        </div>
-      `;
-      const arsenalHint = `<div class="arsenal-keep-bar">${I18n.t('arsenalKeepHint', { n: s.player.weapons.length })}</div>`;
-      contentHtml = `${evolveStrip}${autoAmmoStrip}${arsenalHint}<div class="armory-gun-grid">${gunCards}</div>`;
+        `;
+        contentHtml = `${coopToolbar}<div class="armory-gun-grid">${gunCards}</div>`;
+      } else {
+        const autoAmmoStrip = `
+          <div class="auto-ammo-strip ${autoAmmoOn ? 'active' : ''}">
+            <div class="auto-ammo-copy">
+              <strong>${I18n.t('autoAmmoTitle')}</strong>
+              <span>${I18n.t('autoAmmoDesc')}</span>
+            </div>
+            <button class="btn-cartoon btn-mini ${autoAmmoOn ? 'btn-green' : 'btn-gray'}" id="btn-toggle-auto-ammo" type="button">
+              ${autoAmmoOn ? I18n.t('autoAmmoOn') : I18n.t('autoAmmoOff')}
+            </button>
+          </div>
+        `;
+        const arsenalHint = `<div class="arsenal-keep-bar">${I18n.t('arsenalKeepHint', { n: s.player.weapons.length })}</div>`;
+        contentHtml = `${evolveStrip}${autoAmmoStrip}${arsenalHint}<div class="armory-gun-grid">${gunCards}</div>`;
+      }
     } else {
       const turretSupportText =
         s.hqSupportCooldown > 0
@@ -2269,47 +2311,47 @@ export class UIManager {
       contentHtml = `
         <div class="supply-grid">
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> ${I18n.t('supAlloyWinName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" width="22" height="22" alt="" /> ${I18n.t('supAlloyWinName')}</div>
             <div class="sup-meta">${I18n.t('supAlloyWinMeta', { done: alloyWin.done, total: alloyWin.total })}</div>
             <button class="btn-cartoon btn-mini ${alloyWinFull ? 'btn-gray' : canBuyAlloyWin ? 'btn-blue' : 'btn-disabled'}" data-tac="alloy_windows">${alloyWinFull ? I18n.t('supAlloyWinFullBtn') : I18n.t('supAlloyWinBtn')}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_armor.png" alt="" /> ${I18n.t('supArmorName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_armor.png" width="22" height="22" alt="" /> ${I18n.t('supArmorName')}</div>
             <div class="sup-meta">${I18n.t('supArmorMeta', { cur: Math.round(s.player.armor) })}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 380 && s.player.armor < 100 ? 'btn-blue' : 'btn-disabled'}" data-tac="armor">${I18n.t('buyBtn', { cost: 380 })}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_medkit.png" alt="" /> ${I18n.t('supMedkitName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_medkit.png" width="22" height="22" alt="" /> ${I18n.t('supMedkitName')}</div>
             <div class="sup-meta">${I18n.t('supMedkitMeta', { hp: Math.ceil(s.player.hp), max: s.player.maxHp })}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 300 && s.player.hp < s.player.maxHp ? 'btn-green' : 'btn-disabled'}" data-tac="medkit">${I18n.t('supMedkitBtn')}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_grenade.png" alt="" /> ${I18n.t('supGrenName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_grenade.png" width="22" height="22" alt="" /> ${I18n.t('supGrenName')}</div>
             <div class="sup-meta">${I18n.t('supGrenMeta', { n: s.player.grenades })}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 220 ? 'btn-yellow' : 'btn-disabled'}" data-tac="grenades">${I18n.t('buyBtn', { cost: 220 })}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_ammo_box.png" alt="" /> ${I18n.t('supAllAmmoName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_ammo_box.png" width="22" height="22" alt="" /> ${I18n.t('supAllAmmoName')}</div>
             <div class="sup-meta">${I18n.t('supAllAmmoMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 320 ? 'btn-blue' : 'btn-disabled'}" data-tac="all_ammo">${I18n.t('supAllAmmoBtn')}</button>
           </div>
           <div class="supply-card">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_turret.png" alt="" /> ${I18n.t('supTurretName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_turret.png" width="22" height="22" alt="" /> ${I18n.t('supTurretName')}</div>
             <div class="sup-meta">${I18n.t('supTurretMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 650 ? 'btn-yellow' : 'btn-disabled'}" data-tac="turret">${I18n.t('supTurretBtn')}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/drop_cash.png" alt="" /> ${I18n.t('supCashName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/drop_cash.png" width="22" height="22" alt="" /> ${I18n.t('supCashName')}</div>
             <div class="sup-meta">${I18n.t('supCashMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.armoryAdCooldown > 0 ? 'btn-disabled' : 'btn-yellow'}" id="btn-armory-ad" ${s.armoryAdCooldown > 0 ? 'disabled' : ''}>${cashSupportText}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_chest.png" alt="" /> ${I18n.t('supHqName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/prop_chest.png" width="22" height="22" alt="" /> ${I18n.t('supHqName')}</div>
             <div class="sup-meta">${I18n.t('supHqMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.hqSupportCooldown > 0 ? 'btn-disabled' : 'btn-green'}" id="btn-sup-turret" ${s.hqSupportCooldown > 0 ? 'disabled' : ''}>${turretSupportText}</button>
           </div>
           <div class="supply-card support-highlight">
-            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" alt="" /> ${I18n.t('supElecName')}</div>
+            <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" width="22" height="22" alt="" /> ${I18n.t('supElecName')}</div>
             <div class="sup-meta">${I18n.t('supElecMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.electricFortifyWaves > 0 ? 'btn-disabled' : 'btn-blue'}" id="btn-sup-elec" ${s.electricFortifyWaves > 0 ? 'disabled' : ''}>${elecSupportText}</button>
           </div>
@@ -2318,8 +2360,8 @@ export class UIManager {
     }
 
     this.modalRoot.innerHTML = `
-      <div class="popup-backdrop" id="armory-backdrop">
-        <div class="armory-modal">
+      <div class="popup-backdrop ${isCoopShop ? 'is-coop-shop' : ''}" id="armory-backdrop">
+        <div class="armory-modal ${isCoopShop ? 'is-coop-shop' : ''}">
           <header class="armory-header">
             <div class="armory-left-head">
               <h2>${I18n.t('armoryTitle')}</h2>
@@ -2330,7 +2372,7 @@ export class UIManager {
             </div>
             <div class="armory-wallet">
               <span class="shop-room-tag">${I18n.t('unlockedSectors', { n: unlockedRooms })}</span>
-              <span class="cash-pill">$${s.cash}</span>
+              <span class="cash-pill" id="armory-shop-cash">$${s.cash}</span>
               <button class="shop-close-btn" id="btn-close-armory">✕</button>
             </div>
           </header>
@@ -2557,9 +2599,26 @@ export class UIManager {
       (this.hudRoot!.querySelector('#hud-wave') as HTMLElement).textContent = waveStr;
     });
 
+    const coopNetKey = s.isCoop ? `${I18n.lang}:${CoopManager.hasDirectP2P() ? 1 : 0}:${CoopManager.rttMs}` : 'off';
+    setIfChanged('coopNetHud', coopNetKey, () => {
+      const netEl = this.hudRoot!.querySelector('#hud-coop-net') as HTMLElement;
+      const pingBtn = this.hudRoot!.querySelector('#btn-coop-ping') as HTMLButtonElement;
+      if (!s.isCoop) {
+        netEl.style.display = 'none';
+        pingBtn.style.display = 'none';
+      } else {
+        netEl.style.display = 'inline-flex';
+        netEl.classList.toggle('is-p2p', CoopManager.hasDirectP2P());
+        netEl.textContent = CoopManager.getNetStatusLabel();
+        pingBtn.style.display = 'inline-flex';
+        pingBtn.textContent = I18n.t('coopPingBtn');
+      }
+    });
+
+    const canGift100 = s.isCoop && s.cash >= 100 ? 1 : 0;
     const squadSig =
       s.remotePlayers.length > 0
-        ? `${I18n.lang}|` +
+        ? `${I18n.lang}|${canGift100}|` +
           s.remotePlayers
             .map(
               (rp) =>
@@ -2583,12 +2642,17 @@ export class UIManager {
               : rp.isBot
                 ? I18n.t('botRoleTag')
                 : `$${rp.cash}`;
+          const giftBtnHtml =
+            s.isCoop && !rp.isBot && !rp.spectating
+              ? `<button class="sq-gift-btn" type="button" data-gift-peer="${rp.peerId}" ${canGift100 ? '' : 'disabled'}>+$100</button>`
+              : '';
           return `
             <div class="squad-hud-chip ${rp.downed ? 'is-downed' : ''}">
               <span class="sq-dot" style="background:${rp.color}"></span>
               <span class="sq-name">${rp.callsign}</span>
               <div class="sq-hp-track"><div class="sq-hp-fill" style="width:${hpPct}%;background:${rp.downed ? '#ef4444' : rp.color}"></div></div>
               <span class="sq-meta">${stText}</span>
+              ${giftBtnHtml}
             </div>
           `;
         })
@@ -2646,6 +2710,12 @@ export class UIManager {
     setIfChanged('cash', cashStr, () => {
       (this.hudRoot!.querySelector('#hud-cash') as HTMLElement).textContent = cashStr;
     });
+    if (this.armoryOpen && s.isCoop) {
+      const shopCashEl = this.modalRoot.querySelector('#armory-shop-cash') as HTMLElement | null;
+      if (shopCashEl && shopCashEl.textContent !== cashStr) {
+        shopCashEl.textContent = cashStr;
+      }
+    }
 
     const pulseShop =
       s.waveState === 'intermission' || (s.player.weapons.length === 1 && s.cash >= 400) ? '1' : '0';
