@@ -67,6 +67,8 @@ export class GameEngine {
   // 56px 网格 BFS 流场寻路（支持任意不规则多边形房间、走廊与家具绕障！）
   private flowDist: Int16Array = new Int16Array(0);
   private walkableGrid: Uint8Array = new Uint8Array(0);
+  private botBfsDist: Int16Array = new Int16Array(0);
+  private botBfsQueue: Int32Array = new Int32Array(0);
   private staticBlockers: Rect[] = [];
   private flowTimer = 0;
   private lastViewW = 1280;
@@ -467,6 +469,20 @@ export class GameEngine {
     this.modalPaused = false;
     this.rebuildWalkableMask();
     this.resolveEntityInsideWalls(this.state.player);
+    for (const rp of this.state.remotePlayers) {
+      if (rp.isBot) {
+        const safe = this.snapToNearestWalkablePoint(rp.x, rp.y);
+        rp.x = safe.x;
+        rp.y = safe.y;
+      } else {
+        const ent = { x: rp.x, y: rp.y, radius: 15 };
+        this.resolveEntityInsideWalls(ent);
+        rp.x = ent.x;
+        rp.y = ent.y;
+      }
+      rp.netTx = rp.x;
+      rp.netTy = rp.y;
+    }
     this.rebuildFlowField();
     if (!isCoop || CoopManager.role === 'host') {
       this.prepareWave(1);
@@ -5233,6 +5249,12 @@ export class GameEngine {
         s.player.hp = Math.min(s.player.maxHp, s.player.hp + healAmt);
         this.spawnFloatingText(s.player.x, s.player.y - 28, I18n.t('ftMedDrop', { n: healAmt }), '#4ade80', 1.15);
       }
+      for (const rp of s.remotePlayers) {
+        if (rp.isBot && !rp.downed && !rp.spectating && rp.hp > 0) {
+          const botRatio = rp.peerId === pickerId ? 0.22 : 0.12;
+          rp.hp = Math.min(rp.maxHp, rp.hp + Math.max(10, Math.round(rp.maxHp * botRatio)));
+        }
+      }
       SoundFX.fanfare();
       if (s.isCoop && CoopManager.role === 'host') {
         for (const rp of s.remotePlayers) {
@@ -5461,7 +5483,223 @@ export class GameEngine {
     this.callbacks.onPlayerDowned(!s.reviveUsed);
   }
 
-  // ==================== AI 特警战术小队（自动掩护集火 / 倒地互救 / 撤离集结） ====================
+  // ==================== AI 特警战术小队（独立守窗布防 / 走廊BFS寻路 / 倒地互救 / 绝不穿墙瞬移） ====================
+
+  private isPointInsideUnlockedFloor(x: number, y: number): boolean {
+    const s = this.state;
+    if (!s) return false;
+    for (const rm of s.rooms) {
+      if (!rm.unlocked) continue;
+      for (const r of rm.rects) {
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private isBotSpotClear(x: number, y: number, roomId?: string): boolean {
+    const s = this.state;
+    if (!s) return false;
+    const { gridCols: cols, gridRows: rows, cellSize: G } = s.stage;
+    const gx = Math.floor(x / G);
+    const gy = Math.floor(y / G);
+    if (gx < 0 || gx >= cols || gy < 0 || gy >= rows) return false;
+    if (!this.walkableGrid[gy * cols + gx]) return false;
+    if (roomId) {
+      const rm = s.rooms.find((r) => r.id === roomId && r.unlocked);
+      if (!rm || !rm.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)) {
+        return false;
+      }
+    } else if (!this.isPointInsideUnlockedFloor(x, y)) {
+      return false;
+    }
+    for (let i = 0; i < this.staticBlockers.length; i++) {
+      if (this.circleIntersectsRect(x, y, 15.5, this.staticBlockers[i])) return false;
+    }
+    return true;
+  }
+
+  private snapToNearestWalkablePoint(x: number, y: number, preferredRoomId?: string): { x: number; y: number } {
+    const s = this.state;
+    if (!s) return { x, y };
+    if (this.isBotSpotClear(x, y, preferredRoomId)) {
+      return { x, y };
+    }
+    const { gridCols: cols, gridRows: rows, cellSize: G } = s.stage;
+    const cgx = Math.max(0, Math.min(cols - 1, Math.floor(x / G)));
+    const cgy = Math.max(0, Math.min(rows - 1, Math.floor(y / G)));
+
+    const searchWithRoom = (rid?: string): { x: number; y: number } | null => {
+      let bestX = 0;
+      let bestY = 0;
+      let bestD = Infinity;
+      const maxR = 7;
+      for (let dy = -maxR; dy <= maxR; dy++) {
+        const ny = cgy + dy;
+        if (ny < 0 || ny >= rows) continue;
+        for (let dx = -maxR; dx <= maxR; dx++) {
+          const nx = cgx + dx;
+          if (nx < 0 || nx >= cols) continue;
+          if (!this.walkableGrid[ny * cols + nx]) continue;
+          const wx = (nx + 0.5) * G;
+          const wy = (ny + 0.5) * G;
+          const d = Math.hypot(wx - x, wy - y);
+          if (d >= bestD) continue;
+          if (!this.isBotSpotClear(wx, wy, rid)) continue;
+          bestD = d;
+          bestX = wx;
+          bestY = wy;
+        }
+      }
+      return bestD < Infinity ? { x: bestX, y: bestY } : null;
+    };
+
+    if (preferredRoomId) {
+      const inRoom = searchWithRoom(preferredRoomId);
+      if (inRoom) return inRoom;
+    }
+    const anyUnlocked = searchWithRoom(undefined);
+    if (anyUnlocked) return anyUnlocked;
+    return { x: s.player.x, y: s.player.y };
+  }
+
+  private findBotWalkableCell(wx: number, wy: number): [number, number] | null {
+    const s = this.state;
+    if (!s) return null;
+    const { gridCols: cols, gridRows: rows, cellSize: G } = s.stage;
+    const gx = Math.max(0, Math.min(cols - 1, Math.floor(wx / G)));
+    const gy = Math.max(0, Math.min(rows - 1, Math.floor(wy / G)));
+    if (this.walkableGrid[gy * cols + gx]) return [gx, gy];
+
+    let bestCell: [number, number] | null = null;
+    let bestD = Infinity;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = gx + dx;
+        const ny = gy + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        if (!this.walkableGrid[ny * cols + nx]) continue;
+        const cx = (nx + 0.5) * G;
+        const cy = (ny + 0.5) * G;
+        // 绝不跨墙取邻格！
+        if (this.findBlockingWallOrLockedDoor((wx + cx) * 0.5, (wy + cy) * 0.5, 8)) continue;
+        const d = Math.hypot(cx - wx, cy - wy);
+        if (d < bestD) {
+          bestD = d;
+          bestCell = [nx, ny];
+        }
+      }
+    }
+    return bestCell;
+  }
+
+  private computeBotSteerWaypoint(
+    botX: number,
+    botY: number,
+    goalX: number,
+    goalY: number
+  ): { x: number; y: number; reachable: boolean; directLine: boolean } {
+    const s = this.state!;
+    const directDist = Math.hypot(goalX - botX, goalY - botY);
+    if (directDist <= 260 && this.hasClearWalkLine(botX, botY, goalX, goalY)) {
+      return { x: goalX, y: goalY, reachable: true, directLine: true };
+    }
+
+    const startCell = this.findBotWalkableCell(botX, botY);
+    const goalCell = this.findBotWalkableCell(goalX, goalY);
+    if (!startCell || !goalCell) {
+      return { x: botX, y: botY, reachable: false, directLine: false };
+    }
+    const [sx, sy] = startCell;
+    const [gx, gy] = goalCell;
+    if (sx === gx && sy === gy) {
+      return { x: goalX, y: goalY, reachable: true, directLine: true };
+    }
+
+    const { gridCols: cols, gridRows: rows, cellSize: G } = s.stage;
+    const total = cols * rows;
+    if (this.botBfsDist.length !== total) {
+      this.botBfsDist = new Int16Array(total);
+      this.botBfsQueue = new Int32Array(total);
+    }
+    this.botBfsDist.fill(30000);
+
+    const goalIdx = gy * cols + gx;
+    const startIdx = sy * cols + sx;
+    this.botBfsDist[goalIdx] = 0;
+    let head = 0;
+    let tail = 0;
+    this.botBfsQueue[tail++] = goalIdx;
+
+    const dirs = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    let stopDist = 30000;
+    while (head < tail) {
+      const cur = this.botBfsQueue[head++];
+      const curD = this.botBfsDist[cur];
+      if (curD > stopDist) break;
+      if (cur === startIdx) {
+        // 多扩一层确保起点周围 8 邻格距离完整，支持丝滑斜切过门
+        stopDist = curD + 1;
+      }
+      const cx = cur % cols;
+      const cy = (cur / cols) | 0;
+      const nextD = curD + 1;
+      for (const [dx, dy] of dirs) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const nidx = ny * cols + nx;
+        if (this.botBfsDist[nidx] <= nextD) continue;
+        if (this.canStepBetweenCells(cx, cy, nx, ny)) {
+          this.botBfsDist[nidx] = nextD;
+          this.botBfsQueue[tail++] = nidx;
+        }
+      }
+    }
+
+    const startD = this.botBfsDist[startIdx];
+    if (startD >= 30000) {
+      return { x: botX, y: botY, reachable: false, directLine: false };
+    }
+
+    const pickBestNeighbor = (cx: number, cy: number, curBest: number): [number, number] => {
+      let bx = cx;
+      let by = cy;
+      let bd = curBest;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const d = this.botBfsDist[ny * cols + nx];
+          if (d < bd && this.canStepBetweenCells(cx, cy, nx, ny)) {
+            bd = d;
+            bx = nx;
+            by = ny;
+          }
+        }
+      }
+      return [bx, by];
+    };
+
+    const [n1x, n1y] = pickBestNeighbor(sx, sy, startD);
+    const [n2x, n2y] = pickBestNeighbor(n1x, n1y, this.botBfsDist[n1y * cols + n1x]);
+    const w2x = (n2x + 0.5) * G;
+    const w2y = (n2y + 0.5) * G;
+    if ((n2x !== n1x || n2y !== n1y) && this.hasClearWalkLine(botX, botY, w2x, w2y)) {
+      return { x: w2x, y: w2y, reachable: true, directLine: false };
+    }
+    return { x: (n1x + 0.5) * G, y: (n1y + 0.5) * G, reachable: true, directLine: false };
+  }
 
   private updateSquadBots(dt: number): void {
     const s = this.state;
@@ -5477,11 +5715,11 @@ export class GameEngine {
       return;
     }
 
-    // 2. 主角站立时靠近倒地 AI 队友（68px 内）可自动扶起 AI 队友
+    // 2. 主角站立时靠近倒地 AI 队友（74px 内）可自动扶起 AI 队友
     if (!p.downed && !p.spectating && p.hp > 0) {
       for (const b of bots) {
         if (!b.downed) continue;
-        if (Math.hypot(p.x - b.x, p.y - b.y) <= 68) {
+        if (Math.hypot(p.x - b.x, p.y - b.y) <= 74) {
           b.reviveProgress = Math.min(1, b.reviveProgress + dt / 2.0);
           if (b.reviveProgress >= 1) {
             b.downed = false;
@@ -5497,7 +5735,7 @@ export class GameEngine {
       }
     }
 
-    const nowSec = performance.now() * 0.001;
+    const unlockedWins = s.windows.filter((w) => s.rooms.find((r) => r.id === w.roomId)?.unlocked);
 
     for (let idx = 0; idx < bots.length; idx++) {
       const bot = bots[idx];
@@ -5506,11 +5744,18 @@ export class GameEngine {
       if (bot.muzzleFlashTimer > 0) bot.muzzleFlashTimer = Math.max(0, bot.muzzleFlashTimer - dt);
       if (bot.recoilOffset > 0) bot.recoilOffset = Math.max(0, bot.recoilOffset - dt * 24);
 
+      // 安全兜底：确保 AI 永远位于已解锁房间合法地板内（绝不越入未解锁房间或墙外）
+      if (!this.isPointInsideUnlockedFloor(bot.x, bot.y)) {
+        const safe = this.snapToNearestWalkablePoint(bot.x, bot.y);
+        bot.x = safe.x;
+        bot.y = safe.y;
+      }
+
       if (bot.downed) {
         bot.isMoving = false;
+        bot.repairProgress = 0;
         bot.bleedoutTimer = Math.max(0, bot.bleedoutTimer - dt);
         if (bot.bleedoutTimer <= 0) {
-          // 失血耗尽后等待本波结束自动归队
           bot.bleedoutTimer = 0;
           bot.spectating = true;
           bot.downed = false;
@@ -5530,21 +5775,30 @@ export class GameEngine {
               : ['smg', 'shotgun', 'rifle'];
       bot.activeWepId = tierGuns[idx % tierGuns.length];
       bot.evolved = s.wave >= 6;
+      const wepDef = WEAPONS[bot.activeWepId] || WEAPONS.smg;
 
-      // 决策移动目标：1) 优先抢救倒地主角 -> 2) 抢救倒地同伴 -> 3) 直升机撤离停机坪集结 -> 4) 战术侧翼阵型与拉扯
-      let goalX = p.x;
-      let goalY = p.y;
-      let moveSpd = 205;
+      bot.botDecisionTimer = (bot.botDecisionTimer || 0) - dt;
+
+      let goalX = bot.botGoalX ?? bot.x;
+      let goalY = bot.botGoalY ?? bot.y;
+      let moveSpd = 206;
+      let stopRadius = 12;
+      let isUrgentRescue = false;
+      let repairingWin: RunSnapshot['windows'][number] | null = null;
 
       const downedPeer = !p.downed ? bots.find((ob) => ob !== bot && ob.downed) : null;
 
+      // 优先级 1：抢救倒地主角
       if (p.downed) {
-        goalX = p.x;
-        goalY = p.y;
+        isUrgentRescue = true;
+        const safeP = this.snapToNearestWalkablePoint(p.x, p.y);
+        goalX = safeP.x;
+        goalY = safeP.y;
         moveSpd = 248;
-        if (Math.hypot(bot.x - p.x, bot.y - p.y) <= 64) {
+        stopRadius = 38;
+        if (Math.hypot(bot.x - p.x, bot.y - p.y) <= 76) {
           p.reviveProgress = Math.min(1, p.reviveProgress + dt / 2.1);
-          moveSpd = 40;
+          moveSpd = 0;
           if (p.reviveProgress >= 1) {
             p.downed = false;
             p.spectating = false;
@@ -5555,7 +5809,6 @@ export class GameEngine {
             SoundFX.fanfare();
             this.showBanner(I18n.t('botRevivedYou', { name: bot.callsign }), 2.8);
             this.spawnHitSparks(p.x, p.y, '#4ade80', 16);
-            // 救援震退周围贴脸丧尸，防止刚起身瞬间再次暴毙
             for (const z of s.zombies) {
               const d = Math.hypot(z.x - p.x, z.y - p.y);
               if (d < 135 && d > 0.1) {
@@ -5566,13 +5819,18 @@ export class GameEngine {
             }
           }
         }
-      } else if (downedPeer) {
-        goalX = downedPeer.x;
-        goalY = downedPeer.y;
-        moveSpd = 232;
-        if (Math.hypot(bot.x - downedPeer.x, bot.y - downedPeer.y) <= 64) {
+      }
+      // 优先级 2：抢救倒地 AI 同伴
+      else if (downedPeer) {
+        isUrgentRescue = true;
+        const safeMate = this.snapToNearestWalkablePoint(downedPeer.x, downedPeer.y);
+        goalX = safeMate.x;
+        goalY = safeMate.y;
+        moveSpd = 234;
+        stopRadius = 38;
+        if (Math.hypot(bot.x - downedPeer.x, bot.y - downedPeer.y) <= 76) {
           downedPeer.reviveProgress = Math.min(1, downedPeer.reviveProgress + dt / 2.2);
-          moveSpd = 35;
+          moveSpd = 0;
           if (downedPeer.reviveProgress >= 1) {
             downedPeer.downed = false;
             downedPeer.bleedoutTimer = 0;
@@ -5582,157 +5840,375 @@ export class GameEngine {
             this.spawnHitSparks(downedPeer.x, downedPeer.y, '#38bdf8', 12);
           }
         }
-      } else if (s.waveState === 'extraction') {
-        const padAng = (bot.botOrbitSeed || 0) + nowSec * 0.45;
-        goalX = s.stage.helipadPos.x + Math.cos(padAng) * 44;
-        goalY = s.stage.helipadPos.y + Math.sin(padAng) * 44;
-        moveSpd = 235;
-      } else {
-        const orbitAng = (bot.botOrbitSeed || 0) + nowSec * 0.38;
-        const orbitR = 112 + (idx % 2) * 28;
-        goalX = p.x + Math.cos(orbitAng) * orbitR;
-        goalY = p.y + Math.sin(orbitAng) * orbitR;
+      }
+      // 优先级 3：直升机撤离阶段 -> 沿走廊门框真实寻路至停机坪固定战术扇区坚守，绝不原地转圈！
+      else if (s.waveState === 'extraction') {
+        const sectorAng = idx * ((Math.PI * 2) / Math.max(1, bots.length)) + 0.52;
+        const padSpot = this.snapToNearestWalkablePoint(
+          s.stage.helipadPos.x + Math.cos(sectorAng) * 42,
+          s.stage.helipadPos.y + Math.sin(sectorAng) * 42
+        );
+        goalX = padSpot.x;
+        goalY = padSpot.y;
+        moveSpd = 236;
+        stopRadius = 14;
+      }
+      // 优先级 4~6：常规战术作战（室内破防拉扯 / 顺手拾取空投技能包 / 独立分窗驻守与修窗）
+      else {
+        // 检查附近是否有已破窗入室的近身威胁丧尸
+        let indoorThreat: ZombieEntity | null = null;
+        let indoorBestScore = Infinity;
+        for (const z of s.zombies) {
+          if (z.hp <= 0 || !z.insideBuilding) continue;
+          const db = Math.hypot(z.x - bot.x, z.y - bot.y);
+          const dp = Math.hypot(z.x - p.x, z.y - p.y);
+          if (db > 430 && dp > 350) continue;
+          const sc = (isBossKind(z.kind) ? 0.65 : z.kind === 'thief' ? 0.55 : 1) * Math.min(db, dp * 0.9 + 40);
+          if (sc < indoorBestScore) {
+            indoorBestScore = sc;
+            indoorThreat = z;
+          }
+        }
+
+        // 检查脚边是否有急需拾取的强力道具或急救包
+        const nearValuableDrop = s.drops.find(
+          (dr) =>
+            (dr.kind === 'powerup' || (dr.kind === 'heal' && (bot.hp < bot.maxHp * 0.72 || p.hp < p.maxHp * 0.78))) &&
+            Math.hypot(dr.x - bot.x, dr.y - bot.y) <= 170 &&
+            this.isPointInsideUnlockedFloor(dr.x, dr.y) &&
+            this.hasClearWalkLine(bot.x, bot.y, dr.x, dr.y)
+        );
+
+        if (nearValuableDrop) {
+          const safeDrop = this.snapToNearestWalkablePoint(nearValuableDrop.x, nearValuableDrop.y);
+          goalX = safeDrop.x;
+          goalY = safeDrop.y;
+          moveSpd = 216;
+          stopRadius = 8;
+        } else if (indoorThreat) {
+          const distToZ = Math.hypot(indoorThreat.x - bot.x, indoorThreat.y - bot.y);
+          const hasLos = this.hasBulletLineOfSight(bot.x, bot.y, indoorThreat.x, indoorThreat.y);
+          const isCloseWep =
+            wepDef.id === 'shotgun' || wepDef.id === 'autoshotgun' || wepDef.id === 'flamethrower';
+          const idealDist = isCloseWep ? 118 : 168;
+
+          if (!hasLos) {
+            // 隔墙看不见入室丧尸时，沿门框寻路切入支援
+            const chaseSpot = this.snapToNearestWalkablePoint(indoorThreat.x, indoorThreat.y);
+            goalX = chaseSpot.x;
+            goalY = chaseSpot.y;
+            moveSpd = 215;
+          } else if (distToZ < idealDist - 30) {
+            // 丧尸逼近时在室内可通行地板上战术风筝后撤（绝不退进墙里）
+            const awayAng = Math.atan2(bot.y - indoorThreat.y, bot.x - indoorThreat.x);
+            const flankSign = idx % 2 === 0 ? 1 : -1;
+            const candidates = [0, 0.55 * flankSign, -0.55 * flankSign, 1.05 * flankSign, -1.05 * flankSign];
+            let pickedKite: { x: number; y: number } | null = null;
+            for (const offA of candidates) {
+              const tx = bot.x + Math.cos(awayAng + offA) * 86;
+              const ty = bot.y + Math.sin(awayAng + offA) * 86;
+              if (this.isBotSpotClear(tx, ty) && this.hasClearWalkLine(bot.x, bot.y, tx, ty)) {
+                pickedKite = { x: tx, y: ty };
+                break;
+              }
+            }
+            if (pickedKite) {
+              goalX = pickedKite.x;
+              goalY = pickedKite.y;
+              moveSpd = 212;
+            }
+          } else if (distToZ > idealDist + 95) {
+            const toAng = Math.atan2(indoorThreat.y - bot.y, indoorThreat.x - bot.x);
+            const adv = this.snapToNearestWalkablePoint(
+              indoorThreat.x - Math.cos(toAng) * idealDist,
+              indoorThreat.y - Math.sin(toAng) * idealDist
+            );
+            goalX = adv.x;
+            goalY = adv.y;
+          } else if (bot.botDecisionTimer <= 0 || bot.botGoalX === undefined) {
+            // 已处于最佳射程且有视线：稳稳立定射击，不乱跑转圈
+            goalX = bot.x;
+            goalY = bot.y;
+            bot.botDecisionTimer = 0.65;
+          }
+          bot.botLookAngle = Math.atan2(indoorThreat.y - bot.y, indoorThreat.x - bot.x);
+        } else if (unlockedWins.length > 0) {
+          // 独立分窗驻守与破窗修补：各 AI 自动分担不同防线窗口，主动避开主角正在守的窗户！
+          const curWin = unlockedWins.find((w) => w.id === bot.botAssignedWinId);
+          if (!curWin || bot.botDecisionTimer <= 0) {
+            let bestWin = unlockedWins[idx % unlockedWins.length];
+            let bestWinScore = -1e9;
+
+            for (const w of unlockedWins) {
+              const wcx = w.x + w.w * 0.5;
+              const wcy = w.y + w.h * 0.5;
+              let nearZ = 0;
+              for (const z of s.zombies) {
+                if (z.hp > 0 && (z.targetWindowId === w.id || Math.hypot(z.x - wcx, z.y - wcy) < 260)) {
+                  if (Math.hypot(z.x - wcx, z.y - wcy) < 340) nearZ += 1;
+                }
+              }
+              const missingPlanks = Math.max(0, w.maxPlanks - w.planks);
+              const playerDist = Math.hypot(p.x - wcx, p.y - wcy);
+              const botDist = Math.hypot(bot.x - wcx, bot.y - wcy);
+              const otherAssigned = bots.filter(
+                (ob) => ob !== bot && !ob.downed && !ob.spectating && ob.botAssignedWinId === w.id
+              ).length;
+
+              let score = nearZ * 56 + missingPlanks * 24;
+              // 主动让出主角身边的窗户，去协防侧翼与背后空虚窗口
+              if (playerDist < 175 && unlockedWins.length > 1) score -= 75;
+              // 多名 AI 自动分散镇守不同窗户
+              score -= otherAssigned * 105;
+              // 保持当前驻守点定力，防止频繁左右横跳
+              if (bot.botAssignedWinId === w.id) score += 34;
+              // 适度兼顾主角所在战区走廊距离，玩家推进开新房后自然跟进协防新战区
+              score -= playerDist * 0.065 + botDist * 0.025;
+              if (playerDist > 680 && nearZ === 0) score -= 115;
+
+              if (score > bestWinScore) {
+                bestWinScore = score;
+                bestWin = w;
+              }
+            }
+            bot.botAssignedWinId = bestWin.id;
+            bot.botDecisionTimer = 1.25 + (idx % 3) * 0.22;
+          }
+
+          const guardWin = unlockedWins.find((w) => w.id === bot.botAssignedWinId) || unlockedWins[0];
+          const wf = this.getWindowFrame(guardWin);
+          const sameWinRank = bots
+            .filter((ob) => !ob.downed && !ob.spectating && ob.botAssignedWinId === guardWin.id)
+            .indexOf(bot);
+          const latSlot = sameWinRank <= 0 ? (idx % 2 === 0 ? -24 : 24) : (sameWinRank - 0.5) * 44;
+          const clampedLat = Math.max(-wf.winSpan * 0.34, Math.min(wf.winSpan * 0.34, latSlot));
+
+          const canSafelyRepair =
+            guardWin.planks < guardWin.maxPlanks &&
+            !this.hasZombieVaultingWindow(guardWin) &&
+            !s.zombies.some((z) => z.hp > 0 && Math.hypot(z.x - wf.wcx, z.y - wf.wcy) < 96);
+
+          if (canSafelyRepair) {
+            repairingWin = guardWin;
+            const repSpot = this.snapToNearestWalkablePoint(
+              wf.wcx + wf.inX * 52 + wf.latX * clampedLat * 0.5,
+              wf.wcy + wf.inY * 52 + wf.latY * clampedLat * 0.5,
+              guardWin.roomId
+            );
+            goalX = repSpot.x;
+            goalY = repSpot.y;
+            stopRadius = 14;
+          } else {
+            const standoff = 98 + (idx % 2) * 18;
+            const postSpot = this.snapToNearestWalkablePoint(
+              wf.wcx + wf.inX * standoff + wf.latX * clampedLat,
+              wf.wcy + wf.inY * standoff + wf.latY * clampedLat,
+              guardWin.roomId
+            );
+            goalX = postSpot.x;
+            goalY = postSpot.y;
+            stopRadius = 12;
+          }
+          bot.botLookAngle = Math.atan2(wf.outY, wf.outX);
+        } else {
+          // 无窗房间兜底：静态战术侧翼站位（固定扇区角，绝不绕主角旋转）
+          const staticAng = idx * 2.094 + 0.75;
+          const flankSpot = this.snapToNearestWalkablePoint(
+            p.x + Math.cos(staticAng) * 96,
+            p.y + Math.sin(staticAng) * 96
+          );
+          goalX = flankSpot.x;
+          goalY = flankSpot.y;
+          stopRadius = 14;
+        }
       }
 
-      // 近身防贴脸拉扯排斥力 + 队友间柔和防重叠分离力
+      bot.botGoalX = goalX;
+      bot.botGoalY = goalY;
+
+      // 真实走廊门框 BFS 寻路 + 危险红圈/酸液池规避 + 礼貌让出主角贴身空间
+      const ox = bot.x;
+      const oy = bot.y;
+      const distToGoal = Math.hypot(goalX - bot.x, goalY - bot.y);
+
       let repX = 0;
       let repY = 0;
-      if (!p.downed) {
+      if (!isUrgentRescue) {
+        // 自动躲避轰炸红圈、核脉冲、毒孢子与酸液池
+        for (const hz of s.hazardZones) {
+          const d = Math.hypot(bot.x - hz.x, bot.y - hz.y);
+          const safeR = hz.radius + 26;
+          if (d < safeR) {
+            const dirX = d > 0.5 ? (bot.x - hz.x) / d : Math.cos(idx * 2.1);
+            const dirY = d > 0.5 ? (bot.y - hz.y) / d : Math.sin(idx * 2.1);
+            repX += dirX * 240;
+            repY += dirY * 240;
+          }
+        }
+        for (const ap of s.acidPools) {
+          const d = Math.hypot(bot.x - ap.x, bot.y - ap.y);
+          const safeR = ap.radius + 20;
+          if (d < safeR && d > 0.5) {
+            repX += ((bot.x - ap.x) / d) * 165;
+            repY += ((bot.y - ap.y) / d) * 165;
+          }
+        }
+        // 主动与主角保持舒适战术间距（主角走近时礼貌让位，绝不贴脸围堵）
+        if (!p.downed && s.waveState !== 'extraction') {
+          const dp = Math.hypot(bot.x - p.x, bot.y - p.y);
+          if (dp < 58 && dp > 0.5) {
+            const push = (58 - dp) / 58;
+            repX += ((bot.x - p.x) / dp) * push * 135;
+            repY += ((bot.y - p.y) / dp) * push * 135;
+          }
+        }
+        // 近身丧尸推离防抱死
         for (const z of s.zombies) {
+          if (z.hp <= 0) continue;
           const d = Math.hypot(bot.x - z.x, bot.y - z.y);
-          if (d < 92 && d > 0.1) {
-            const push = (92 - d) / 92;
-            repX += ((bot.x - z.x) / d) * push * 165;
-            repY += ((bot.y - z.y) / d) * push * 165;
+          if (d < 74 && d > 0.5) {
+            const push = (74 - d) / 74;
+            repX += ((bot.x - z.x) / d) * push * 145;
+            repY += ((bot.y - z.y) / d) * push * 145;
           }
         }
       }
       for (const ob of bots) {
-        if (ob === bot || ob.spectating) continue;
+        if (ob === bot || ob.spectating || ob.downed) continue;
         const d = Math.hypot(bot.x - ob.x, bot.y - ob.y);
-        if (d < 46 && d > 0.1) {
-          repX += ((bot.x - ob.x) / d) * 85;
-          repY += ((bot.y - ob.y) / d) * 85;
+        if (d < 44 && d > 0.5) {
+          const push = (44 - d) / 44;
+          repX += ((bot.x - ob.x) / d) * push * 95;
+          repY += ((bot.y - ob.y) / d) * push * 95;
         }
       }
 
-      // 若离目标隔墙，优先导航至最近已解锁门框中心穿门而过；若仍受阻超过 1.1s 自动战术翻越归队！
-      const distToPlayer = Math.hypot(bot.x - p.x, bot.y - p.y);
-      if (distToPlayer > 560 && s.waveState !== 'extraction') {
-        const reloc = { x: p.x + (idx - 1) * 28, y: p.y + 24, radius: 15 };
-        this.resolveEntityInsideWalls(reloc);
-        bot.x = reloc.x;
-        bot.y = reloc.y;
-        bot.botStuckTimer = 0;
-      } else {
-        let navX = goalX + repX;
-        let navY = goalY + repY;
-        const wallBetween =
-          this.findBlockingWallOrLockedDoor(bot.x + (goalX - bot.x) * 0.25, bot.y + (goalY - bot.y) * 0.25, 10) ||
-          this.findBlockingWallOrLockedDoor(bot.x + (goalX - bot.x) * 0.5, bot.y + (goalY - bot.y) * 0.5, 10) ||
-          this.findBlockingWallOrLockedDoor(bot.x + (goalX - bot.x) * 0.75, bot.y + (goalY - bot.y) * 0.75, 10);
-        if (wallBetween) {
-          // 隔墙时自动取道最近已开启门框中心穿门而过
-          let bestDoorScore = 1e9;
-          for (const d of s.doors) {
-            if (!d.unlocked) continue;
-            const dcx = d.x + d.w * 0.5;
-            const dcy = d.y + d.h * 0.5;
-            const score = Math.hypot(bot.x - dcx, bot.y - dcy) + Math.hypot(goalX - dcx, goalY - dcy);
-            if (score < bestDoorScore && Math.hypot(bot.x - dcx, bot.y - dcy) > 20) {
-              bestDoorScore = score;
-              navX = dcx;
-              navY = dcy;
-            }
+      const repMag = Math.hypot(repX, repY);
+      if (moveSpd > 0 && (distToGoal > stopRadius || repMag > 18)) {
+        let vx = 0;
+        let vy = 0;
+        let navigatingDoorway = false;
+        if (distToGoal > stopRadius) {
+          const wp = this.computeBotSteerWaypoint(bot.x, bot.y, goalX, goalY);
+          navigatingDoorway = !wp.directLine;
+          if (wp.reachable) {
+            const wdx = wp.x - bot.x;
+            const wdy = wp.y - bot.y;
+            const wdist = Math.hypot(wdx, wdy) || 1;
+            const desiredSpd = wp.directLine && distToGoal < 36 ? moveSpd * (distToGoal / 36) : moveSpd;
+            vx = (wdx / wdist) * desiredSpd;
+            vy = (wdy / wdist) * desiredSpd;
           }
         }
+        // 穿门绕障时减弱侧向排斥力，确保丝滑过门不卡门框
+        const repScale = navigatingDoorway ? 0.25 : 1.0;
+        vx += repX * repScale;
+        vy += repY * repScale;
+        const vMag = Math.hypot(vx, vy);
+        if (vMag > moveSpd) {
+          vx = (vx / vMag) * moveSpd;
+          vy = (vy / vMag) * moveSpd;
+        }
 
-        const prevGoalDist = Math.hypot(goalX - bot.x, goalY - bot.y);
-        const dx = navX - bot.x;
-        const dy = navY - bot.y;
-        const dist = Math.hypot(dx, dy);
-        const ox = bot.x;
-        const oy = bot.y;
-        if (dist > 14) {
-          const step = Math.min(dist, moveSpd * dt);
-          const baseAng = Math.atan2(dy, dx);
-          const steerOffsets = [0, 0.65, -0.65, 1.25, -1.25];
-          for (const offA of steerOffsets) {
-            const tx = bot.x + Math.cos(baseAng + offA) * step;
-            const ty = bot.y + Math.sin(baseAng + offA) * step;
-            if (!this.findBlockingWallOrLockedDoor(tx, ty, 15)) {
-              const probe = { x: tx, y: ty, radius: 15 };
-              this.resolveEntityInsideWalls(probe);
-              bot.x = probe.x;
-              bot.y = probe.y;
+        let bestStepX = ox;
+        let bestStepY = oy;
+        let bestMoved = 0;
+        const evalStep = (sx: number, sy: number): number => {
+          const probe = { x: sx, y: sy, radius: 15 };
+          this.resolveEntityInsideWalls(probe);
+          if (!this.isPointInsideUnlockedFloor(probe.x, probe.y)) return 0;
+          const m = Math.hypot(probe.x - ox, probe.y - oy);
+          if (m > bestMoved) {
+            bestMoved = m;
+            bestStepX = probe.x;
+            bestStepY = probe.y;
+          }
+          return m;
+        };
+
+        if (evalStep(ox + vx * dt, oy + vy * dt) <= moveSpd * dt * 0.35 && vMag > 20) {
+          // 贴家具或门框边角微滑绕障（纯物理滑行，绝不瞬移穿墙！）
+          const baseA = Math.atan2(vy, vx);
+          const stepLen = moveSpd * dt;
+          for (const slideOff of [0.68, -0.68, 1.22, -1.22]) {
+            if (evalStep(ox + Math.cos(baseA + slideOff) * stepLen, oy + Math.sin(baseA + slideOff) * stepLen) > moveSpd * dt * 0.55) {
               break;
             }
           }
         }
-        const moved = Math.hypot(bot.x - ox, bot.y - oy);
-        const newGoalDist = Math.hypot(goalX - bot.x, goalY - bot.y);
-        const expectedProgress = moveSpd * dt * 0.55;
-        if (prevGoalDist > 62 && prevGoalDist - newGoalDist < expectedProgress) {
-          bot.botStuckTimer = (bot.botStuckTimer || 0) + dt;
-          if (bot.botStuckTimer >= 0.95) {
-            const reloc = { x: goalX + (idx - 1) * 22, y: goalY + 18, radius: 15 };
-            this.resolveEntityInsideWalls(reloc);
-            bot.x = reloc.x;
-            bot.y = reloc.y;
-            bot.botStuckTimer = 0;
-          }
-        } else {
-          bot.botStuckTimer = Math.max(0, (bot.botStuckTimer || 0) - dt * 0.5);
-        }
-        bot.isMoving = moved > 0.3;
-        if (bot.isMoving) {
-          bot.walkPhase += moved * 0.115;
-          bot.legAngle = this.lerpAngle(bot.legAngle, Math.atan2(bot.y - oy, bot.x - ox), Math.min(1, dt * 12));
-        }
+        bot.x = bestStepX;
+        bot.y = bestStepY;
+      }
+
+      const moved = Math.hypot(bot.x - ox, bot.y - oy);
+      bot.isMoving = moved > 0.35;
+      if (bot.isMoving) {
+        bot.walkPhase += moved * 0.115;
+        bot.legAngle = this.lerpAngle(bot.legAngle, Math.atan2(bot.y - oy, bot.x - ox), Math.min(1, dt * 13));
+      } else {
+        bot.legAngle = this.lerpAngle(bot.legAngle, bot.angle, Math.min(1, dt * 8));
       }
       bot.netTx = bot.x;
       bot.netTy = bot.y;
 
-      // 波间休整时顺手帮忙修补附近破损窗户
-      if (s.waveState === 'intermission') {
-        const brokenWin = s.windows.find(
-          (w) =>
-            w.planks < w.maxPlanks &&
-            Math.hypot(bot.x - (w.x + w.w / 2), bot.y - (w.y + w.h / 2)) < 95
-        );
-        if (brokenWin) {
-          bot.repairProgress += dt * 1.4;
-          if (bot.repairProgress >= 1) {
-            bot.repairProgress = 0;
-            brokenWin.planks = Math.min(brokenWin.maxPlanks, brokenWin.planks + 1);
-          }
+      // 驻守修窗：安全空档或波间休整时自动钉回破损木板
+      const winToFix =
+        repairingWin ||
+        (s.waveState === 'intermission'
+          ? unlockedWins.find(
+              (w) =>
+                w.planks < w.maxPlanks &&
+                Math.hypot(bot.x - (w.x + w.w * 0.5), bot.y - (w.y * 1 + w.h * 0.5)) <= 88
+            ) || null
+          : null);
+      if (
+        winToFix &&
+        winToFix.planks < winToFix.maxPlanks &&
+        !this.hasZombieVaultingWindow(winToFix) &&
+        Math.hypot(bot.x - (winToFix.x + winToFix.w * 0.5), bot.y - (winToFix.y + winToFix.h * 0.5)) <= 88
+      ) {
+        bot.repairProgress += dt * 1.18;
+        if (bot.repairProgress >= 1) {
+          bot.repairProgress = 0;
+          winToFix.planks = Math.min(winToFix.maxPlanks, winToFix.planks + 1);
+          this.pushOutdoorZombiesOutsidePlanks(winToFix);
+          SoundFX.repair();
         }
+      } else {
+        bot.repairProgress = 0;
       }
 
-      // 自动索敌瞄准与压制射击（520px 射程内优先锁定最近威胁）
+      // 精准全段射线索敌（严格遵循室内视线遮挡与已解锁窗户射界，绝不对隔墙盲射）
       let bestTarget: ZombieEntity | null = null;
       let bestScore = 520;
       for (const z of s.zombies) {
         if (z.hp <= 0) continue;
-        const d = Math.hypot(z.x - bot.x, z.y - bot.y);
+        const dx = z.x - bot.x;
+        const dy = z.y - bot.y;
+        if (Math.abs(dx) > 520 || Math.abs(dy) > 520) continue;
+        const d = Math.hypot(dx, dy);
         if (d > 520) continue;
-        // 简单视线掩体遮挡检测（中点不穿实心厚墙）
-        const midBlocked = this.findBulletBlocker((bot.x + z.x) * 0.5, (bot.y + z.y) * 0.5, 3);
-        if (midBlocked) continue;
-        const score = isBossKind(z.kind) ? d * 0.72 : d;
-        if (score < bestScore) {
-          bestScore = score;
-          bestTarget = z;
-        }
+        const score =
+          z.kind === 'thief'
+            ? d * 0.52
+            : isBossKind(z.kind)
+              ? d * 0.68
+              : z.insideBuilding
+                ? d * 0.72
+                : d * 1.05;
+        if (score >= bestScore) continue;
+        if (!this.isZombieTargetableForAutoAim(z)) continue;
+        if (!this.hasBulletLineOfSight(bot.x, bot.y, z.x, z.y)) continue;
+        bestScore = score;
+        bestTarget = z;
       }
 
       if (bestTarget) {
         const aimAng = Math.atan2(bestTarget.y - bot.y, bestTarget.x - bot.x);
-        bot.angle = this.lerpAngle(bot.angle, aimAng, Math.min(1, dt * 14));
+        bot.angle = this.lerpAngle(bot.angle, aimAng, Math.min(1, dt * 15));
         bot.netAngle = bot.angle;
 
         bot.botFireCd = (bot.botFireCd || 0) - dt;
-        const wepDef = WEAPONS[bot.activeWepId] || WEAPONS.smg;
         if (bot.botFireCd <= 0) {
           const interval = Math.max(0.11, (1 / wepDef.fireRate) * 1.38);
           bot.botFireCd = interval;
@@ -5772,6 +6248,10 @@ export class GameEngine {
             });
           }
         }
+      } else if (bot.botLookAngle !== undefined) {
+        // 无怪时朝驻守窗户方向警戒瞄准
+        bot.angle = this.lerpAngle(bot.angle, bot.botLookAngle, Math.min(1, dt * 8));
+        bot.netAngle = bot.angle;
       }
     }
   }

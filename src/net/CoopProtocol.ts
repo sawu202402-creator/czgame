@@ -105,7 +105,11 @@ export interface RemotePlayerState {
   isBot?: boolean;
   botFireCd?: number;
   botOrbitSeed?: number;
-  botStuckTimer?: number;
+  botDecisionTimer?: number;
+  botGoalX?: number;
+  botGoalY?: number;
+  botLookAngle?: number;
+  botAssignedWinId?: string;
 }
 
 export interface PlayerSyncPayload {
