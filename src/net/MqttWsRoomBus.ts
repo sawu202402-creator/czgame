@@ -1,5 +1,6 @@
 const BROKER_URLS = [
   'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker-cn.emqx.io:8084/mqtt',
   'wss://mqtt.eclipseprojects.io:443/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
 ];
@@ -29,7 +30,8 @@ function encodeUtf8Field(str: string): Uint8Array {
 }
 
 function buildConnectPacket(clientId: string): Uint8Array {
-  const varHdr = new Uint8Array([0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x04, 0x02, 0x00, 0x1e]);
+  // Keep-Alive 设为 120s (0x00, 0x78)，彻底防止切到微信/后台发链接期间浏览器节流定时器导致 Broker 45s 踢下线！
+  const varHdr = new Uint8Array([0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x04, 0x02, 0x00, 0x78]);
   const payload = encodeUtf8Field(clientId);
   const remLen = varHdr.length + payload.length;
   const fixed = new Uint8Array([0x10, ...encodeVarLen(remLen)]);
@@ -73,6 +75,8 @@ class SingleMqttLink {
   private ws: WebSocket | null = null;
   private rxBuf: Uint8Array = new Uint8Array(0);
   private pingTimer = 0;
+  private pongWatchTimer = 0;
+  private lastRxAt = 0;
   public ready = false;
   private closed = false;
 
@@ -95,11 +99,14 @@ class SingleMqttLink {
 
       ws.onopen = () => {
         if (this.closed) return;
+        this.lastRxAt = Date.now();
         ws.send(buildConnectPacket(this.clientId));
       };
 
       ws.onmessage = (ev) => {
         if (this.closed || !(ev.data instanceof ArrayBuffer)) return;
+        this.lastRxAt = Date.now();
+        window.clearTimeout(this.pongWatchTimer);
         this.appendAndParse(new Uint8Array(ev.data));
       };
 
@@ -110,12 +117,40 @@ class SingleMqttLink {
       ws.onclose = () => {
         this.ready = false;
         window.clearInterval(this.pingTimer);
+        window.clearTimeout(this.pongWatchTimer);
         if (!this.closed) {
           this.onDisconnect();
         }
       };
     } catch {
       this.onDisconnect();
+    }
+  }
+
+  public isDeadOrClosed(): boolean {
+    return !this.ws || this.ws.readyState === WebSocket.CLOSING || this.ws.readyState === WebSocket.CLOSED;
+  }
+
+  public sendPingProbe(): void {
+    if (this.closed || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const pingSentAt = Date.now();
+      this.ws.send(PINGREQ_PKT);
+      window.clearTimeout(this.pongWatchTimer);
+      // 半开死连接探活保护：前台发 PINGREQ 后若 9 秒内未收到任何包（含 PINGRESP 0xd0），判定 NAT 半死连接立即重连！
+      this.pongWatchTimer = window.setTimeout(() => {
+        if (this.closed || !this.ws) return;
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (this.lastRxAt < pingSentAt) {
+          try {
+            this.ws.close();
+          } catch {
+            // ignore
+          }
+        }
+      }, 9000);
+    } catch {
+      // ignore
     }
   }
 
@@ -166,10 +201,8 @@ class SingleMqttLink {
           this.ws.send(buildSubscribePacket(this.topic, 1));
           window.clearInterval(this.pingTimer);
           this.pingTimer = window.setInterval(() => {
-            if (this.ws?.readyState === WebSocket.OPEN) {
-              this.ws.send(PINGREQ_PKT);
-            }
-          }, 18_000);
+            this.sendPingProbe();
+          }, 22_000);
         }
       } else if (pktType === 0x90) {
         if (!this.ready) {
@@ -210,6 +243,7 @@ class SingleMqttLink {
     this.closed = true;
     this.ready = false;
     window.clearInterval(this.pingTimer);
+    window.clearTimeout(this.pongWatchTimer);
     if (this.ws) {
       try {
         if (this.ws.readyState === WebSocket.OPEN) {
@@ -233,10 +267,10 @@ export interface RoomWireEnvelope<T> {
 }
 
 /**
- * 多节点并行寻房 + 单优链路自动锁定 WSS 房间总线：
- * - 同时尝试 8084 (EMQX 亚太高速) / 443 (标准 HTTPS 端口防手机运营商防火墙拦截) / 8884 (HiveMQ 全球)
- * - 建房/加房握手期跨全部可达节点广播寻房，彻底根除“房主在 A 服、好友切到 B 服”的主备脑裂连不上问题！
- * - 一旦收到对端数据包立即记录对端所在的最优互通节点，局内高频同步仅走唯一互通单链路，零重复包、零跨洲乱序抖动！
+ * 多节点并行寻房 + 控制面全链路冗余 / 数据面单优链路锁定 WSS 房间总线：
+ * - 同时接入 EMQX 全球 + EMQX 亚太节点 + Eclipse 443 端口 + HiveMQ 全球 4 大节点
+ * - 建房/加房握手、房间列表同步、准备/开局等关键控制信令跨全部在线节点并发投递（接收端幂等去重），单节点半死/断流零感知！
+ * - 局内高频快照（world_sync / players_fast / player_sync / cmd_fire）自动走对端最新互通单节点，零重复带宽、零跨洲抖动！
  */
 export class MqttWsRoomBus<T extends { type?: string }> {
   private links: (SingleMqttLink | null)[] = new Array(BROKER_URLS.length).fill(null);
@@ -249,6 +283,7 @@ export class MqttWsRoomBus<T extends { type?: string }> {
   private closed = false;
   private allFailTimer = 0;
   private topic: string;
+  private onWakeBound: () => void;
 
   constructor(
     private myPeerId: string,
@@ -259,6 +294,13 @@ export class MqttWsRoomBus<T extends { type?: string }> {
     private onReconnected?: () => void
   ) {
     this.topic = `czgame/room/v2/${roomCode}`;
+    this.onWakeBound = () => this.wakeAndCheckLinks();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.onWakeBound);
+    }
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('focus', this.onWakeBound);
+    }
     for (let i = 0; i < BROKER_URLS.length; i++) {
       this.openBrokerLink(i);
     }
@@ -266,7 +308,20 @@ export class MqttWsRoomBus<T extends { type?: string }> {
       if (!this.openedOnce && !this.closed) {
         this.onAllFailed();
       }
-    }, 5500);
+    }, 6500);
+  }
+
+  public wakeAndCheckLinks(): void {
+    if (this.closed) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    for (let i = 0; i < BROKER_URLS.length; i++) {
+      const l = this.links[i];
+      if (!l || l.isDeadOrClosed()) {
+        this.openBrokerLink(i);
+      } else {
+        l.sendPingProbe();
+      }
+    }
   }
 
   private openBrokerLink(idx: number): void {
@@ -384,7 +439,20 @@ export class MqttWsRoomBus<T extends { type?: string }> {
     };
     const wire = JSON.stringify(env);
 
-    // 1) 单播：如果已知目标对端所在的互通节点且在线，精准单发；否则（如首次 join_req 寻房）向所有在线节点同时探活！
+    const t = msg?.type;
+    const isHighFreqData =
+      t === 'world_sync' || t === 'players_fast' || t === 'player_sync' || t === 'cmd_fire';
+
+    // 控制面信令（进房握手 join_req / join_ack、大厅列表 lobby_state、开局 start_game、心跳 __hb 等）
+    // 一律跨所有在线节点冗余并发投递（接收端按 seenIds 严格幂等去重），彻底根除单节点半死/单向丢包导致加房失败！
+    if (!isHighFreqData) {
+      for (const { link } of ready) {
+        link.publish(wire);
+      }
+      return;
+    }
+
+    // 1) 高频数据单播：走已知目标对端所在的互通单节点
     if (to !== '*') {
       const knownIdx = this.peerBrokerMap.get(to);
       if (knownIdx !== undefined) {
@@ -400,7 +468,7 @@ export class MqttWsRoomBus<T extends { type?: string }> {
       return;
     }
 
-    // 2) 广播：仅在已知队友所在的最小互通节点集合上发送（2人同服时仅发 1 条链路，零冗余抖动！）
+    // 2) 高频数据广播：仅在已知队友所在的最小互通节点集合上发送（零冗余抖动）
     const activePeerBrokers = new Set<number>();
     for (const [peerId, bIdx] of this.peerBrokerMap.entries()) {
       if (exclude && peerId === exclude) continue;
@@ -423,6 +491,12 @@ export class MqttWsRoomBus<T extends { type?: string }> {
 
   public close(): void {
     this.closed = true;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onWakeBound);
+    }
+    if (typeof window !== 'undefined' && window.removeEventListener) {
+      window.removeEventListener('focus', this.onWakeBound);
+    }
     window.clearTimeout(this.allFailTimer);
     for (let i = 0; i < this.links.length; i++) {
       window.clearTimeout(this.retryTimers[i]);

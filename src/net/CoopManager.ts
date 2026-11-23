@@ -40,6 +40,7 @@ class CoopNetworkManager {
   private hostLastSeen = 0;
   private heartbeatTimer = 0;
   private joinRetryTimer = 0;
+  private lastJoinReqSentAt = 0;
 
   private onLobbyChangeCb: (() => void) | null = null;
   private onMatchStartCb: ((stageId: string, mode: GameMode, lobby: LobbyState) => void) | null = null;
@@ -53,7 +54,47 @@ class CoopNetworkManager {
           this.bus.send('*', { type: '__bye' });
         }
       });
+      const onForegroundWake = () => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (!this.bus || this.role === 'offline') return;
+        const now = performance.now();
+        // 切回前台时给予心跳宽限期，防止手机切微信发链接归来瞬间误判超时踢人！
+        this.hostLastSeen = now;
+        for (const pid of Array.from(this.clientLastSeen.keys())) {
+          this.clientLastSeen.set(pid, now);
+        }
+        this.bus.wakeAndCheckLinks();
+        if (this.role === 'host' && this.lobby) {
+          this.bus.send('*', { type: '__hb' });
+          if (!this.lobby.inGame) {
+            this.broadcastLobby();
+          }
+        } else if (this.role === 'client') {
+          const missingSelf =
+            !this.lobby || !this.lobby.members.some((m) => m.peerId === this.myPeerId);
+          if (this.status === 'connecting' || (this.status === 'ready' && missingSelf && !this.lobby?.inGame)) {
+            this.sendJoinRequestThrottled(true);
+          } else if (this.status === 'ready') {
+            this.bus.send(this.hostPeerId, { type: '__hb' });
+          }
+        }
+      };
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', onForegroundWake);
+      }
+      window.addEventListener('focus', onForegroundWake);
     }
+  }
+
+  private sendJoinRequestThrottled(force = false): void {
+    if (this.role !== 'client' || !this.bus || !this.hostPeerId) return;
+    const now = performance.now();
+    if (!force && now - this.lastJoinReqSentAt < 420) return;
+    this.lastJoinReqSentAt = now;
+    this.bus.send(this.hostPeerId, {
+      type: 'join_req',
+      callsign: this.getCallsign(),
+    });
   }
 
   public getCallsign(): string {
@@ -334,10 +375,7 @@ class CoopNetworkManager {
 
     const sendJoinReq = () => {
       if (this.role !== 'client' || this.status !== 'connecting') return;
-      this.bus?.send(this.hostPeerId, {
-        type: 'join_req',
-        callsign: this.getCallsign(),
-      });
+      this.sendJoinRequestThrottled(true);
     };
 
     this.bus = new MqttWsRoomBus<BusPayload>(
@@ -354,7 +392,8 @@ class CoopNetworkManager {
             return;
           }
           attempts++;
-          if (attempts >= 9) {
+          // 留足约 16.5s 寻房窗口，兼容房主刚切去微信发链接尚未切回浏览器的等待期
+          if (attempts >= 22) {
             window.clearInterval(this.joinRetryTimer);
             this.status = 'error';
             this.errorMsg = I18n.t('errRoomNotFound', { code });
@@ -362,7 +401,7 @@ class CoopNetworkManager {
             return;
           }
           sendJoinReq();
-        }, 800);
+        }, 750);
       },
       (env) => this.handleClientEnvelope(env),
       () => {
@@ -373,7 +412,11 @@ class CoopNetworkManager {
         this.notifyLobby();
       },
       () => {
-        sendJoinReq();
+        const missingSelf =
+          !this.lobby || !this.lobby.members.some((m) => m.peerId === this.myPeerId);
+        if (this.status === 'connecting' || (this.status === 'ready' && missingSelf && !this.lobby?.inGame)) {
+          this.sendJoinRequestThrottled(true);
+        }
       }
     );
   }
@@ -395,7 +438,14 @@ class CoopNetworkManager {
     }
 
     this.hostLastSeen = performance.now();
-    if (msg.type === '__hb') return;
+    if (msg.type === '__hb') {
+      const missingSelf =
+        !this.lobby || !this.lobby.members.some((m) => m.peerId === this.myPeerId);
+      if (this.status === 'connecting' || (this.status === 'ready' && missingSelf && !this.lobby?.inGame)) {
+        this.sendJoinRequestThrottled(false);
+      }
+      return;
+    }
 
     if (msg.type === 'join_ack') {
       window.clearInterval(this.joinRetryTimer);
@@ -415,14 +465,44 @@ class CoopNetworkManager {
     }
 
     if (msg.type === 'lobby_state') {
-      this.lobby = msg.lobby;
-      const me = this.lobby.members.find((m) => m.peerId === this.myPeerId);
-      if (me) this.mySlot = me.slot;
-      this.notifyLobby();
+      const me = msg.lobby.members.find((m) => m.peerId === this.myPeerId);
+      if (me) {
+        // 哪怕单播 join_ack 丢包，只要广播 lobby_state 里已有自己，立刻确认入座成功！
+        window.clearInterval(this.joinRetryTimer);
+        const wasConnecting = this.status !== 'ready';
+        this.status = 'ready';
+        this.mySlot = me.slot;
+        this.lobby = msg.lobby;
+        PlatformSDK.showInviteButton(this.lobby.roomCode, !this.lobby.inGame && this.lobby.members.length < 4);
+        if (wasConnecting) {
+          this.startHeartbeatLoop();
+        }
+        this.notifyLobby();
+      } else if (msg.lobby.inGame) {
+        window.clearInterval(this.joinRetryTimer);
+        this.lobby = null;
+        this.status = 'error';
+        this.errorMsg = I18n.t('errRoomInGame');
+        this.notifyLobby();
+      } else {
+        // 关键修复：若收到不含自己的 lobby_state（例如握手途中收到房主广播、或切后台短暂超时被移出），
+        // 绝不渲染“看得到房间却没有自己”的幽灵旁观界面，而是立刻自动重发 join_req 重新入座！
+        if (this.status === 'ready') {
+          this.lobby = null;
+          this.status = 'connecting';
+          this.notifyLobby();
+          this.sendJoinRequestThrottled(true);
+        } else {
+          this.sendJoinRequestThrottled(false);
+        }
+      }
       return;
     }
 
     if (msg.type === 'start_game') {
+      if (!msg.lobby.members.some((m) => m.peerId === this.myPeerId)) {
+        return;
+      }
       this.lobby = msg.lobby;
       this.lobby.inGame = true;
       PlatformSDK.hideInviteButton(this.lobby.roomCode);
@@ -439,23 +519,27 @@ class CoopNetworkManager {
     this.heartbeatTimer = window.setInterval(() => {
       if (!this.bus || this.role === 'offline') return;
       const now = performance.now();
+      // 大厅等待好友阶段给足 45s 切后台发微信宽限期；局内战斗保持 16s 掉线清理
+      const peerTimeoutMs = this.lobby?.inGame ? 16_000 : 45_000;
 
       if (this.role === 'host') {
         this.bus.send('*', { type: '__hb' });
         for (const [pid, seenAt] of Array.from(this.clientLastSeen.entries())) {
-          if (now - seenAt > 11_500) {
+          if (now - seenAt > peerTimeoutMs) {
             this.removeClientPeer(pid);
           }
         }
       } else if (this.role === 'client' && this.status === 'ready') {
         this.bus.send(this.hostPeerId, { type: '__hb' });
-        if (this.hostLastSeen > 0 && now - this.hostLastSeen > 12_500) {
+        if (this.hostLastSeen > 0 && now - this.hostLastSeen > peerTimeoutMs + 2000) {
           window.clearInterval(this.heartbeatTimer);
           this.status = 'error';
           this.errorMsg = I18n.t('errHostLeft');
           this.onPeerLeaveCb?.('host');
           this.notifyLobby();
         }
+      } else if (this.role === 'client' && this.status === 'connecting') {
+        this.sendJoinRequestThrottled(false);
       }
     }, 2400);
   }
