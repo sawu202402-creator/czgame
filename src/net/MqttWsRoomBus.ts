@@ -1,7 +1,7 @@
 const BROKER_URLS = [
   'wss://broker-cn.emqx.io:8084/mqtt',
   'wss://broker.emqx.io:8084/mqtt',
-  'wss://mqtt.eclipseprojects.io:443/mqtt',
+  'wss://test.mosquitto.org:8081',
   'wss://broker.hivemq.com:8884/mqtt',
 ];
 
@@ -308,7 +308,7 @@ export class MqttWsRoomBus<T extends { type?: string }> {
       if (!this.openedOnce && !this.closed) {
         this.onAllFailed();
       }
-    }, 6500);
+    }, 9500);
   }
 
   public wakeAndCheckLinks(): void {

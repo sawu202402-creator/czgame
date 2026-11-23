@@ -77,6 +77,7 @@ class CoopNetworkManager {
 
   private onLobbyChangeCb: (() => void) | null = null;
   private onMatchStartCb: ((stageId: string, mode: GameMode, lobby: LobbyState) => void) | null = null;
+  private onNetStatsChangeCb: (() => void) | null = null;
   private onGameMessageCb: ((msg: CoopNetMessage, fromPeerId: string) => void) | null = null;
   private onPeerLeaveCb: ((peerId: string) => void) | null = null;
   private onPeerHotJoinCb: ((member: LobbyMember) => void) | null = null;
@@ -162,10 +163,12 @@ class CoopNetworkManager {
 
   public bindUI(
     onLobbyChange: () => void,
-    onMatchStart: (stageId: string, mode: GameMode, lobby: LobbyState) => void
+    onMatchStart: (stageId: string, mode: GameMode, lobby: LobbyState) => void,
+    onNetStatsChange?: () => void
   ): void {
     this.onLobbyChangeCb = onLobbyChange;
     this.onMatchStartCb = onMatchStart;
+    this.onNetStatsChangeCb = onNetStatsChange || null;
   }
 
   public bindEngine(
@@ -179,11 +182,7 @@ class CoopNetworkManager {
   }
 
   public isActiveCoop(): boolean {
-    return (
-      (this.role === 'host' || this.role === 'client') &&
-      this.lobby !== null &&
-      (this.lobby.members.length >= 2 || this.role === 'client')
-    );
+    return (this.role === 'host' || this.role === 'client') && this.lobby !== null;
   }
 
   public getNetStatusLabel(): string {
@@ -316,6 +315,7 @@ class CoopNetworkManager {
       const sample = Math.max(1, Math.round(performance.now() - msg.t0));
       if (sample < 5000) {
         this.rttMs = this.rttMs > 0 ? Math.round(this.rttMs * 0.6 + sample * 0.4) : sample;
+        if (!this.lobby?.inGame) this.onNetStatsChangeCb?.();
       }
       return;
     }
@@ -514,6 +514,7 @@ class CoopNetworkManager {
       const sample = Math.max(1, Math.round(performance.now() - msg.t0));
       if (sample < 5000) {
         this.rttMs = this.rttMs > 0 ? Math.round(this.rttMs * 0.6 + sample * 0.4) : sample;
+        if (!this.lobby?.inGame) this.onNetStatsChangeCb?.();
       }
       return;
     }
@@ -591,12 +592,25 @@ class CoopNetworkManager {
       if (!msg.lobby.members.some((m) => m.peerId === this.myPeerId)) {
         return;
       }
+      if (this.inMatchTriggered) return;
       this.lobby = msg.lobby;
       this.lobby.inGame = true;
       this.inMatchTriggered = true;
       PlatformSDK.hideInviteButton(this.lobby.roomCode);
       this.onMatchStartCb?.(msg.stageId, msg.mode, msg.lobby);
       return;
+    }
+
+    if (
+      this.status === 'ready' &&
+      this.lobby &&
+      !this.inMatchTriggered &&
+      (msg.type === 'world_sync' || msg.type === 'players_fast')
+    ) {
+      this.lobby.inGame = true;
+      this.inMatchTriggered = true;
+      PlatformSDK.hideInviteButton(this.lobby.roomCode);
+      this.onMatchStartCb?.(this.lobby.stageId, this.lobby.mode, this.lobby);
     }
 
     this.onGameMessageCb?.(msg, this.hostPeerId);
@@ -662,13 +676,29 @@ class CoopNetworkManager {
     if (this.role !== 'host' || !this.lobby) return;
     this.lobby.inGame = true;
     PlatformSDK.hideInviteButton(this.lobby.roomCode);
-    const pkt: CoopNetMessage = {
-      type: 'start_game',
-      stageId: this.lobby.stageId,
-      mode: this.lobby.mode,
-      lobby: this.lobby,
+    const sendStartBurst = () => {
+      if (this.role !== 'host' || !this.lobby || !this.lobby.inGame) return;
+      const pkt: CoopNetMessage = {
+        type: 'start_game',
+        stageId: this.lobby.stageId,
+        mode: this.lobby.mode,
+        lobby: this.lobby,
+      };
+      this.bus?.send('*', pkt);
+      const rtcWire = JSON.stringify({ f: this.myPeerId, m: pkt });
+      for (const b of this.rtcPeers.values()) {
+        if (b.dcRel && b.dcRel.readyState === 'open') {
+          try {
+            b.dcRel.send(rtcWire);
+          } catch {
+            // ignore
+          }
+        }
+      }
     };
-    this.broadcastToClients(pkt);
+    sendStartBurst();
+    window.setTimeout(sendStartBurst, 350);
+    window.setTimeout(sendStartBurst, 900);
     this.onMatchStartCb?.(this.lobby.stageId, this.lobby.mode, this.lobby);
   }
 
@@ -733,7 +763,7 @@ class CoopNetworkManager {
       bundle.dcFast = dc;
       dc.onopen = () => {
         this.sendRawPingPong(peerId, { type: '__ping', t0: Math.round(performance.now()) });
-        if (!this.lobby?.inGame) this.notifyLobby();
+        if (!this.lobby?.inGame) this.onNetStatsChangeCb?.();
       };
     } else {
       bundle.dcRel = dc;
@@ -758,7 +788,7 @@ class CoopNetworkManager {
               this.rttMs > 0 && this.rttMs < sample * 2.5
                 ? Math.round(this.rttMs * 0.55 + sample * 0.45)
                 : sample;
-            if (!this.lobby?.inGame) this.notifyLobby();
+            if (!this.lobby?.inGame) this.onNetStatsChangeCb?.();
           }
           return;
         }
@@ -769,6 +799,27 @@ class CoopNetworkManager {
           }
         } else if (this.role === 'client') {
           this.hostLastSeen = now;
+          if (parsed.m.type === 'start_game') {
+            if (!parsed.m.lobby.members.some((m) => m.peerId === this.myPeerId)) return;
+            if (this.inMatchTriggered) return;
+            this.lobby = parsed.m.lobby;
+            this.lobby.inGame = true;
+            this.inMatchTriggered = true;
+            PlatformSDK.hideInviteButton(this.lobby.roomCode);
+            this.onMatchStartCb?.(parsed.m.stageId, parsed.m.mode, parsed.m.lobby);
+            return;
+          }
+          if (
+            this.status === 'ready' &&
+            this.lobby &&
+            !this.inMatchTriggered &&
+            (parsed.m.type === 'world_sync' || parsed.m.type === 'players_fast')
+          ) {
+            this.lobby.inGame = true;
+            this.inMatchTriggered = true;
+            PlatformSDK.hideInviteButton(this.lobby.roomCode);
+            this.onMatchStartCb?.(this.lobby.stageId, this.lobby.mode, this.lobby);
+          }
           this.onGameMessageCb?.(parsed.m, this.hostPeerId);
         }
       } catch {
@@ -855,12 +906,13 @@ class CoopNetworkManager {
         if (!bundle) return;
         const bRef = bundle;
         bRef.pc
-          .setRemoteDescription(new RTCSessionDescription(sig.sdp))
+          .setRemoteDescription(sig.sdp)
           .then(async () => {
             bRef.remoteDescSet = true;
             for (const c of bRef.pendingCands.splice(0)) {
+              if (!c || !c.candidate) continue;
               try {
-                await bRef.pc.addIceCandidate(new RTCIceCandidate(c));
+                await bRef.pc.addIceCandidate(c);
               } catch {
                 // ignore
               }
@@ -877,12 +929,13 @@ class CoopNetworkManager {
       } else if (sig.sdp.type === 'answer' && this.role === 'host' && bundle) {
         const bRef = bundle;
         bRef.pc
-          .setRemoteDescription(new RTCSessionDescription(sig.sdp))
+          .setRemoteDescription(sig.sdp)
           .then(async () => {
             bRef.remoteDescSet = true;
             for (const c of bRef.pendingCands.splice(0)) {
+              if (!c || !c.candidate) continue;
               try {
-                await bRef.pc.addIceCandidate(new RTCIceCandidate(c));
+                await bRef.pc.addIceCandidate(c);
               } catch {
                 // ignore
               }
@@ -895,9 +948,9 @@ class CoopNetworkManager {
       return;
     }
 
-    if (sig.cand && bundle) {
+    if (sig.cand && sig.cand.candidate && bundle) {
       if (bundle.remoteDescSet) {
-        bundle.pc.addIceCandidate(new RTCIceCandidate(sig.cand)).catch(() => {});
+        bundle.pc.addIceCandidate(sig.cand).catch(() => {});
       } else {
         bundle.pendingCands.push(sig.cand);
       }

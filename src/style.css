@@ -2995,6 +2995,145 @@ button {
   min-width: 210px;
 }
 
+@media (max-height: 540px) and (orientation: landscape), (max-width: 960px) and (orientation: landscape) {
+  .coop-wrap {
+    gap: 6px;
+  }
+  .coop-callsign-bar {
+    padding: 5px 10px;
+    border-radius: 10px;
+    gap: 6px;
+  }
+  .coop-callsign-left {
+    font-size: 12px;
+    gap: 6px;
+  }
+  .coop-p2p-tag {
+    font-size: 11px;
+  }
+  .coop-inp {
+    padding: 4px 8px;
+    font-size: 12.5px;
+  }
+  .callsign-inp {
+    width: 112px;
+  }
+  .code-inp {
+    width: 120px;
+    font-size: 14px;
+  }
+  .coop-rules-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 5px 9px;
+    gap: 6px;
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
+  .coop-alert {
+    padding: 4px 10px;
+    font-size: 11.5px;
+  }
+  .coop-entry-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .coop-panel-card {
+    padding: 10px 12px;
+    border-radius: 12px;
+    gap: 7px;
+  }
+  .coop-panel-card h3 {
+    font-size: 14.5px;
+  }
+  .coop-panel-card p {
+    font-size: 11.5px;
+    line-height: 1.32;
+  }
+  .coop-panel-card .btn-cartoon {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+  .coop-lobby-box {
+    padding: 8px 11px;
+    border-radius: 12px;
+    gap: 6px;
+  }
+  .coop-lobby-head {
+    padding-bottom: 6px;
+    gap: 6px;
+  }
+  .rc-val {
+    font-size: 16px;
+    padding: 1px 9px;
+    letter-spacing: 2px;
+  }
+  .coop-slots-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .coop-slot-card {
+    padding: 6px 8px;
+    min-height: 58px;
+    gap: 4px;
+    border-radius: 9px;
+  }
+  .slot-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+  }
+  .slot-ready {
+    font-size: 10px;
+  }
+  .slot-player {
+    gap: 5px;
+  }
+  .slot-player img {
+    width: 24px;
+    height: 24px;
+  }
+  .slot-player strong {
+    font-size: 12px;
+  }
+  .slot-empty-txt {
+    font-size: 11px;
+  }
+  .coop-slot-card.empty small {
+    font-size: 9.5px;
+  }
+  .coop-scale-banner {
+    padding: 4px 9px;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .coop-stage-Controls {
+    gap: 5px;
+    flex-wrap: nowrap;
+  }
+  .coop-wrap.in-room .coop-callsign-bar {
+    display: none;
+  }
+  .coop-sel-group label {
+    display: none;
+  }
+  .coop-stage-Controls .seg-btn {
+    padding: 4px 8px;
+    font-size: 11.5px;
+  }
+  .coop-select {
+    padding: 4px 7px;
+    font-size: 12px;
+    max-width: 175px;
+  }
+  .coop-launch-btn {
+    min-width: 148px;
+    padding: 6px 12px;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+}
+
 /* 局内左上角联机队友状态条 */
 .hud-squad-list {
   display: flex;

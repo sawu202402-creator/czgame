@@ -89,6 +89,11 @@ export class UIManager {
       (stageId, mode, lobby) => {
         const st = STAGES.find((item) => item.id === stageId) || STAGES[0];
         this.startStageRun(st, mode, false, lobby?.tier || 1);
+      },
+      () => {
+        if (!this.engine.state && this.hubTab === 'coop') {
+          this.syncCoopLobbyNetBadge();
+        }
       }
     );
 
@@ -266,6 +271,10 @@ export class UIManager {
       (o) => `<option value="${o.code}" ${o.code === I18n.lang ? 'selected' : ''}>🌐 ${o.label}</option>`
     ).join('');
 
+    const prevHubEl = this.modalRoot.querySelector('.hub-screen') as HTMLElement | null;
+    const prevScrollTop = prevHubEl ? prevHubEl.scrollTop : 0;
+    const prevCodeDraft = (this.modalRoot.querySelector('#coop-code-inp') as HTMLInputElement | null)?.value;
+
     this.modalRoot.innerHTML = `
       <div class="hub-screen">
         <div class="hub-bg-art">
@@ -346,11 +355,11 @@ export class UIManager {
     }
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-hub-tab]').forEach((btn) => {
-      btn.onclick = () => {
+      this.bindModalTap(btn, () => {
         this.hubTab = btn.dataset.hubTab as 'stages' | 'upgrades' | 'coop' | 'daily' | 'rank';
         this.coopToast = '';
         this.showHomeHub();
-      };
+      });
     });
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-mode-pick]').forEach((btn) => {
@@ -531,6 +540,22 @@ export class UIManager {
     });
 
     this.bindCoopHubEvents();
+
+    if (prevCodeDraft && !CoopManager.lobby) {
+      const nextCodeInp = this.modalRoot.querySelector('#coop-code-inp') as HTMLInputElement | null;
+      if (nextCodeInp) nextCodeInp.value = prevCodeDraft;
+    }
+    if (prevScrollTop > 0) {
+      const nextHubEl = this.modalRoot.querySelector('.hub-screen') as HTMLElement | null;
+      if (nextHubEl) nextHubEl.scrollTop = prevScrollTop;
+    }
+  }
+
+  private syncCoopLobbyNetBadge(): void {
+    const pill = this.modalRoot.querySelector('.coop-net-pill') as HTMLElement | null;
+    if (!pill) return;
+    pill.classList.toggle('is-p2p', CoopManager.hasDirectP2P());
+    pill.textContent = CoopManager.getNetStatusLabel();
   }
 
   private buildStagesHubView(save: ReturnType<typeof SaveManager.get>): string {
@@ -1408,7 +1433,7 @@ export class UIManager {
           });
 
     return `
-      <div class="coop-wrap">
+      <div class="coop-wrap in-room">
         ${callsignBar}
         ${statusBanner}
 
@@ -1447,14 +1472,14 @@ export class UIManager {
 
     const createBtn = this.modalRoot.querySelector('#btn-coop-create') as HTMLButtonElement | null;
     if (createBtn) {
-      createBtn.onclick = () => {
+      this.bindModalTap(createBtn, () => {
         if (callInp) CoopManager.setCallsign(callInp.value);
         this.coopToast = '';
         CoopManager.createHostRoom(STAGES[0].id, this.selectedMode);
-      };
+      });
     }
 
-    const joinBtn = this.modalRoot.querySelector('#btn-coop-join') as HTMLButtonElement | null;
+    const joinBtn = this.modalRoot.querySelector('#coop-code-inp') ? (this.modalRoot.querySelector('#btn-coop-join') as HTMLButtonElement | null) : null;
     const codeInp = this.modalRoot.querySelector('#coop-code-inp') as HTMLInputElement | null;
     if (joinBtn && codeInp) {
       const doJoin = () => {
@@ -1462,7 +1487,7 @@ export class UIManager {
         this.coopToast = '';
         CoopManager.joinRoomByCode(codeInp.value);
       };
-      joinBtn.onclick = doJoin;
+      this.bindModalTap(joinBtn, doJoin);
       codeInp.onkeydown = (e) => {
         if (e.key === 'Enter') doJoin();
       };
@@ -1534,16 +1559,16 @@ export class UIManager {
 
     const readyBtn = this.modalRoot.querySelector('#btn-coop-ready') as HTMLButtonElement | null;
     if (readyBtn) {
-      readyBtn.onclick = () => {
+      this.bindModalTap(readyBtn, () => {
         CoopManager.toggleClientReady();
-      };
+      });
     }
 
     const launchBtn = this.modalRoot.querySelector('#btn-coop-launch') as HTMLButtonElement | null;
     if (launchBtn) {
-      launchBtn.onclick = () => {
+      this.bindModalTap(launchBtn, () => {
         CoopManager.launchHostMatch();
-      };
+      });
     }
   }
 
