@@ -4679,3 +4679,290 @@ body.pc-combat-cursor #game-canvas {
   cursor: default;
   filter: grayscale(0.6);
 }
+
+/* ==================== 内置联机房间号大按键面板（手机横屏免弹出系统输入法、零遮挡） ==================== */
+.code-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: auto;
+  min-width: 146px;
+  cursor: pointer;
+  background: rgba(9, 14, 23, 0.94);
+  border: 1.5px solid rgba(56, 189, 248, 0.72);
+  border-radius: 10px;
+  padding: 6px 10px;
+  color: #e2e8f0;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.55);
+  transition: border-color 0.14s ease, transform 0.1s ease;
+}
+
+.code-trigger-btn:hover {
+  border-color: #fde047;
+}
+
+.code-trigger-btn:active {
+  transform: translateY(1px);
+}
+
+.code-trigger-btn .code-trigger-val {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.code-trigger-btn.has-val {
+  border-color: #facc15;
+  background: rgba(23, 37, 84, 0.45);
+}
+
+.code-trigger-btn.has-val .code-trigger-val {
+  font-size: 16.5px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #fde047;
+}
+
+.code-trigger-kbd {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.88;
+}
+
+.coop-paste-quick-btn {
+  flex: 0 0 auto !important;
+  white-space: nowrap;
+}
+
+.code-keypad-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(8px, env(safe-area-inset-top, 8px))
+    max(12px, env(safe-area-inset-right, 12px))
+    max(8px, env(safe-area-inset-bottom, 8px))
+    max(12px, env(safe-area-inset-left, 12px));
+  pointer-events: auto;
+}
+
+.code-keypad-card {
+  width: min(95vw, 576px);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(9, 14, 23, 0.99));
+  border: 2px solid #38bdf8;
+  border-radius: 16px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #f8fafc;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.76), 0 0 24px rgba(56, 189, 248, 0.24);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.code-keypad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.code-keypad-titles {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-keypad-titles strong {
+  font-size: 15px;
+  color: #fef08a;
+  white-space: nowrap;
+}
+
+.code-keypad-titles span {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.code-keypad-titles span.is-ok {
+  color: #4ade80;
+}
+
+.code-keypad-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(148, 163, 184, 0.45);
+  background: rgba(30, 41, 59, 0.9);
+  color: #e2e8f0;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.code-keypad-close:hover {
+  border-color: #f87171;
+  color: #fecaca;
+}
+
+.code-keypad-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: rgba(2, 6, 23, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  padding: 6px 8px;
+}
+
+.code-slots-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-char-slot {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: #090e17;
+  border: 2px solid rgba(71, 85, 105, 0.72);
+  color: #475569;
+  font-size: 21px;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.code-char-slot.filled {
+  color: #fde047;
+  border-color: #eab308;
+  background: rgba(30, 41, 59, 0.92);
+  box-shadow: 0 0 10px rgba(250, 204, 21, 0.22);
+}
+
+.code-char-slot.active-cursor {
+  border-color: #38bdf8;
+  color: #38bdf8;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+}
+
+.code-keypad-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.code-keypad-actions .is-ready-pulse {
+  box-shadow: 0 0 16px rgba(74, 222, 128, 0.55), 0 3px 0 #14532d;
+}
+
+.code-key-grid {
+  display: grid;
+  grid-template-columns: repeat(11, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.code-key-btn {
+  height: 42px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(100, 116, 139, 0.58);
+  background: linear-gradient(180deg, #1e293b, #0f172a);
+  color: #f8fafc;
+  font-size: 16.5px;
+  font-weight: 900;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: 0 3px 0 #020617;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: transform 0.06s ease, border-color 0.08s ease;
+}
+
+.code-key-btn.is-digit {
+  color: #fef08a;
+  border-color: rgba(250, 204, 21, 0.48);
+  background: linear-gradient(180deg, rgba(30, 58, 138, 0.65), rgba(15, 23, 42, 0.96));
+}
+
+.code-key-btn.is-backspace {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.58);
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.78), rgba(69, 10, 10, 0.92));
+  font-size: 18px;
+}
+
+.code-key-btn:hover {
+  border-color: #7dd3fc;
+}
+
+.code-key-btn:active,
+.code-key-btn.is-pressed {
+  transform: translateY(2px) scale(0.96);
+  box-shadow: 0 1px 0 #020617;
+  border-color: #fde047;
+  background: #334155;
+}
+
+@media (max-height: 480px) {
+  .code-keypad-card {
+    padding: 8px 10px;
+    gap: 6px;
+    border-radius: 14px;
+  }
+  .code-keypad-titles strong {
+    font-size: 14px;
+  }
+  .code-keypad-titles span {
+    font-size: 11px;
+  }
+  .code-keypad-bar {
+    padding: 5px 7px;
+    gap: 6px;
+  }
+  .code-char-slot {
+    width: 37px;
+    height: 36px;
+    font-size: 18.5px;
+    border-radius: 8px;
+  }
+  .code-key-grid {
+    gap: 4px;
+  }
+  .code-key-btn {
+    height: 35px;
+    font-size: 15px;
+    border-radius: 8px;
+  }
+}
+
+@media (max-width: 560px) {
+  .code-keypad-grid-fallback,
+  .code-key-grid {
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+  }
+}

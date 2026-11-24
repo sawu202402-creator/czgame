@@ -58,6 +58,8 @@ export class UIManager {
   private armoryTab: 'guns' | 'supplies' = 'guns';
   private hudCache: Record<string, string> = {};
   private coopToast = '';
+  private coopCodeDraft = '';
+  private cleanupKeypadModal: (() => void) | null = null;
   private perkKeyHandler: ((e: KeyboardEvent) => void) | null = null;
   private ftue: {
     active: boolean;
@@ -280,9 +282,9 @@ export class UIManager {
       (o) => `<option value="${o.code}" ${o.code === I18n.lang ? 'selected' : ''}>🌐 ${o.label}</option>`
     ).join('');
 
+    this.cleanupKeypadModal?.();
     const prevHubEl = this.modalRoot.querySelector('.hub-screen') as HTMLElement | null;
     const prevScrollTop = prevHubEl ? prevHubEl.scrollTop : 0;
-    const prevCodeDraft = (this.modalRoot.querySelector('#coop-code-inp') as HTMLInputElement | null)?.value;
 
     this.modalRoot.innerHTML = `
       <div class="hub-screen">
@@ -570,10 +572,6 @@ export class UIManager {
 
     this.bindCoopHubEvents();
 
-    if (prevCodeDraft && !CoopManager.lobby) {
-      const nextCodeInp = this.modalRoot.querySelector('#coop-code-inp') as HTMLInputElement | null;
-      if (nextCodeInp) nextCodeInp.value = prevCodeDraft;
-    }
     if (prevScrollTop > 0) {
       const nextHubEl = this.modalRoot.querySelector('.hub-screen') as HTMLElement | null;
       if (nextHubEl) nextHubEl.scrollTop = prevScrollTop;
@@ -1398,7 +1396,8 @@ export class UIManager {
       <div class="coop-callsign-bar">
         <div class="coop-callsign-left">
           <span>${I18n.t('callsignLabel')}</span>
-          <input id="coop-callsign-inp" class="coop-inp callsign-inp" type="text" maxlength="10" value="${callsign}" placeholder="${I18n.t('callsignPlaceholder')}" />
+          <input id="coop-callsign-inp" class="coop-inp callsign-inp" type="text" maxlength="10" enterkeyhint="done" value="${callsign}" placeholder="${I18n.t('callsignPlaceholder')}" />
+          <button class="btn-cartoon btn-mini btn-gray" id="btn-rand-callsign" type="button" title="Random Callsign">${I18n.t('randCallsignBtn')}</button>
           <button class="btn-cartoon btn-mini btn-blue" id="btn-save-callsign" type="button">${I18n.t('saveCallsign')}</button>
         </div>
         <span class="coop-p2p-tag">${I18n.t('p2pBadge')}</span>
@@ -1415,6 +1414,7 @@ export class UIManager {
             : '';
 
     if (!lobby || CoopManager.role === 'offline') {
+      const currentDraft = (this.coopCodeDraft || CoopManager.lastJoinCode || '').toUpperCase().slice(0, 5);
       return `
         <div class="coop-wrap">
           ${callsignBar}
@@ -1433,7 +1433,13 @@ export class UIManager {
               <h3>${I18n.t('joinCardTitle')}</h3>
               <p>${I18n.t('joinCardDesc')}</p>
               <div class="coop-join-row">
-                <input id="coop-code-inp" class="coop-inp code-inp" type="text" maxlength="6" value="${CoopManager.lastJoinCode}" placeholder="${I18n.t('codePlaceholder')}" />
+                <button type="button" id="coop-code-inp" class="coop-inp code-inp code-trigger-btn ${currentDraft ? 'has-val' : ''}" data-code="${currentDraft}" ${status === 'connecting' ? 'disabled' : ''}>
+                  <span class="code-trigger-val">${currentDraft || I18n.t('codeTapPlaceholder')}</span>
+                  <span class="code-trigger-kbd">⌨️</span>
+                </button>
+                <button type="button" class="btn-cartoon btn-mini btn-blue coop-paste-quick-btn" id="btn-coop-paste-join" ${status === 'connecting' ? 'disabled' : ''}>
+                  ${I18n.t('pasteCodeQuickBtn')}
+                </button>
                 <button class="btn-cartoon btn-yellow" id="btn-coop-join" ${status === 'connecting' ? 'disabled' : ''}>
                   ${I18n.t('joinRoomBtn')}
                 </button>
@@ -1572,9 +1578,317 @@ export class UIManager {
     `;
   }
 
+  private extractRoomCodeFromText(raw: string): string {
+    if (!raw) return '';
+    const urlParam = raw.match(/[?&](?:room|roomId)=([A-Za-z0-9]{4,6})/i);
+    if (urlParam && urlParam[1]) {
+      return urlParam[1].toUpperCase().slice(0, 5);
+    }
+    const stripped = raw.replace(/https?:\/\/\S+/gi, ' ');
+    const strictToken = stripped.match(/(?:^|[^A-Za-z0-9])([2-9A-HJ-NP-Z]{5})(?:$|[^A-Za-z0-9])/i);
+    if (strictToken && strictToken[1]) {
+      return strictToken[1].toUpperCase();
+    }
+    const looseToken = stripped.match(/(?:^|[^A-Za-z0-9])([A-Za-z0-9]{5})(?:$|[^A-Za-z0-9])/);
+    if (looseToken && looseToken[1]) {
+      return looseToken[1].toUpperCase();
+    }
+    const cleaned = stripped.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return cleaned.length >= 4 && cleaned.length <= 6 ? cleaned.slice(0, 5) : '';
+  }
+
+  private generateRandomCallsign(): string {
+    const zhPool = [
+      '幽灵猎手',
+      '雷霆突击',
+      '铁血先锋',
+      '暗影狙神',
+      '赤焰战神',
+      '极光特警',
+      '零号王牌',
+      '风暴重装',
+      '苍穹飞鹰',
+      '破阵狂龙',
+    ];
+    const enPool = [
+      'Ghost-07',
+      'Viper-X',
+      'Titan-09',
+      'Apex-01',
+      'Falcon-5',
+      'Shadow-K',
+      'Blaze-88',
+      'Raptor-3',
+    ];
+    const pool = I18n.isZh() ? zhPool : enPool;
+    const base = pool[Math.floor(Math.random() * pool.length)];
+    return I18n.isZh() ? `${base}${Math.floor(10 + Math.random() * 89)}` : base;
+  }
+
+  private syncCodeTriggerDisplay(): void {
+    const triggerBtn = this.modalRoot.querySelector('#coop-code-inp') as HTMLButtonElement | null;
+    if (!triggerBtn) return;
+    const draft = (this.coopCodeDraft || '').toUpperCase().slice(0, 5);
+    triggerBtn.dataset.code = draft;
+    triggerBtn.classList.toggle('has-val', draft.length > 0);
+    const valSpan = triggerBtn.querySelector('.code-trigger-val');
+    if (valSpan) {
+      valSpan.textContent = draft || I18n.t('codeTapPlaceholder');
+    }
+  }
+
+  private openRoomCodeKeypadModal(initialNotice = ''): void {
+    this.cleanupKeypadModal?.();
+    const hub = (this.modalRoot.querySelector('.hub-screen') as HTMLElement | null) || this.modalRoot;
+    hub.querySelector('#room-code-keypad-overlay')?.remove();
+
+    let draft = (this.coopCodeDraft || CoopManager.lastJoinCode || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 5);
+    this.coopCodeDraft = draft;
+
+    const keypadKeys = [
+      '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C',
+      'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'P',
+      'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '⌫',
+    ];
+
+    const keysHtml = keypadKeys
+      .map((k) => {
+        const isBack = k === '⌫';
+        const isDigit = k >= '2' && k <= '9';
+        const cls = isBack ? 'is-backspace' : isDigit ? 'is-digit' : '';
+        return `<button type="button" class="code-key-btn ${cls}" data-k="${k}">${k}</button>`;
+      })
+      .join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'room-code-keypad-overlay';
+    overlay.className = 'code-keypad-overlay';
+    overlay.innerHTML = `
+      <div class="code-keypad-card" role="dialog" aria-modal="true">
+        <div class="code-keypad-head">
+          <div class="code-keypad-titles">
+            <strong>${I18n.t('keypadModalTitle')}</strong>
+            <span id="keypad-sub-hint">${initialNotice || I18n.t('keypadModalHint')}</span>
+          </div>
+          <button type="button" class="code-keypad-close" id="btn-keypad-close" aria-label="Close">✕</button>
+        </div>
+
+        <div class="code-keypad-bar">
+          <div class="code-slots-row" id="keypad-slots-row">
+            ${[0, 1, 2, 3, 4]
+              .map((idx) => `<span class="code-char-slot" data-slot-idx="${idx}"></span>`)
+              .join('')}
+          </div>
+          <div class="code-keypad-actions">
+            <button type="button" class="btn-cartoon btn-mini btn-blue" id="btn-keypad-paste">${I18n.t('keypadPasteBtn')}</button>
+            <button type="button" class="btn-cartoon btn-mini btn-gray" id="btn-keypad-clear">${I18n.t('keypadClearBtn')}</button>
+            <button type="button" class="btn-cartoon btn-mini btn-yellow" id="btn-keypad-join">${I18n.t('keypadJoinBtn')}</button>
+          </div>
+        </div>
+
+        <div class="code-key-grid">
+          ${keysHtml}
+        </div>
+      </div>
+    `;
+
+    const openedAt = performance.now();
+    hub.appendChild(overlay);
+
+    const slotEls = Array.from(overlay.querySelectorAll<HTMLElement>('.code-char-slot'));
+    const joinBtn = overlay.querySelector('#btn-keypad-join') as HTMLButtonElement;
+    const clearBtn = overlay.querySelector('#btn-keypad-clear') as HTMLButtonElement;
+    const pasteBtn = overlay.querySelector('#btn-keypad-paste') as HTMLButtonElement;
+    const closeBtn = overlay.querySelector('#btn-keypad-close') as HTMLButtonElement;
+    const subHint = overlay.querySelector('#keypad-sub-hint') as HTMLElement;
+
+    const refreshSlotsUI = () => {
+      this.coopCodeDraft = draft;
+      this.syncCodeTriggerDisplay();
+      const activeIdx = Math.min(4, draft.length);
+      slotEls.forEach((el, idx) => {
+        const ch = draft[idx] || '';
+        el.textContent = ch || '·';
+        el.classList.toggle('filled', ch.length > 0);
+        el.classList.toggle('active-cursor', draft.length < 5 && idx === activeIdx);
+      });
+      const ready = draft.length >= 4;
+      joinBtn.disabled = !ready;
+      joinBtn.classList.toggle('btn-green', ready);
+      joinBtn.classList.toggle('btn-yellow', !ready);
+      joinBtn.classList.toggle('is-ready-pulse', draft.length === 5);
+      clearBtn.disabled = draft.length === 0;
+    };
+
+    const submitJoin = () => {
+      if (draft.length < 4) {
+        SoundFX.emptyClip();
+        return;
+      }
+      const callInp = this.modalRoot.querySelector('#coop-callsign-inp') as HTMLInputElement | null;
+      if (callInp && callInp.value.trim()) {
+        CoopManager.setCallsign(callInp.value);
+      }
+      const targetCode = draft;
+      closeModal();
+      this.coopToast = '';
+      SoundFX.reloadDone();
+      CoopManager.joinRoomByCode(targetCode);
+    };
+
+    const handleCharInput = (ch: string) => {
+      if (ch === '⌫') {
+        if (draft.length > 0) {
+          draft = draft.slice(0, -1);
+          SoundFX.xp();
+          refreshSlotsUI();
+        }
+        return;
+      }
+      const clean = ch.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!clean) return;
+      if (draft.length >= 5) {
+        // 已满 5 位时继续按键则覆盖最后一位，方便手滑秒改
+        draft = draft.slice(0, 4) + clean[0];
+      } else {
+        draft += clean[0];
+      }
+      if (draft.length === 5) {
+        SoundFX.reloadDone();
+      } else {
+        SoundFX.xp();
+      }
+      refreshSlotsUI();
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeModal();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitJoin();
+        return;
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault();
+        handleCharInput('⌫');
+        return;
+      }
+      if (/^[a-zA-Z0-9]$/.test(e.key)) {
+        e.preventDefault();
+        handleCharInput(e.key);
+      }
+    };
+
+    const onWindowPaste = (e: ClipboardEvent) => {
+      const txt = e.clipboardData?.getData('text') || '';
+      const code = this.extractRoomCodeFromText(txt);
+      if (code.length >= 4) {
+        e.preventDefault();
+        draft = code.slice(0, 5);
+        subHint.textContent = I18n.t('keypadPastedToast', { code: draft });
+        subHint.classList.add('is-ok');
+        SoundFX.reloadDone();
+        refreshSlotsUI();
+      }
+    };
+
+    const closeModal = () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('paste', onWindowPaste);
+      if (this.cleanupKeypadModal === closeModal) {
+        this.cleanupKeypadModal = null;
+      }
+      overlay.remove();
+    };
+
+    this.cleanupKeypadModal = closeModal;
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('paste', onWindowPaste);
+
+    overlay.onclick = (e) => {
+      if (e.target === overlay && performance.now() - openedAt > 380) {
+        closeModal();
+      }
+    };
+
+    this.bindModalTap(closeBtn, () => closeModal());
+    this.bindModalTap(clearBtn, () => {
+      draft = '';
+      SoundFX.xp();
+      refreshSlotsUI();
+    });
+    this.bindModalTap(joinBtn, () => submitJoin());
+
+    this.bindModalTap(pasteBtn, async () => {
+      try {
+        const txt = await navigator.clipboard.readText();
+        const code = this.extractRoomCodeFromText(txt);
+        if (code.length >= 4) {
+          draft = code.slice(0, 5);
+          subHint.textContent = I18n.t('keypadPastedToast', { code: draft });
+          subHint.classList.add('is-ok');
+          SoundFX.reloadDone();
+          refreshSlotsUI();
+          return;
+        }
+      } catch {
+        // clipboard read blocked by browser permission
+      }
+      subHint.textContent = I18n.t('keypadClipboardEmpty');
+      subHint.classList.remove('is-ok');
+      SoundFX.emptyClip();
+    });
+
+    overlay.querySelectorAll<HTMLButtonElement>('.code-key-btn').forEach((keyBtn) => {
+      let lastFastPress = -9999;
+      const fireKey = () => {
+        const k = keyBtn.dataset.k || '';
+        if (k) handleCharInput(k);
+      };
+      keyBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        lastFastPress = performance.now();
+        keyBtn.classList.add('is-pressed');
+        fireKey();
+      });
+      const clearPressed = () => keyBtn.classList.remove('is-pressed');
+      keyBtn.addEventListener('pointerup', clearPressed);
+      keyBtn.addEventListener('pointercancel', clearPressed);
+      keyBtn.addEventListener('pointerleave', clearPressed);
+      keyBtn.onclick = (e) => {
+        if (performance.now() - lastFastPress < 450) {
+          e.preventDefault();
+          return;
+        }
+        fireKey();
+      };
+    });
+
+    refreshSlotsUI();
+  }
+
   private bindCoopHubEvents(): void {
     const saveCallBtn = this.modalRoot.querySelector('#btn-save-callsign') as HTMLButtonElement | null;
+    const randCallBtn = this.modalRoot.querySelector('#btn-rand-callsign') as HTMLButtonElement | null;
     const callInp = this.modalRoot.querySelector('#coop-callsign-inp') as HTMLInputElement | null;
+    if (randCallBtn && callInp) {
+      this.bindModalTap(randCallBtn, () => {
+        const nextName = this.generateRandomCallsign();
+        callInp.value = nextName;
+        CoopManager.setCallsign(nextName);
+        SoundFX.xp();
+        this.coopToast = I18n.t('callsignSaved', { name: CoopManager.getCallsign() });
+        this.showHomeHub();
+      });
+    }
     if (saveCallBtn && callInp) {
       saveCallBtn.onclick = () => {
         CoopManager.setCallsign(callInp.value);
@@ -1592,18 +1906,48 @@ export class UIManager {
       });
     }
 
-    const joinBtn = this.modalRoot.querySelector('#coop-code-inp') ? (this.modalRoot.querySelector('#btn-coop-join') as HTMLButtonElement | null) : null;
-    const codeInp = this.modalRoot.querySelector('#coop-code-inp') as HTMLInputElement | null;
-    if (joinBtn && codeInp) {
-      const doJoin = () => {
+    const codeTriggerBtn = this.modalRoot.querySelector('#coop-code-inp') as HTMLButtonElement | null;
+    const pasteJoinBtn = this.modalRoot.querySelector('#btn-coop-paste-join') as HTMLButtonElement | null;
+    const joinBtn = codeTriggerBtn ? (this.modalRoot.querySelector('#btn-coop-join') as HTMLButtonElement | null) : null;
+
+    if (codeTriggerBtn) {
+      this.bindModalTap(codeTriggerBtn, () => {
+        this.openRoomCodeKeypadModal();
+      });
+    }
+
+    if (pasteJoinBtn) {
+      this.bindModalTap(pasteJoinBtn, async () => {
+        try {
+          const txt = await navigator.clipboard.readText();
+          const extracted = this.extractRoomCodeFromText(txt);
+          if (extracted.length >= 4) {
+            this.coopCodeDraft = extracted;
+            this.syncCodeTriggerDisplay();
+            if (callInp) CoopManager.setCallsign(callInp.value);
+            this.coopToast = '';
+            SoundFX.reloadDone();
+            CoopManager.joinRoomByCode(extracted);
+            return;
+          }
+        } catch {
+          // fallback to built-in keypad modal
+        }
+        this.openRoomCodeKeypadModal(I18n.t('keypadClipboardEmpty'));
+      });
+    }
+
+    if (joinBtn && codeTriggerBtn) {
+      this.bindModalTap(joinBtn, () => {
+        const currentCode = (this.coopCodeDraft || CoopManager.lastJoinCode || '').trim();
+        if (currentCode.length < 4) {
+          this.openRoomCodeKeypadModal();
+          return;
+        }
         if (callInp) CoopManager.setCallsign(callInp.value);
         this.coopToast = '';
-        CoopManager.joinRoomByCode(codeInp.value);
-      };
-      this.bindModalTap(joinBtn, doJoin);
-      codeInp.onkeydown = (e) => {
-        if (e.key === 'Enter') doJoin();
-      };
+        CoopManager.joinRoomByCode(currentCode);
+      });
     }
 
     const copyCodeBtn = this.modalRoot.querySelector('#btn-copy-code') as HTMLButtonElement | null;
