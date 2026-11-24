@@ -367,7 +367,10 @@ export class UIManager {
     const installBtn = this.modalRoot.querySelector('#btn-hub-install') as HTMLButtonElement | null;
     if (installBtn) {
       this.bindModalTap(installBtn, async () => {
-        if (PlatformSDK.hasNativeInstallPrompt()) {
+        const plat = PlatformSDK.getInstallGuidePlatform();
+        // 国内安卓 Chrome 的 beforeinstallprompt ("安装应用") 会后台请求被墙的 googleapis WebAPK 服务导致安装后桌面无图标，
+        // 安卓端优先展示清晰的「创建快捷方式 + 桌面快捷方式权限」指引；桌面端与其他支持端正常弹原生安装框
+        if (plat !== 'android' && PlatformSDK.hasNativeInstallPrompt()) {
           const outcome = await PlatformSDK.triggerNativeInstallPrompt();
           if (outcome === 'accepted') {
             SoundFX.fanfare();
@@ -628,6 +631,7 @@ export class UIManager {
           <div class="install-step-item">${step2}</div>
         </div>
         <div class="install-guide-actions">
+          ${PlatformSDK.hasNativeInstallPrompt() ? `<button class="btn-cartoon btn-mini btn-yellow" id="btn-install-native" type="button">${I18n.isZh() ? '⚡ 系统直接安装' : '⚡ Install Now'}</button>` : ''}
           <button class="btn-cartoon btn-mini btn-blue" id="btn-install-copy-url" type="button">${I18n.t('installCopyUrlBtn')}</button>
           <button class="btn-cartoon btn-mini btn-green" id="btn-install-close" type="button">${I18n.t('installGotItBtn')}</button>
         </div>
@@ -643,6 +647,17 @@ export class UIManager {
     };
     const closeBtn = overlay.querySelector('#btn-install-close') as HTMLButtonElement;
     this.bindModalTap(closeBtn, () => overlay.remove());
+
+    const nativeBtn = overlay.querySelector('#btn-install-native') as HTMLButtonElement | null;
+    if (nativeBtn) {
+      this.bindModalTap(nativeBtn, async () => {
+        const out = await PlatformSDK.triggerNativeInstallPrompt();
+        if (out === 'accepted') {
+          SoundFX.fanfare();
+          overlay.remove();
+        }
+      });
+    }
 
     const copyUrlBtn = overlay.querySelector('#btn-install-copy-url') as HTMLButtonElement;
     this.bindModalTap(copyUrlBtn, async () => {
