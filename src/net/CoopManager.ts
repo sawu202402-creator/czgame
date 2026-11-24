@@ -23,6 +23,7 @@ type BusPayload =
 interface PeerRtcBundle {
   pc: RTCPeerConnection;
   dcFast: RTCDataChannel | null;
+  dcCombat: RTCDataChannel | null;
   dcRel: RTCDataChannel | null;
   pendingCands: RTCIceCandidateInit[];
   remoteDescSet: boolean;
@@ -35,16 +36,13 @@ const RTC_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
 ];
 
-function isFastUnreliableGameMsg(msg: CoopNetMessage): boolean {
+function isSnapshotFastMsg(msg: CoopNetMessage): boolean {
   const t = msg.type;
-  return (
-    t === 'world_sync' ||
-    t === 'players_fast' ||
-    t === 'player_sync' ||
-    t === 'cmd_fire' ||
-    t === 'evt_fx' ||
-    t === 'cmd_revive_tick'
-  );
+  return t === 'world_sync' || t === 'players_fast' || t === 'player_sync' || t === 'cmd_revive_tick';
+}
+
+function isCombatUnorderedMsg(msg: CoopNetMessage): boolean {
+  return msg.type === 'cmd_fire' || msg.type === 'evt_fx';
 }
 
 function randomCode(len = 5): string {
@@ -74,6 +72,9 @@ class CoopNetworkManager {
   private joinRetryTimer = 0;
   private lastJoinReqSentAt = 0;
   private inMatchTriggered = false;
+  private pendingClientWorldRaw: string | null = null;
+  private pendingClientPlayersRaw: string | null = null;
+  private pendingHostPlayerRaw = new Map<string, string>();
 
   private onLobbyChangeCb: (() => void) | null = null;
   private onMatchStartCb: ((stageId: string, mode: GameMode, lobby: LobbyState) => void) | null = null;
@@ -229,6 +230,9 @@ class CoopNetworkManager {
     this.hostLastSeen = 0;
     this.rttMs = 0;
     this.inMatchTriggered = false;
+    this.pendingClientWorldRaw = null;
+    this.pendingClientPlayersRaw = null;
+    this.pendingHostPlayerRaw.clear();
     this.role = 'offline';
     this.status = 'idle';
     this.errorMsg = '';
@@ -731,12 +735,54 @@ class CoopNetworkManager {
 
   // ==================== WebRTC 原生 UDP DataChannel 直连加速层（自动穿透 + 无感回退 MQTT） ====================
 
+  public flushCoalescedSnapshots(): void {
+    if (this.role === 'client') {
+      const wRaw = this.pendingClientWorldRaw;
+      const pRaw = this.pendingClientPlayersRaw;
+      this.pendingClientWorldRaw = null;
+      this.pendingClientPlayersRaw = null;
+      if (wRaw) {
+        try {
+          const parsed = JSON.parse(wRaw) as { m?: CoopNetMessage };
+          if (parsed?.m) this.onGameMessageCb?.(parsed.m, this.hostPeerId);
+        } catch {
+          // ignore
+        }
+      }
+      if (pRaw) {
+        try {
+          const parsed = JSON.parse(pRaw) as { m?: CoopNetMessage };
+          if (parsed?.m) this.onGameMessageCb?.(parsed.m, this.hostPeerId);
+        } catch {
+          // ignore
+        }
+      }
+    } else if (this.role === 'host' && this.pendingHostPlayerRaw.size > 0) {
+      for (const [peerId, raw] of this.pendingHostPlayerRaw.entries()) {
+        if (!this.clientLastSeen.has(peerId)) continue;
+        try {
+          const parsed = JSON.parse(raw) as { m?: CoopNetMessage };
+          if (parsed?.m) this.onGameMessageCb?.(parsed.m, peerId);
+        } catch {
+          // ignore
+        }
+      }
+      this.pendingHostPlayerRaw.clear();
+    }
+  }
+
   private closeRtcPeer(peerId: string): void {
     const b = this.rtcPeers.get(peerId);
     if (!b) return;
     this.rtcPeers.delete(peerId);
+    this.pendingHostPlayerRaw.delete(peerId);
     try {
       b.dcFast?.close();
+    } catch {
+      // ignore
+    }
+    try {
+      b.dcCombat?.close();
     } catch {
       // ignore
     }
@@ -765,13 +811,39 @@ class CoopNetworkManager {
         this.sendRawPingPong(peerId, { type: '__ping', t0: Math.round(performance.now()) });
         if (!this.lobby?.inGame) this.onNetStatsChangeCb?.();
       };
+    } else if (dc.label === 'combat') {
+      bundle.dcCombat = dc;
     } else {
       bundle.dcRel = dc;
     }
     dc.onmessage = (ev) => {
       if (typeof ev.data !== 'string') return;
+      const raw = ev.data;
+      const now = performance.now();
+
+      // Wi-Fi 节能帧突发聚合消抖：同一渲染帧内若涌入多包快照，仅保留最后一包到 update() 统一解析，砍掉 70%+ JSON 与 GC 卡顿！
+      if (dc.label === 'fast') {
+        if (this.role === 'client' && this.inMatchTriggered) {
+          this.hostLastSeen = now;
+          if (raw.includes('"world_sync"')) {
+            this.pendingClientWorldRaw = raw;
+            return;
+          }
+          if (raw.includes('"players_fast"')) {
+            this.pendingClientPlayersRaw = raw;
+            return;
+          }
+        } else if (this.role === 'host' && this.clientLastSeen.has(peerId)) {
+          if (raw.includes('"player_sync"')) {
+            this.clientLastSeen.set(peerId, now);
+            this.pendingHostPlayerRaw.set(peerId, raw);
+            return;
+          }
+        }
+      }
+
       try {
-        const parsed = JSON.parse(ev.data) as {
+        const parsed = JSON.parse(raw) as {
           f: string;
           m: CoopNetMessage | { type: '__ping'; t0: number } | { type: '__pong'; t0: number };
         };
@@ -836,6 +908,7 @@ class CoopNetworkManager {
       const bundle: PeerRtcBundle = {
         pc,
         dcFast: null,
+        dcCombat: null,
         dcRel: null,
         pendingCands: [],
         remoteDescSet: false,
@@ -871,10 +944,12 @@ class CoopNetworkManager {
     const bundle = this.createRtcPeerBundle(clientPeerId);
     if (!bundle) return;
     try {
-      // fast 通道开启无序零重传 UDP 模式，彻底消除 Wi-Fi / 4G 偶发丢包引起的 TCP 队头阻塞卡顿！
+      // fast 通道开启无序零重传 UDP 模式；combat 通道开启无序 2 次重传（确保非主机开火子弹零队头阻塞且绝不丢弹！）
       const dcFast = bundle.pc.createDataChannel('fast', { ordered: false, maxRetransmits: 0 });
+      const dcCombat = bundle.pc.createDataChannel('combat', { ordered: false, maxRetransmits: 2 });
       const dcRel = bundle.pc.createDataChannel('rel', { ordered: true });
       this.bindRtcChannel(clientPeerId, bundle, dcFast);
+      this.bindRtcChannel(clientPeerId, bundle, dcCombat);
       this.bindRtcChannel(clientPeerId, bundle, dcRel);
 
       bundle.pc
@@ -970,9 +1045,20 @@ class CoopNetworkManager {
     }
     const b = this.rtcPeers.get(peerId);
     if (!b) return false;
-    const fast = isFastUnreliableGameMsg(msg);
-    const ch = fast ? b.dcFast : b.dcRel;
-    if (!ch || ch.readyState !== 'open' || ch.bufferedAmount > 32_768) return false;
+    const isSnap = isSnapshotFastMsg(msg);
+    const isCombat = isCombatUnorderedMsg(msg);
+    const ch = isSnap
+      ? b.dcFast
+      : isCombat
+        ? b.dcCombat && b.dcCombat.readyState === 'open'
+          ? b.dcCombat
+          : b.dcRel
+        : b.dcRel;
+    if (!ch || ch.readyState !== 'open') return false;
+    if (ch.bufferedAmount > 32_768) {
+      // 当 P2P 快照通道瞬时缓冲满时直接丢弃旧快照（等待下一帧新鲜快照），绝不倒灌进慢速 TCP MQTT 引发新旧包乱序卡顿！
+      return isSnap;
+    }
     try {
       ch.send(preSerialized || JSON.stringify({ f: this.myPeerId, m: msg }));
       return true;

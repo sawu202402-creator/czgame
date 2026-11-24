@@ -68,6 +68,7 @@ async function bootstrap() {
 
   let viewW = window.innerWidth;
   let viewH = window.innerHeight;
+  let currentDpr = 1;
 
   const input = new InputManager(canvas);
   inputRef = input;
@@ -90,6 +91,7 @@ async function bootstrap() {
     viewW = Math.max(1, Math.round(gameRoot.clientWidth || window.innerWidth));
     viewH = Math.max(1, Math.round(gameRoot.clientHeight || window.innerHeight));
     const dpr = Math.min(window.devicePixelRatio || 1, viewW > 1440 ? 1.25 : 1.5);
+    currentDpr = dpr;
     const targetW = Math.max(1, Math.floor(viewW * dpr));
     const targetH = Math.max(1, Math.floor(viewH * dpr));
     if (canvas.width !== targetW || canvas.height !== targetH) {
@@ -170,8 +172,22 @@ async function bootstrap() {
     }
 
     try {
+      const liveW = Math.max(1, Math.round(gameRoot.clientWidth || window.innerWidth));
+      const liveH = Math.max(1, Math.round(gameRoot.clientHeight || window.innerHeight));
+      const liveDpr = Math.min(window.devicePixelRatio || 1, liveW > 1440 ? 1.25 : 1.5);
+      if (
+        liveW !== viewW ||
+        liveH !== viewH ||
+        Math.abs(liveDpr - currentDpr) > 0.01 ||
+        canvas.width !== Math.max(1, Math.floor(liveW * liveDpr)) ||
+        canvas.height !== Math.max(1, Math.floor(liveH * liveDpr))
+      ) {
+        syncViewportAndOrientation();
+      }
       if (engine.state) {
         engine.update(dt, viewW, viewH);
+        // 强制每帧重置 2D 变换矩阵，彻底杜绝安卓 GPU 上下文恢复或全屏过渡导致画面缩在左上角 2/3 (1/dpr) 及残影问题！
+        ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
         engine.render(viewW, viewH);
         hudTick += dt;
         if (hudTick >= 0.08) {

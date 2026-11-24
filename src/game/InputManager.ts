@@ -19,6 +19,7 @@ export class InputManager {
   public usingTouch = false;
   public autoFireEnabled = false;
   private touchAutoFireInitialized = false;
+  private lastTouchAt = 0;
 
   public moveStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
   public aimStick: StickState = { active: false, id: -1, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
@@ -41,17 +42,36 @@ export class InputManager {
       this.touchAutoFireInitialized = true;
     }
 
+    const markTouchActive = () => {
+      this.lastTouchAt = performance.now();
+      this.usingTouch = true;
+      if (!this.touchAutoFireInitialized) {
+        this.autoFireEnabled = true;
+        this.touchAutoFireInitialized = true;
+      }
+    };
+
+    window.addEventListener('touchstart', markTouchActive, { passive: true });
+    window.addEventListener('touchend', () => {
+      this.lastTouchAt = performance.now();
+    }, { passive: true });
     window.addEventListener(
-      'touchstart',
-      () => {
-        this.usingTouch = true;
-        if (!this.touchAutoFireInitialized) {
-          this.autoFireEnabled = true;
-          this.touchAutoFireInitialized = true;
+      'pointerdown',
+      (e) => {
+        if (e.pointerType === 'touch') {
+          markTouchActive();
         }
       },
       { passive: true }
     );
+
+    const isSyntheticOrMobileTouch = (e?: MouseEvent): boolean => {
+      if (PlatformSDK.isMobileOrTablet()) return true;
+      if (performance.now() - this.lastTouchAt < 2000) return true;
+      const sc = (e as (MouseEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } }) | undefined)
+        ?.sourceCapabilities;
+      return Boolean(sc?.firesTouchEvents);
+    };
 
     window.addEventListener('keydown', (e) => {
       const target = e.target as HTMLElement | null;
@@ -69,8 +89,29 @@ export class InputManager {
       }
       if (e.repeat) return;
 
-      this.keys.add(code);
-      this.usingTouch = false;
+      const isGameKey =
+        code === 'KeyW' ||
+        code === 'KeyA' ||
+        code === 'KeyS' ||
+        code === 'KeyD' ||
+        code.startsWith('Arrow') ||
+        code === 'KeyQ' ||
+        code === 'KeyR' ||
+        code === 'KeyB' ||
+        code === 'KeyG' ||
+        code === 'KeyF' ||
+        code === 'KeyE' ||
+        code === 'KeyV' ||
+        code === 'KeyT' ||
+        code === 'Space' ||
+        /^Digit[1-9]$/.test(code);
+
+      if (isGameKey) {
+        this.keys.add(code);
+        if (!PlatformSDK.isMobileOrTablet() && performance.now() - this.lastTouchAt > 2000) {
+          this.usingTouch = false;
+        }
+      }
       if (code === 'Escape' || code === 'KeyP') {
         e.preventDefault();
         this.onEscapeCb?.();
@@ -128,6 +169,7 @@ export class InputManager {
     );
 
     this.canvas.addEventListener('mousemove', (e) => {
+      if (isSyntheticOrMobileTouch(e)) return;
       const rect = this.canvas.getBoundingClientRect();
       this.mouseScreenX = e.clientX - rect.left;
       this.mouseScreenY = e.clientY - rect.top;
@@ -135,6 +177,7 @@ export class InputManager {
     });
 
     this.canvas.addEventListener('mousedown', (e) => {
+      if (isSyntheticOrMobileTouch(e)) return;
       if (e.button === 0) {
         const rect = this.canvas.getBoundingClientRect();
         this.mouseScreenX = e.clientX - rect.left;

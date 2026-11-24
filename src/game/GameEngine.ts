@@ -72,8 +72,11 @@ export class GameEngine {
   private explosionDepth = 0;
   private pendingModals: (() => void)[] = [];
 
-  // 56px 网格 BFS 流场寻路（支持任意不规则多边形房间、走廊与家具绕障！）
+  // 56px 网格 BFS 流场寻路（支持任意不规则多边形房间、走廊与家具绕障 + 多人独立仇恨分流流场！）
   private flowDist: Int16Array = new Int16Array(0);
+  private combatantFlowDists: Int16Array[] = [];
+  private flowBfsQueue: Int32Array = new Int32Array(0);
+  private flowAliveSnapshot: { id: string; isLocal: boolean; x: number; y: number; radius: number }[] = [];
   private walkableGrid: Uint8Array = new Uint8Array(0);
   private botBfsDist: Int16Array = new Int16Array(0);
   private botBfsQueue: Int32Array = new Int32Array(0);
@@ -81,6 +84,11 @@ export class GameEngine {
   private flowTimer = 0;
   private lastViewW = 1280;
   private lastViewH = 720;
+
+  // 客机零 GC 实体复用表（彻底消除每包 new Map / new Set 引发的移动端 V8 垃圾回收卡顿）
+  private clientZombieMap = new Map<number, ZombieEntity>();
+  private clientSeenZombieIds = new Set<number>();
+  private clientDropMap = new Map<number, DropItem>();
 
   // 多人联机状态同步计时器与序列号
   private playerSyncTimer = 0;
@@ -695,38 +703,13 @@ export class GameEngine {
     if (this.flowDist.length !== total) {
       this.flowDist = new Int16Array(total);
     }
+    if (this.flowBfsQueue.length !== total) {
+      this.flowBfsQueue = new Int32Array(total);
+    }
     this.flowDist.fill(30000);
 
-    const q = new Int32Array(total);
-    let head = 0;
-    let tail = 0;
-
-    // 多源 BFS：将所有在场存活队员同时设为流场目标源点，僵尸自动扑向路径最近的特种兵！
-    const seedCells: [number, number][] = [];
-    for (const comb of this.getAliveCombatants()) {
-      const pgx = Math.max(0, Math.min(cols - 1, Math.floor(comb.x / G)));
-      const pgy = Math.max(0, Math.min(rows - 1, Math.floor(comb.y / G)));
-      if (this.walkableGrid[pgy * cols + pgx]) {
-        seedCells.push([pgx, pgy]);
-      } else {
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = pgx + dx;
-            const ny = pgy + dy;
-            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && this.walkableGrid[ny * cols + nx]) {
-              seedCells.push([nx, ny]);
-            }
-          }
-        }
-      }
-    }
-
-    for (const [sx, sy] of seedCells) {
-      const idx = sy * cols + sx;
-      if (this.flowDist[idx] === 0) continue;
-      this.flowDist[idx] = 0;
-      q[tail++] = idx;
-    }
+    const alive = this.getAliveCombatants();
+    this.flowAliveSnapshot = alive;
 
     const dirs = [
       [1, 0],
@@ -734,44 +717,179 @@ export class GameEngine {
       [0, 1],
       [0, -1],
     ];
-    while (head < tail) {
-      const cur = q[head++];
-      const cx = cur % cols;
-      const cy = (cur / cols) | 0;
-      const nextD = this.flowDist[cur] + 1;
-      for (const [dx, dy] of dirs) {
-        const nx = cx + dx;
-        const ny = cy + dy;
-        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
-        const nidx = ny * cols + nx;
-        if (this.flowDist[nidx] <= nextD) continue;
-        if (this.canStepBetweenCells(cx, cy, nx, ny)) {
-          this.flowDist[nidx] = nextD;
-          q[tail++] = nidx;
+    const q = this.flowBfsQueue;
+
+    // 为每位在场存活队员构建独立 BFS 流场距离图（~1400 格仅耗时 < 0.08ms），实现联机精准分流追击且绝不隔墙吸怪！
+    for (let pIdx = 0; pIdx < alive.length; pIdx++) {
+      let grid = this.combatantFlowDists[pIdx];
+      if (!grid || grid.length !== total) {
+        grid = new Int16Array(total);
+        this.combatantFlowDists[pIdx] = grid;
+      }
+      grid.fill(30000);
+
+      const comb = alive[pIdx];
+      const pgx = Math.max(0, Math.min(cols - 1, Math.floor(comb.x / G)));
+      const pgy = Math.max(0, Math.min(rows - 1, Math.floor(comb.y / G)));
+      let head = 0;
+      let tail = 0;
+
+      if (this.walkableGrid[pgy * cols + pgx]) {
+        const cIdx = pgy * cols + pgx;
+        grid[cIdx] = 0;
+        q[tail++] = cIdx;
+      } else {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = pgx + dx;
+            const ny = pgy + dy;
+            if (nx >= 0 && nx < cols && ny >= 0 && ny < rows && this.walkableGrid[ny * cols + nx]) {
+              const cIdx = ny * cols + nx;
+              if (grid[cIdx] !== 0) {
+                grid[cIdx] = 0;
+                q[tail++] = cIdx;
+              }
+            }
+          }
+        }
+      }
+
+      while (head < tail) {
+        const cur = q[head++];
+        const cx = cur % cols;
+        const cy = (cur / cols) | 0;
+        const nextD = grid[cur] + 1;
+        for (const [dx, dy] of dirs) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const nidx = ny * cols + nx;
+          if (grid[nidx] <= nextD) continue;
+          if (this.canStepBetweenCells(cx, cy, nx, ny)) {
+            grid[nidx] = nextD;
+            q[tail++] = nidx;
+          }
+        }
+      }
+
+      for (let k = 0; k < total; k++) {
+        if (grid[k] < this.flowDist[k]) {
+          this.flowDist[k] = grid[k];
         }
       }
     }
   }
 
-  private getFlowVelocityTarget(zx: number, zy: number): { x: number; y: number } {
+  private isSegmentBlockedByWallOrDoor(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    probeR = 9
+  ): boolean {
+    const dist = Math.hypot(x2 - x1, y2 - y1);
+    const steps = Math.max(3, Math.min(10, Math.ceil(dist / 22)));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const mx = x1 + (x2 - x1) * t;
+      const my = y1 + (y2 - y1) * t;
+      if (this.findBlockingWallOrLockedDoor(mx, my, probeR)) return true;
+    }
+    return false;
+  }
+
+  private getSampledFlowCells(distGrid: Int16Array, gx: number, gy: number): number {
+    const { gridCols: cols, gridRows: rows } = this.state!.stage;
+    let best = distGrid[gy * cols + gx];
+    if (best < 29000) return best;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = gx + dx;
+        const ny = gy + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        const d = distGrid[ny * cols + nx];
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
+  private getZombieTargetCombatant(z: ZombieEntity): {
+    target: { id: string; isLocal: boolean; x: number; y: number; radius: number };
+    idx: number;
+  } {
+    const s = this.state!;
+    const list = this.flowAliveSnapshot.length > 0 ? this.flowAliveSnapshot : this.getAliveCombatants();
+    if (list.length <= 1) {
+      return { target: list[0], idx: 0 };
+    }
+
+    const { gridCols: cols, gridRows: rows, cellSize: G } = s.stage;
+    const gx = Math.max(0, Math.min(cols - 1, Math.floor(z.x / G)));
+    const gy = Math.max(0, Math.min(rows - 1, Math.floor(z.y / G)));
+
+    // 按僵尸 ID 均匀哈希分配偏好队员槽位，确保 2~4 人同处一室或相邻防区时尸潮均匀分流追击所有队员（绝不偏心只追房主！）
+    const prefIdx = z.id % list.length;
+    let bestIdx = 0;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      const euclid = Math.hypot(c.x - z.x, c.y - z.y);
+      const grid = this.combatantFlowDists[i];
+      const dCells = grid && grid.length === cols * rows ? this.getSampledFlowCells(grid, gx, gy) : 30000;
+      const clearNear = euclid < 175 && !this.isSegmentBlockedByWallOrDoor(z.x, z.y, c.x, c.y, 10);
+
+      let score: number;
+      if (clearNear && euclid < 120) {
+        // 贴脸无遮挡队员优先近战响应
+        score = euclid * 0.55 - (i === prefIdx ? 35 : 0);
+      } else {
+        // 以真实绕墙寻路距离为准（隔墙看似直线近但实际绕路远时绝不死顶墙壁！），叠加 235px 仇恨分流偏置
+        const pathPx = dCells < 29000 ? dCells * G : euclid * 2.6 + 900;
+        score = pathPx + euclid * 0.12 - (i === prefIdx ? 235 : 0);
+      }
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+
+    return { target: list[bestIdx], idx: bestIdx };
+  }
+
+  private getFlowVelocityTarget(
+    zx: number,
+    zy: number,
+    zRadius = 22,
+    targetIdx = 0
+  ): { x: number; y: number } {
     const s = this.state!;
     const { gridCols: cols, gridRows: rows, cellSize: G } = s.stage;
-    const p = this.getNearestAliveCombatant(zx, zy);
+    const list = this.flowAliveSnapshot.length > 0 ? this.flowAliveSnapshot : this.getAliveCombatants();
+    const p = list[targetIdx] || list[0];
+    const distGrid =
+      this.combatantFlowDists[targetIdx] && this.combatantFlowDists[targetIdx].length === cols * rows
+        ? this.combatantFlowDists[targetIdx]
+        : this.flowDist;
 
     const gx = Math.max(0, Math.min(cols - 1, Math.floor(zx / G)));
     const gy = Math.max(0, Math.min(rows - 1, Math.floor(zy / G)));
-    let bestD = this.flowDist[gy * cols + gx];
+    const curCellD = distGrid[gy * cols + gx];
+    const clearR = Math.min(20, Math.max(13, zRadius * 0.66));
 
-    // 仅当流场距离已足够近且在 280px 内时才做直线视线检测，砍掉后期尸潮 85% 的冗余射线开销！
+    // 仅当流场距离足够近且真实通行宽度无墙体/家具阻挡时才直扑目标队员
     if (
-      bestD <= 6 &&
-      Math.abs(p.x - zx) < 280 &&
-      Math.abs(p.y - zy) < 280 &&
-      this.hasClearWalkLine(zx, zy, p.x, p.y)
+      curCellD <= 6 &&
+      Math.abs(p.x - zx) < 270 &&
+      Math.abs(p.y - zy) < 270 &&
+      this.hasClearWalkLine(zx, zy, p.x, p.y, clearR)
     ) {
       return { x: p.x, y: p.y };
     }
 
+    let bestScore = curCellD;
     let bestX = gx;
     let bestY = gy;
 
@@ -781,31 +899,69 @@ export class GameEngine {
         const nx = gx + dx;
         const ny = gy + dy;
         if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
-        const d = this.flowDist[ny * cols + nx];
-        if (d < bestD && this.canStepBetweenCells(gx, gy, nx, ny)) {
-          bestD = d;
+        const d = distGrid[ny * cols + nx];
+        if (d >= 29000) continue;
+        // 正交方向轻微优先于斜向，防止大体型暴君/尸王在门口与沙发拐角斜切蹭墙！
+        const diagPenalty = dx !== 0 && dy !== 0 ? (zRadius > 26 ? 0.65 : 0.18) : 0;
+        const candScore = d + diagPenalty;
+        if (candScore < bestScore && this.canStepBetweenCells(gx, gy, nx, ny)) {
+          bestScore = candScore;
           bestX = nx;
           bestY = ny;
         }
       }
     }
 
-    if (bestX === gx && bestY === gy) {
+    if (bestX !== gx || bestY !== gy) {
+      return { x: (bestX + 0.5) * G, y: (bestY + 0.5) * G };
+    }
+
+    // 防卡墙脱困：当僵尸被同伴挤到贴墙/沙发格导致当前格无合法邻边时，绝不盲目隔墙直扑玩家，
+    // 而是搜索周围 5x5 范围内无实墙阻隔且流场值最小的可通行格，平滑导引回主通道绕门进攻！
+    let rescueX = -1;
+    let rescueY = -1;
+    let rescueCost = Infinity;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = gx + dx;
+        const ny = gy + dy;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+        if (!this.walkableGrid[ny * cols + nx]) continue;
+        const d = distGrid[ny * cols + nx];
+        if (d >= 29000) continue;
+        const cx = (nx + 0.5) * G;
+        const cy = (ny + 0.5) * G;
+        if (this.isSegmentBlockedByWallOrDoor(zx, zy, cx, cy, 8)) continue;
+        const cost = d * G + Math.hypot(cx - zx, cy - zy) * 0.4;
+        if (cost < rescueCost) {
+          rescueCost = cost;
+          rescueX = nx;
+          rescueY = ny;
+        }
+      }
+    }
+
+    if (rescueX >= 0) {
+      return { x: (rescueX + 0.5) * G, y: (rescueY + 0.5) * G };
+    }
+    if (!this.isSegmentBlockedByWallOrDoor(zx, zy, p.x, p.y, 8)) {
       return { x: p.x, y: p.y };
     }
-    return { x: (bestX + 0.5) * G, y: (bestY + 0.5) * G };
+    return { x: (gx + 0.5) * G, y: (gy + 0.5) * G };
   }
 
-  private hasClearWalkLine(x1: number, y1: number, x2: number, y2: number): boolean {
-    const steps = 6;
+  private hasClearWalkLine(x1: number, y1: number, x2: number, y2: number, probeR = 14): boolean {
+    const dist = Math.hypot(x2 - x1, y2 - y1);
+    const steps = Math.max(6, Math.min(12, Math.ceil(dist / 28)));
     for (let i = 1; i < steps; i++) {
       const t = i / steps;
       const mx = x1 + (x2 - x1) * t;
       const my = y1 + (y2 - y1) * t;
-      if (this.findBlockingWallOrLockedDoor(mx, my, 14)) return false;
+      if (this.findBlockingWallOrLockedDoor(mx, my, probeR)) return false;
       for (const pr of this.state!.props) {
         const { ew, eh } = this.getEffectivePropDims(pr);
-        if (this.circleIntersectsRect(mx, my, 14, { x: pr.x - ew / 2, y: pr.y - eh / 2, w: ew, h: eh })) {
+        if (this.circleIntersectsRect(mx, my, probeR, { x: pr.x - ew / 2, y: pr.y - eh / 2, w: ew, h: eh })) {
           return false;
         }
       }
@@ -1781,8 +1937,9 @@ export class GameEngine {
       s.fever = Math.max(0, s.fever - dt * 7);
     }
 
-    // 平滑插值远端联机队友身位与动画
+    // 先统一合并本帧收到的最新 P2P 快照（防移动端 Wi-Fi 突发包造成同帧多次重复解析卡顿），再平滑插值队友身位
     if (s.isCoop) {
+      CoopManager.flushCoalescedSnapshots();
       this.interpolateRemotePlayers(dt);
     }
 
@@ -1797,14 +1954,14 @@ export class GameEngine {
       this.flushPendingNetFire(dt);
       this.playerSyncTimer -= dt;
       if (this.playerSyncTimer <= 0 && !CoopManager.isCongested()) {
-        this.playerSyncTimer = CoopManager.hasDirectP2P() ? 0.035 : 0.045;
+        this.playerSyncTimer = CoopManager.hasDirectP2P() ? 0.033 : 0.045;
         CoopManager.sendToHost({ type: 'player_sync', p: this.buildLocalPlayerSync() });
       }
     } else {
       // 单机或房主权威模式：完整物理、多源流场寻路、刷怪与战斗结算
       this.flowTimer -= dt;
       if (this.flowTimer <= 0) {
-        this.flowTimer = 0.18;
+        this.flowTimer = 0.16;
         this.rebuildFlowField();
       }
 
@@ -1847,8 +2004,8 @@ export class GameEngine {
         this.playersFastTimer -= dt;
         if (!CoopManager.isCongested()) {
           const directP2P = CoopManager.hasDirectP2P();
-          const wInterval = directP2P ? 0.062 : 0.075;
-          const pInterval = directP2P ? 0.035 : 0.045;
+          const wInterval = directP2P ? 0.05 : 0.072;
+          const pInterval = directP2P ? 0.033 : 0.045;
           if (this.worldSyncTimer <= 0) {
             this.worldSyncTimer = wInterval;
             this.playersFastTimer = pInterval;
@@ -2237,7 +2394,15 @@ export class GameEngine {
     }
     let win = s.windows[0];
     if (activeWindows.length > 0) {
-      const weights = activeWindows.map((w) => 1 / (1 + (windowLoad.get(w.id) || 0) * 1.35));
+      const alivePlayers = this.getAliveCombatants();
+      const targetPl = alivePlayers[(this.nextEntityId + s.zombies.length) % alivePlayers.length];
+      const weights = activeWindows.map((w) => {
+        const loadFactor = 1 / (1 + (windowLoad.get(w.id) || 0) * 1.35);
+        if (!targetPl || alivePlayers.length <= 1) return loadFactor;
+        const dPl = Math.hypot(w.x + w.w * 0.5 - targetPl.x, w.y + w.h * 0.5 - targetPl.y);
+        const proxBoost = dPl < 520 ? 1.45 : dPl < 880 ? 1.12 : 0.85;
+        return loadFactor * proxBoost;
+      });
       const totalW = weights.reduce((acc, v) => acc + v, 0);
       let pick = Math.random() * totalW;
       win = activeWindows[activeWindows.length - 1];
@@ -4536,7 +4701,7 @@ export class GameEngine {
         continue;
       }
 
-      const targetP = this.getNearestAliveCombatant(z.x, z.y);
+      const { target: targetP, idx: targetPIdx } = this.getZombieTargetCombatant(z);
 
       if (z.kind === 'thief') {
         z.fleeTimer -= dt;
@@ -4564,7 +4729,12 @@ export class GameEngine {
           if (z.fleeTimer > 0) z.fleeTimer = Math.max(0, z.fleeTimer - dt);
           z.rangedCd -= dt;
           const pDistCharge = Math.hypot(targetP.x - z.x, targetP.y - z.y);
-          if (z.rangedCd <= 0 && pDistCharge < 390 && pDistCharge > 75) {
+          if (
+            z.rangedCd <= 0 &&
+            pDistCharge < 390 &&
+            pDistCharge > 75 &&
+            !this.isSegmentBlockedByWallOrDoor(z.x, z.y, targetP.x, targetP.y, 12)
+          ) {
             z.rangedCd = 4.2;
             z.fleeTimer = 0.65;
             z.attackAnim = 1.0;
@@ -4630,7 +4800,10 @@ export class GameEngine {
               z.attackAnim = 1.0;
               const strikeDist = Math.hypot(targetP.x - z.x, targetP.y - z.y);
               const strikeReach = targetP.radius + z.radius + 34;
-              if (strikeDist <= strikeReach) {
+              if (
+                strikeDist <= strikeReach &&
+                !this.isSegmentBlockedByWallOrDoor(z.x, z.y, targetP.x, targetP.y, 8)
+              ) {
                 const hitAng = Math.atan2(targetP.y - z.y, targetP.x - z.x);
                 let angDiff = hitAng - z.slashAngle;
                 while (angDiff > Math.PI) angDiff -= Math.PI * 2;
@@ -4705,7 +4878,10 @@ export class GameEngine {
         }
 
         const standoffDist = targetP.radius + z.radius + 20;
-        if (z.damage > 0 && pDist <= targetP.radius + z.radius + 26 && z.attackCd <= 0) {
+        const clearMeleeSight =
+          pDist <= targetP.radius + z.radius + 30 &&
+          !this.isSegmentBlockedByWallOrDoor(z.x, z.y, targetP.x, targetP.y, 9);
+        if (z.damage > 0 && clearMeleeSight && pDist <= targetP.radius + z.radius + 26 && z.attackCd <= 0) {
           z.attackState = 'windup';
           z.attackStateTimer =
             z.kind === 'runner' ? 0.16 : isBoss || z.kind === 'miniboss' ? 0.23 : 0.2;
@@ -4715,12 +4891,12 @@ export class GameEngine {
           continue;
         }
 
-        const goal = this.getFlowVelocityTarget(z.x, z.y);
+        const goal = this.getFlowVelocityTarget(z.x, z.y, z.radius, targetPIdx);
         const dx = goal.x - z.x;
         const dy = goal.y - z.y;
         const dist = Math.hypot(dx, dy) || 1;
 
-        if (pDist < standoffDist && z.attackCd > 0) {
+        if (clearMeleeSight && pDist < standoffDist && z.attackCd > 0) {
           const awayAng = Math.atan2(z.y - targetP.y, z.x - targetP.x);
           const strafeSign = z.id % 2 === 0 ? 1 : -1;
           const orbitAng = awayAng + strafeSign * 1.15;
@@ -4748,10 +4924,30 @@ export class GameEngine {
           }
         }
 
+        // 分轴平滑贴墙滑行 + 拐角防卡死切向脱困（彻底消除大体型暴君/尸群挤在墙边和门框立柱动弹不得）
         z.x += z.vx * dt;
-        z.y += z.vy * dt;
-        this.maintainZombiePlayerSeparation(z, targetP, targetP.radius + z.radius + 9);
         this.resolveEntityInsideWalls(z);
+        z.y += z.vy * dt;
+        this.resolveEntityInsideWalls(z);
+        if (clearMeleeSight) {
+          this.maintainZombiePlayerSeparation(z, targetP, targetP.radius + z.radius + 9);
+          this.resolveEntityInsideWalls(z);
+        }
+
+        const stepMoved = Math.hypot(z.x - prevZx, z.y - prevZy);
+        if (spd > 20 && stepMoved < spd * dt * 0.26) {
+          const tx1 = -dy / dist;
+          const ty1 = dx / dist;
+          const nudge = spd * dt * 0.82;
+          const probeR = Math.min(18, z.radius * 0.72);
+          const open1 = !this.findBlockingWallOrLockedDoor(z.x + tx1 * 22, z.y + ty1 * 22, probeR);
+          const open2 = !this.findBlockingWallOrLockedDoor(z.x - tx1 * 22, z.y - ty1 * 22, probeR);
+          const sign = open1 && !open2 ? 1 : open2 && !open1 ? -1 : z.id % 2 === 0 ? 1 : -1;
+          z.x += tx1 * sign * nudge;
+          z.y += ty1 * sign * nudge;
+          this.resolveEntityInsideWalls(z);
+        }
+
         if (dt > 0.0005) {
           z.vx = (z.x - prevZx) / dt;
           z.vy = (z.y - prevZy) / dt;
@@ -6717,12 +6913,12 @@ export class GameEngine {
 
   private interpolateRemotePlayers(dt: number): void {
     const s = this.state!;
-    const angLerp = Math.min(1, dt * 20);
+    const angLerp = 1 - Math.exp(-20 * dt);
     for (const rp of s.remotePlayers) {
-      // 阻尼航位推测：在快照间隙平滑前推至多 100ms 并渐进衰减预测速度，彻底消除急停/拐弯时的冲过头回拉抖动！
-      if ((rp.vx !== 0 || rp.vy !== 0) && rp.extrapAge < 0.1 && !rp.spectating) {
-        const step = Math.min(dt, 0.1 - rp.extrapAge);
-        const damp = Math.max(0.25, 1 - rp.extrapAge * 5.5);
+      // 恒速前推 + 超时平滑阻尼：在正常 50ms 快照间隔内保持 1.0x 匀速外推（彻底消除 16Hz 忽快忽慢锯齿感！），仅在包晚到 > 75ms 时平滑衰减防冲过头
+      if ((rp.vx !== 0 || rp.vy !== 0) && rp.extrapAge < 0.13 && !rp.spectating) {
+        const step = Math.min(dt, 0.13 - rp.extrapAge);
+        const damp = rp.extrapAge <= 0.075 ? 1 : Math.max(0, 1 - (rp.extrapAge - 0.075) * 14);
         rp.extrapAge += step;
         const nx = rp.netTx + rp.vx * damp * step;
         const ny = rp.netTy + rp.vy * damp * step;
@@ -6734,7 +6930,7 @@ export class GameEngine {
         }
       }
       const errDist = Math.hypot(rp.netTx - rp.x, rp.netTy - rp.y);
-      const posLerp = Math.min(1, dt * (errDist > 75 ? 24 : 17));
+      const posLerp = 1 - Math.exp(-(errDist > 75 ? 24 : 18) * dt);
       rp.x += (rp.netTx - rp.x) * posLerp;
       rp.y += (rp.netTy - rp.y) * posLerp;
       rp.angle = this.lerpAngle(rp.angle, rp.netAngle, angLerp);
@@ -7018,6 +7214,8 @@ export class GameEngine {
 
   private updateClientWorldVisuals(dt: number): void {
     const s = this.state!;
+    const baseZLerp = 1 - Math.exp(-18 * dt);
+    const fastZLerp = 1 - Math.exp(-25 * dt);
 
     for (const z of s.zombies) {
       z.wobblePhase += dt * (z.kind === 'runner' ? 11 : 7.5);
@@ -7025,9 +7223,10 @@ export class GameEngine {
       if (z.attackAnim > 0) z.attackAnim = Math.max(0, z.attackAnim - dt * 4.8);
       if (z.netTx !== undefined && z.netTy !== undefined) {
         const age = z.extrapAge ?? 0;
-        if ((z.vx !== 0 || z.vy !== 0) && age < 0.095) {
-          const step = Math.min(dt, 0.095 - age);
-          const damp = Math.max(0.25, 1 - age * 5.8);
+        if ((z.vx !== 0 || z.vy !== 0) && age < 0.13) {
+          const step = Math.min(dt, 0.13 - age);
+          // 0~75ms 正常快照间隔内保持 1.0x 恒速航位推测，使下一包抵达时坐标无缝衔接零顿挫！
+          const damp = age <= 0.075 ? 1 : Math.max(0, 1 - (age - 0.075) * 14);
           z.extrapAge = age + step;
           const nx = z.netTx + z.vx * damp * step;
           const ny = z.netTy + z.vy * damp * step;
@@ -7037,7 +7236,7 @@ export class GameEngine {
           }
         }
         const err = Math.hypot(z.netTx - z.x, z.netTy - z.y);
-        const zLerp = Math.min(1, dt * (err > 70 ? 22 : 16));
+        const zLerp = err > 65 ? fastZLerp : baseZLerp;
         z.x += (z.netTx - z.x) * zLerp;
         z.y += (z.netTy - z.y) * zLerp;
       }
@@ -7648,13 +7847,19 @@ export class GameEngine {
       }));
     }
 
-    // 同步僵尸列表并保持平滑插值目标
-    const existingZ = new Map<number, ZombieEntity>();
-    for (const z of s.zombies) existingZ.set(z.id, z);
+    // 同步僵尸列表并保持零 GC 复用与平滑插值目标
+    const existingZ = this.clientZombieMap;
+    existingZ.clear();
+    for (let i = 0; i < s.zombies.length; i++) {
+      const z = s.zombies[i];
+      existingZ.set(z.id, z);
+    }
 
+    const incomingIds = this.clientSeenZombieIds;
+    incomingIds.clear();
     const nextZombies: ZombieEntity[] = [];
-    const incomingIds = new Set<number>();
-    for (const tup of w.zombies) {
+    for (let ti = 0; ti < w.zombies.length; ti++) {
+      const tup = w.zombies[ti];
       const [id, kindCode, zx, zy, zvx, zvy, hp, maxHp, facing, flags, rawAnim, rawSlash, rawFlee] = tup;
       const kind: ZombieKind =
         typeof kindCode === 'number' ? ZOMBIE_KIND_NET_TABLE[kindCode] || 'walker' : kindCode;
@@ -7729,11 +7934,13 @@ export class GameEngine {
       }
     }
 
-    // 被击杀消失的僵尸在客机同步生成击飞滑行尸体动画与血迹火花反馈
+    // 被击杀消失的僵尸在客机同步生成击飞滑行尸体动画与节流粒子反馈（防止密集火拼粒子过多掉帧）
     for (const [oldId, oldZ] of existingZ) {
       if (!incomingIds.has(oldId)) {
-        this.spawnHitSparks(oldZ.x, oldZ.y, oldZ.color, 6);
-        if (s.dyingZombies.length < 28) {
+        if (s.particles.length < 72) {
+          this.spawnHitSparks(oldZ.x, oldZ.y, oldZ.color, 4);
+        }
+        if (s.dyingZombies.length < 22) {
           const backAng = oldZ.facingAngle + Math.PI;
           s.dyingZombies.push({
             kind: oldZ.kind,
@@ -7749,7 +7956,7 @@ export class GameEngine {
             maxLife: 0.28,
           });
         }
-        if (s.decals.length > 52) s.decals.shift();
+        if (s.decals.length > 44) s.decals.shift();
         s.decals.push({
           x: oldZ.x,
           y: oldZ.y,
@@ -7795,9 +8002,13 @@ export class GameEngine {
       isBoss: Boolean(isB),
     }));
 
-    // 战利品掉落保留本地 60fps 磁吸连续坐标（差距不大时不强行拉回旧位）
-    const prevDrops = new Map<number, DropItem>();
-    for (const od of s.drops) prevDrops.set(od.id, od);
+    // 战利品掉落保留本地 60fps 磁吸连续坐标（复用持久 Map 零 GC）
+    const prevDrops = this.clientDropMap;
+    prevDrops.clear();
+    for (let i = 0; i < s.drops.length; i++) {
+      const od = s.drops[i];
+      prevDrops.set(od.id, od);
+    }
     s.drops = w.drops.map(([id, kind, pow, val, dx, dy, dlife]) => {
       const oldD = prevDrops.get(id);
       const keepSmooth = oldD && Math.hypot(oldD.x - dx, oldD.y - dy) < 96;

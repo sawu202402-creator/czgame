@@ -169,7 +169,7 @@ export class UIManager {
   }
 
   private bindCombatTap(btn: HTMLButtonElement, action: () => void): void {
-    let lastTouchFire = 0;
+    let lastTouchFire = -9999;
     btn.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') {
         e.preventDefault();
@@ -185,7 +185,7 @@ export class UIManager {
   }
 
   private bindModalTap(btn: HTMLButtonElement, action: () => void): void {
-    let lastTouchFire = 0;
+    let lastTouchFire = -9999;
     btn.addEventListener('pointerup', (e) => {
       if (e.pointerType === 'touch') {
         e.preventDefault();
