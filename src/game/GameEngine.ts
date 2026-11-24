@@ -20,6 +20,7 @@ import {
   RemotePlayerState,
   SQUAD_SLOTS,
   SerializedBullet,
+  SquadMvpEntry,
   WorldSyncPayload,
   ZOMBIE_KIND_NET_TABLE,
   ZombieNetTuple,
@@ -34,7 +35,7 @@ import {
   getStageEcology,
   getWeaponMasteryBonuses,
 } from '../meta/EndgameDefs';
-import { DifficultyTier, GameMode, InRunPerkDef, PowerUpType, Rect, StageDef } from '../types';
+import { AgentClassId, DifficultyTier, GameMode, InRunPerkDef, PowerUpType, Rect, StageDef } from '../types';
 import {
   DropItem,
   RunSnapshot,
@@ -110,6 +111,9 @@ export class GameEngine {
   private reviveSyncGraceUntil = new Map<string, number>();
   private clientHotJoinSynced = false;
   private pingCooldown = 0;
+  private peerMvpCounters = new Map<string, { revives: number; repairs: number; doorFunded: number }>();
+  private pendingPeerKillCredits = new Map<string, { kills: number; bossKills: number }>();
+  private killCreditFlushTimer = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -212,6 +216,7 @@ export class GameEngine {
                 slot: m.slot,
                 callsign: m.callsign,
                 color: m.color || SQUAD_SLOTS[m.slot]?.color || '#4ade80',
+                classId: m.classId || 'vanguard',
                 x: sx,
                 y: sy,
                 netTx: sx,
@@ -313,6 +318,9 @@ export class GameEngine {
     this.reviveTickAccum = 0;
     this.lastReviveTickAt.clear();
     this.reviveSyncGraceUntil.clear();
+    this.peerMvpCounters.clear();
+    this.pendingPeerKillCredits.clear();
+    this.killCreditFlushTimer = 0;
     this.clientHotJoinSynced = false;
     this.pingCooldown = 0;
 
@@ -333,6 +341,7 @@ export class GameEngine {
       battleXp: 0,
       battleXpNext: 55,
       kills: 0,
+      personalKills: 0,
       fever: 0,
       feverTimer: 0,
       electricFortifyWaves: 0,
@@ -463,7 +472,10 @@ export class GameEngine {
         trapTickTimer: 0,
       })),
       props: stage.props,
-      stations: stage.stations.map((s) => ({ ...s, used: false, progress: 0, activeTimer: 0 })),
+      // 多人联机模式彻底移除“超武空投/广告宝箱”站点，杜绝战斗中误触弹窗广告遮挡或打断联机节奏！
+      stations: stage.stations
+        .filter((st) => !isCoop || st.type !== 'starter_airdrop')
+        .map((s) => ({ ...s, used: false, progress: 0, activeTimer: 0 })),
       walls: stage.walls,
       barrels: stage.barrels.map((b) => ({ ...b, alive: true, respawnWaves: 0 })),
       zombies: [],
@@ -1481,6 +1493,7 @@ export class GameEngine {
           spinAngle: ang,
           damage: gDmg,
           radius: 165,
+          ownerId: CoopManager.myPeerId,
         };
         s.grenadesThrown.push(gData);
         if (s.isCoop && CoopManager.role === 'client') {
@@ -1512,6 +1525,22 @@ export class GameEngine {
       }
     }
 
+    // 联机四大职业团队协同光环：释放职业技能时同步赋能全队/身边战友！
+    if (s.isCoop) {
+      const skillInfo = {
+        ownerId: CoopManager.myPeerId,
+        ownerName: s.localCallsign,
+        classId: s.classId,
+        x: Math.round(p.x),
+        y: Math.round(p.y),
+      };
+      if (CoopManager.role === 'client') {
+        CoopManager.sendToHost({ type: 'cmd_team_skill', ...skillInfo });
+      } else if (CoopManager.role === 'host') {
+        CoopManager.broadcastToClients({ type: 'evt_team_reward', teamSkill: skillInfo });
+      }
+    }
+
     this.spawnFloatingText(
       p.x,
       p.y - 42,
@@ -1520,6 +1549,50 @@ export class GameEngine {
       1.3
     );
     return true;
+  }
+
+  private applyTeamSkillAuraLocal(info: {
+    ownerId: string;
+    ownerName: string;
+    classId: AgentClassId;
+    x: number;
+    y: number;
+  }): void {
+    const s = this.state;
+    if (!s || info.ownerId === CoopManager.myPeerId) return;
+    const p = s.player;
+    const dist = Math.hypot(p.x - info.x, p.y - info.y);
+
+    if (info.classId === 'medic' && dist <= 360 && !p.spectating) {
+      if (p.downed) {
+        this.reviveLocalPlayerFromWaveOrTeammate(info.ownerName);
+      } else {
+        const healAmt = Math.max(18, Math.round(p.maxHp * 0.38));
+        p.hp = Math.min(p.maxHp, p.hp + healAmt);
+        p.armor = Math.min(p.maxArmor, p.armor + 25);
+        this.spawnHitSparks(p.x, p.y, '#4ade80', 10);
+        this.spawnFloatingText(p.x, p.y - 34, I18n.t('ftTeamMedicAura', { hp: healAmt }), '#4ade80', 1.15);
+      }
+    } else if (info.classId === 'vanguard' && dist <= 380 && !p.downed && !p.spectating) {
+      s.powerUpTimers.overdrive = Math.max(s.powerUpTimers.overdrive, 3.6);
+      const activeWep = p.weapons[p.activeSlot];
+      if (activeWep) {
+        activeWep.mag = this.getMaxMag(activeWep.defId, activeWep.evolved);
+        p.reloadTimer = 0;
+      }
+      this.spawnFloatingText(p.x, p.y - 34, I18n.t('ftTeamVanguardAura'), '#fb923c', 1.15);
+    } else if (info.classId === 'engineer' && !p.downed && !p.spectating) {
+      p.grenades = Math.min(9, p.grenades + 1);
+      const activeWep = p.weapons[p.activeSlot];
+      if (activeWep) {
+        const maxM = this.getMaxMag(activeWep.defId, activeWep.evolved);
+        activeWep.mag = Math.min(maxM, activeWep.mag + Math.ceil(maxM * 0.5));
+      }
+      this.spawnFloatingText(p.x, p.y - 34, I18n.t('ftTeamEngineerAura'), '#38bdf8', 1.12);
+    } else if (info.classId === 'demolisher' && !p.spectating) {
+      s.cash += 35;
+      this.spawnFloatingText(p.x, p.y - 34, I18n.t('ftTeamDemoAura'), '#facc15', 1.12);
+    }
   }
 
   public throwGrenade(): void {
@@ -1545,6 +1618,7 @@ export class GameEngine {
       spinAngle: p.angle,
       damage: 320 * s.modifiers.damageMult * grenMult * this.getSectorDamageMult(),
       radius: 175,
+      ownerId: CoopManager.myPeerId,
     };
     s.grenadesThrown.push(gData);
     if (s.isCoop && CoopManager.role === 'client') {
@@ -1984,6 +2058,16 @@ export class GameEngine {
     s.camera.zoom = Math.max(0.54, Math.min(1.1, fitZoom));
 
     if (s.bannerTimer > 0) s.bannerTimer -= dt;
+    if (s.localCalloutTimer && s.localCalloutTimer > 0) {
+      s.localCalloutTimer = Math.max(0, s.localCalloutTimer - dt);
+      if (s.localCalloutTimer <= 0) s.localCalloutText = undefined;
+    }
+    for (const rp of s.remotePlayers) {
+      if (rp.calloutTimer && rp.calloutTimer > 0) {
+        rp.calloutTimer = Math.max(0, rp.calloutTimer - dt);
+        if (rp.calloutTimer <= 0) rp.calloutText = undefined;
+      }
+    }
     if (s.lootToast) {
       s.lootToast.timer -= dt;
       if (s.lootToast.timer <= 0) s.lootToast = null;
@@ -2042,6 +2126,10 @@ export class GameEngine {
       if (this.isRunHalted()) return;
       if (s.isCoop) {
         this.updateCoopRevive(dt);
+        if (CoopManager.role === 'host' && s.remotePlayers.some((rp) => rp.isBot)) {
+          this.updateSquadBots(dt);
+          if (this.isRunHalted()) return;
+        }
       } else if (s.remotePlayers.length > 0) {
         this.updateSquadBots(dt);
         if (this.isRunHalted()) return;
@@ -2066,7 +2154,9 @@ export class GameEngine {
       this.updateFX(dt);
 
       if (s.isCoop && CoopManager.role === 'host') {
+        CoopManager.setHostWaveForDirectory(s.wave);
         this.flushPendingNetFire(dt);
+        this.flushPendingPeerKillCredits(dt);
         this.checkCoopSquadWipe();
         this.worldSyncTimer -= dt;
         this.playersFastTimer -= dt;
@@ -2229,7 +2319,14 @@ export class GameEngine {
           SaveManager.addDailyProgress('clear', 1);
           this.flushRunTelemetry(true);
           if (s.isCoop && CoopManager.role === 'host') {
-            CoopManager.broadcastToClients({ type: 'evt_run_finished', victory: true });
+            const squadStats = this.buildSquadMvpStats();
+            s.squadMvpStats = squadStats;
+            CoopManager.broadcastToClients({
+              type: 'evt_run_finished',
+              victory: true,
+              tier: s.difficultyTier,
+              squadStats,
+            });
           }
           this.callbacks.onRunFinished(true, s);
         }
@@ -3098,6 +3195,7 @@ export class GameEngine {
       if (s.isCoop) netBullets.push(bSpec);
       s.bullets.push({
         ...bSpec,
+        ownerId: CoopManager.myPeerId,
         weaponId: def.id,
         golden: mastery.isGoldenAwakened,
         hitIds: new Set(),
@@ -3258,7 +3356,7 @@ export class GameEngine {
       }
 
       if (g.fuse <= 0) {
-        this.explodeAt(g.x, g.y, g.radius, g.damage);
+        this.explodeAt(g.x, g.y, g.radius, g.damage, g.ownerId);
         s.grenadesThrown.splice(i, 1);
       }
     }
@@ -3285,6 +3383,7 @@ export class GameEngine {
 
     if (accepted <= 0) return;
     door.paidAmount += accepted;
+    this.bumpPeerMvp(contributorPeerId || CoopManager.myPeerId, 'doorFunded', accepted);
     const cx = door.x + door.w / 2;
     const cy = door.y + door.h / 2;
 
@@ -3490,6 +3589,7 @@ export class GameEngine {
           this.pushOutdoorZombiesOutsidePlanks(win);
           SoundFX.repair();
           SaveManager.addDailyProgress('repairs', 1);
+          this.bumpPeerMvp(CoopManager.myPeerId, 'repairs', 1);
           if (s.repairsPaidThisWave < maxPaidRepairs) {
             s.repairsPaidThisWave += 1;
             const cashBonus = 8;
@@ -3860,7 +3960,7 @@ export class GameEngine {
       const b = s.bullets[i];
       b.life -= dt;
       if (b.life <= 0) {
-        if (b.explosiveRadius > 0) this.explodeAt(b.x, b.y, b.explosiveRadius, b.damage);
+        if (b.explosiveRadius > 0) this.explodeAt(b.x, b.y, b.explosiveRadius, b.damage, b.ownerId, b.weaponId);
         s.bullets.splice(i, 1);
         continue;
       }
@@ -3871,7 +3971,7 @@ export class GameEngine {
       const hitWall = this.findBulletBlocker(nextX, nextY, b.radius);
       if (hitWall) {
         if (b.explosiveRadius > 0) {
-          this.explodeAt(b.x, b.y, b.explosiveRadius, b.damage);
+          this.explodeAt(b.x, b.y, b.explosiveRadius, b.damage, b.ownerId, b.weaponId);
           s.bullets.splice(i, 1);
           continue;
         }
@@ -3930,7 +4030,7 @@ export class GameEngine {
         if (Math.hypot(b.x - z.x, b.y - z.y) <= hitDist) {
           b.hitIds.add(z.id);
           if (b.explosiveRadius > 0) {
-            this.explodeAt(b.x, b.y, b.explosiveRadius, b.damage);
+            this.explodeAt(b.x, b.y, b.explosiveRadius, b.damage, b.ownerId, b.weaponId);
             s.bullets.splice(i, 1);
             break;
           }
@@ -3959,7 +4059,9 @@ export class GameEngine {
             b.isCrit,
             b.flame,
             b.electric,
-            b.cryo
+            b.cryo,
+            b.ownerId,
+            b.weaponId
           );
 
           if (b.pierceLeft > 0) {
@@ -4017,7 +4119,9 @@ export class GameEngine {
     isCrit: boolean,
     flame: boolean,
     electric: boolean,
-    cryo = false
+    cryo = false,
+    killerId?: string,
+    killerWeaponId?: string
   ): void {
     if (!z || z.hp <= 0 || this.deadZombieIds.has(z.id)) return;
     const s = this.state!;
@@ -4076,7 +4180,7 @@ export class GameEngine {
 
     // 先处理击杀移出数组，再触发闪电链等连锁伤害，彻底阻断重入递归！
     if (z.hp <= 0) {
-      this.killZombie(z);
+      this.killZombie(z, killerId, killerWeaponId);
     }
 
     if (electric) {
@@ -4087,7 +4191,133 @@ export class GameEngine {
     }
   }
 
-  private killZombie(z: ZombieEntity): void {
+  private applyLocalKillPerks(count = 1, weaponDefId?: string): void {
+    const s = this.state;
+    if (!s) return;
+    const activeWep = s.player.weapons[s.player.activeSlot];
+    const recWepId = weaponDefId || activeWep?.defId;
+    if (recWepId) {
+      SaveManager.recordWeaponKill(recWepId, count);
+    }
+    SaveManager.addDailyProgress('kills', count);
+
+    for (let k = 0; k < count; k++) {
+      if (activeWep && s.modifiers.killRefillChance > 0 && Math.random() < s.modifiers.killRefillChance) {
+        const maxMag = this.getMaxMag(activeWep.defId, activeWep.evolved);
+        if (activeWep.mag < maxMag) {
+          const addAmt = maxMag >= 20 ? 2 : 1;
+          const gained = Math.min(addAmt, maxMag - activeWep.mag);
+          activeWep.mag += gained;
+          if (s.floatingTexts.length < 14) {
+            this.spawnFloatingText(
+              s.player.x,
+              s.player.y - 28,
+              I18n.t('ftAmmoScav', { n: gained }),
+              '#4ade80',
+              0.95
+            );
+          }
+        }
+      }
+
+      if (s.modifiers.killHealRatio > 0 && !s.player.downed && !s.player.spectating) {
+        s.player.killHealCounter += 1;
+        if (s.player.killHealCounter >= 10) {
+          s.player.killHealCounter = 0;
+          const healRatio = Math.min(0.35, s.modifiers.killHealRatio);
+          const heal = Math.max(4, Math.round(s.player.maxHp * healRatio));
+          if (s.player.hp < s.player.maxHp) {
+            s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
+            this.spawnFloatingText(s.player.x, s.player.y - 34, I18n.t('ftKillSiphon', { n: heal }), '#34d399', 1.12);
+          } else {
+            const overArmor = SaveManager.getEffectivePlayerStats().vampOverhealArmor;
+            if (overArmor > 0 && s.player.armor < s.player.maxArmor) {
+              s.player.armor = Math.min(s.player.maxArmor, s.player.armor + overArmor);
+            }
+          }
+        }
+      }
+
+      if (s.relicIds.includes('vamp_fangs')) {
+        s.player.vampCounter += 1;
+        if (s.player.vampCounter >= 18) {
+          s.player.vampCounter = 0;
+          const heal = Math.round(s.player.maxHp * 0.08);
+          s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
+          this.spawnFloatingText(s.player.x, s.player.y - 30, I18n.t('ftNanoHeal', { n: heal }), '#4ade80', 1.15);
+        }
+      }
+    }
+  }
+
+  private flushPendingPeerKillCredits(dt: number): void {
+    if (this.pendingPeerKillCredits.size === 0) return;
+    this.killCreditFlushTimer -= dt;
+    if (this.killCreditFlushTimer > 0) return;
+    this.killCreditFlushTimer = 0.18;
+    for (const [peerId, rec] of Array.from(this.pendingPeerKillCredits.entries())) {
+      this.pendingPeerKillCredits.delete(peerId);
+      if (rec.kills > 0 || rec.bossKills > 0) {
+        CoopManager.sendToClient(peerId, {
+          type: 'evt_team_reward',
+          targetId: peerId,
+          killCredits: rec.kills,
+          bossKills: rec.bossKills > 0 ? rec.bossKills : undefined,
+        });
+      }
+    }
+  }
+
+  private bumpPeerMvp(peerId: string, field: 'revives' | 'repairs' | 'doorFunded', amount = 1): void {
+    if (!peerId) return;
+    let cur = this.peerMvpCounters.get(peerId);
+    if (!cur) {
+      cur = { revives: 0, repairs: 0, doorFunded: 0 };
+      this.peerMvpCounters.set(peerId, cur);
+    }
+    cur[field] += amount;
+  }
+
+  public buildSquadMvpStats(): SquadMvpEntry[] {
+    const s = this.state;
+    if (!s) return [];
+    const myCounters = this.peerMvpCounters.get(CoopManager.myPeerId) || {
+      revives: 0,
+      repairs: 0,
+      doorFunded: 0,
+    };
+    const out: SquadMvpEntry[] = [
+      {
+        peerId: CoopManager.myPeerId,
+        slot: s.localSlot,
+        callsign: s.localCallsign,
+        color: SQUAD_SLOTS[s.localSlot]?.color || '#38bdf8',
+        classId: s.classId,
+        kills: s.isCoop ? s.personalKills : s.kills,
+        revives: myCounters.revives,
+        repairs: myCounters.repairs,
+        doorFunded: myCounters.doorFunded,
+      },
+    ];
+    for (const rp of s.remotePlayers) {
+      const c = this.peerMvpCounters.get(rp.peerId) || { revives: 0, repairs: 0, doorFunded: 0 };
+      out.push({
+        peerId: rp.peerId,
+        slot: rp.slot,
+        callsign: rp.callsign,
+        color: rp.color,
+        classId: rp.classId || 'vanguard',
+        kills: rp.kills,
+        revives: c.revives,
+        repairs: c.repairs,
+        doorFunded: c.doorFunded,
+      });
+    }
+    out.sort((a, b) => a.slot - b.slot);
+    return out;
+  }
+
+  private killZombie(z: ZombieEntity, killerId?: string, killerWeaponId?: string): void {
     if (!z || this.deadZombieIds.has(z.id)) return;
     this.deadZombieIds.add(z.id);
 
@@ -4133,38 +4363,39 @@ export class GameEngine {
     });
 
     s.kills += 1;
-    SaveManager.addDailyProgress('kills', 1);
-    const activeWepKill = s.player.weapons[s.player.activeSlot];
-    if (activeWepKill) {
-      SaveManager.recordWeaponKill(activeWepKill.defId, 1);
-    }
     const isBoss = isBossKind(z.kind);
-    if (isBoss || z.kind === 'miniboss') {
-      SaveManager.addDailyProgress('bosses', 1);
+    const actualKiller = killerId || CoopManager.myPeerId;
+
+    if (!s.isCoop || actualKiller === CoopManager.myPeerId) {
+      s.personalKills += 1;
+      this.applyLocalKillPerks(1, killerWeaponId);
+      if (isBoss || z.kind === 'miniboss') {
+        SaveManager.addDailyProgress('bosses', 1);
+      }
+    } else {
+      const rp = s.remotePlayers.find((r) => r.peerId === actualKiller);
+      if (rp) {
+        rp.kills += 1;
+        if (!rp.isBot && CoopManager.role === 'host') {
+          const prevCred = this.pendingPeerKillCredits.get(actualKiller) || { kills: 0, bossKills: 0 };
+          prevCred.kills += 1;
+          if (isBoss || z.kind === 'miniboss') prevCred.bossKills += 1;
+          this.pendingPeerKillCredits.set(actualKiller, prevCred);
+        }
+      } else {
+        s.personalKills += 1;
+        this.applyLocalKillPerks(1, killerWeaponId);
+      }
     }
+
     if (isBoss && !s.stage.isTutorial) {
       SaveManager.addTechCores(1, false);
       this.spawnFloatingText(z.x, z.y - z.radius - 26, '💠 +1 Tech Core', '#38bdf8', 1.3);
-    }
-
-    if (s.modifiers.killRefillChance > 0 && Math.random() < s.modifiers.killRefillChance) {
-      const activeWep = s.player.weapons[s.player.activeSlot];
-      const maxMag = this.getMaxMag(activeWep.defId, activeWep.evolved);
-      if (activeWep.mag < maxMag) {
-        const addAmt = maxMag >= 20 ? 2 : 1;
-        const gained = Math.min(addAmt, maxMag - activeWep.mag);
-        activeWep.mag += gained;
-        if (s.floatingTexts.length < 14) {
-          this.spawnFloatingText(
-            s.player.x,
-            s.player.y - 28,
-            I18n.t('ftAmmoScav', { n: gained }),
-            '#4ade80',
-            0.95
-          );
-        }
+      if (s.isCoop && CoopManager.role === 'host') {
+        CoopManager.broadcastToClients({ type: 'evt_team_reward', bossTechCore: 1 });
       }
     }
+
     this.spawnHitSparks(z.x, z.y, z.color, 8);
     if (s.decals.length > 52) s.decals.shift();
     s.decals.push({
@@ -4191,34 +4422,6 @@ export class GameEngine {
         s.fever = 0;
         SoundFX.fanfare();
         this.spawnFloatingText(s.player.x, s.player.y - 38, I18n.t('ftFever'), '#fb923c', 1.25);
-      }
-    }
-
-    if (s.modifiers.killHealRatio > 0 && !s.player.downed && !s.player.spectating) {
-      s.player.killHealCounter += 1;
-      if (s.player.killHealCounter >= 10) {
-        s.player.killHealCounter = 0;
-        const healRatio = Math.min(0.35, s.modifiers.killHealRatio);
-        const heal = Math.max(4, Math.round(s.player.maxHp * healRatio));
-        if (s.player.hp < s.player.maxHp) {
-          s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
-          this.spawnFloatingText(s.player.x, s.player.y - 34, I18n.t('ftKillSiphon', { n: heal }), '#34d399', 1.12);
-        } else {
-          const overArmor = SaveManager.getEffectivePlayerStats().vampOverhealArmor;
-          if (overArmor > 0 && s.player.armor < s.player.maxArmor) {
-            s.player.armor = Math.min(s.player.maxArmor, s.player.armor + overArmor);
-          }
-        }
-      }
-    }
-
-    if (s.relicIds.includes('vamp_fangs')) {
-      s.player.vampCounter += 1;
-      if (s.player.vampCounter >= 18) {
-        s.player.vampCounter = 0;
-        const heal = Math.round(s.player.maxHp * 0.08);
-        s.player.hp = Math.min(s.player.maxHp, s.player.hp + heal);
-        this.spawnFloatingText(s.player.x, s.player.y - 30, I18n.t('ftNanoHeal', { n: heal }), '#4ade80', 1.15);
       }
     }
 
@@ -4419,7 +4622,14 @@ export class GameEngine {
     }
   }
 
-  private explodeAt(x: number, y: number, radius: number, damage: number): void {
+  private explodeAt(
+    x: number,
+    y: number,
+    radius: number,
+    damage: number,
+    killerId?: string,
+    killerWeaponId?: string
+  ): void {
     const s = this.state!;
     this.spawnExplosionVisuals(x, y, radius);
 
@@ -4445,7 +4655,10 @@ export class GameEngine {
             Math.sin(ang) * 260,
             true,
             true,
-            false
+            false,
+            false,
+            killerId,
+            killerWeaponId
           );
         }
       }
@@ -7165,6 +7378,7 @@ export class GameEngine {
       if (!p.downed || p.spectating) return;
       p.reviveProgress = Math.min(1, p.reviveProgress + dt / 2.2);
       if (p.reviveProgress >= 1) {
+        this.bumpPeerMvp(reviverId, 'revives', 1);
         this.reviveLocalPlayerFromWaveOrTeammate(reviverName);
         CoopManager.broadcastToClients({
           type: 'evt_player_revived',
@@ -7187,6 +7401,7 @@ export class GameEngine {
     if (!rp || !rp.downed || rp.spectating) return;
     rp.reviveProgress = Math.min(1, rp.reviveProgress + dt / 2.2);
     if (rp.reviveProgress >= 1) {
+      this.bumpPeerMvp(reviverId, 'revives', 1);
       rp.downed = false;
       rp.spectating = false;
       rp.reviveProgress = 0;
@@ -7227,7 +7442,14 @@ export class GameEngine {
         SaveManager.recordEndlessWave(s.stage.id, s.wave);
       }
       this.flushRunTelemetry(false);
-      CoopManager.broadcastToClients({ type: 'evt_run_finished', victory: false });
+      const squadStats = this.buildSquadMvpStats();
+      s.squadMvpStats = squadStats;
+      CoopManager.broadcastToClients({
+        type: 'evt_run_finished',
+        victory: false,
+        tier: s.difficultyTier,
+        squadStats,
+      });
       this.callbacks.onRunFinished(false, s);
     }
   }
@@ -7583,7 +7805,7 @@ export class GameEngine {
     y: number,
     color: string,
     label: string,
-    kind: 'rally' | 'door' | 'sos' | 'evac'
+    kind: 'rally' | 'door' | 'sos' | 'evac' | 'chest' | 'nice'
   ): void {
     const s = this.state;
     if (!s) return;
@@ -7600,6 +7822,126 @@ export class GameEngine {
     });
     if (kind === 'sos') SoundFX.alarm();
     else SoundFX.coin();
+  }
+
+  public getNextFundableDoor(): RunSnapshot['doors'][number] | null {
+    const s = this.state;
+    if (!s || !s.isCoop || s.waveState === 'ended') return null;
+    const candidates = s.doors.filter((d) => {
+      if (d.unlocked || d.paidAmount >= d.cost) return false;
+      const ra = s.rooms.find((r) => r.id === d.roomA)?.unlocked;
+      const rb = s.rooms.find((r) => r.id === d.roomB)?.unlocked;
+      return Boolean(ra || rb);
+    });
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => {
+      // 优先选择队友已投过钱正在凑的门，其次选剩余门费最低的门
+      if ((b.paidAmount > 0 ? 1 : 0) !== (a.paidAmount > 0 ? 1 : 0)) {
+        return (b.paidAmount > 0 ? 1 : 0) - (a.paidAmount > 0 ? 1 : 0);
+      }
+      return a.cost - a.paidAmount - (b.cost - b.paidAmount);
+    });
+    return candidates[0];
+  }
+
+  public fundNextLockedDoorRemotely(amount = 100): boolean {
+    const s = this.state;
+    if (!s || !s.isCoop || s.waveState === 'ended') return false;
+    const door = this.getNextFundableDoor();
+    if (!door) return false;
+    const needed = Math.max(0, door.cost - door.paidAmount);
+    const pay = Math.min(amount, needed);
+    if (pay <= 0 || s.cash < pay) {
+      this.spawnFloatingText(s.player.x, s.player.y - 30, I18n.t('msgNoCash', { c: pay || amount }), '#f87171', 1.02);
+      SoundFX.emptyClip();
+      return false;
+    }
+    s.cash -= pay;
+    SoundFX.coin();
+    if (CoopManager.role === 'host') {
+      this.applyDoorFunding(door, pay, CoopManager.myPeerId);
+    } else {
+      CoopManager.sendToHost({
+        type: 'cmd_fund_door',
+        ownerId: CoopManager.myPeerId,
+        doorId: door.id,
+        amount: pay,
+      });
+      this.spawnFloatingText(
+        s.player.x,
+        s.player.y - 30,
+        I18n.t('ftDoorPool', { paid: pay, left: Math.max(0, needed - pay) }),
+        '#fde047',
+        1.05
+      );
+    }
+    return true;
+  }
+
+  public sendQuickCallout(preset: 'sos' | 'door' | 'chest' | 'nice'): boolean {
+    const s = this.state;
+    if (!s || s.waveState === 'ended') return false;
+    const p = s.player;
+    const call = s.localCallsign || 'Agent';
+    let px = p.x;
+    let py = p.y;
+    let color: string = SQUAD_SLOTS[s.localSlot]?.color || '#38bdf8';
+    let kind: 'rally' | 'door' | 'sos' | 'evac' | 'chest' | 'nice' = preset;
+    let bubble = I18n.t('calloutNice');
+    let label = `${call}: ${bubble}`;
+
+    if (preset === 'sos') {
+      color = '#ef4444';
+      bubble = I18n.t('calloutSOS');
+      label = I18n.t('coopPingSOS', { name: call });
+    } else if (preset === 'door') {
+      color = '#facc15';
+      bubble = I18n.t('calloutDoor');
+      const d = this.getNextFundableDoor();
+      if (d) {
+        px = d.x + d.w * 0.5;
+        py = d.y + d.h * 0.5;
+        label = I18n.t('coopPingDoor', { name: call, n: Math.max(0, d.cost - d.paidAmount) });
+      } else {
+        label = `${call}: ${bubble}`;
+      }
+    } else if (preset === 'chest') {
+      color = '#f59e0b';
+      bubble = I18n.t('calloutChest');
+      const c = s.chests[0];
+      if (c) {
+        px = c.x;
+        py = c.y;
+      }
+      label = I18n.t('coopPingChest', { name: call });
+    } else {
+      color = '#4ade80';
+      bubble = I18n.t('calloutNice');
+      label = `${call}: ${bubble}`;
+    }
+
+    s.localCalloutText = bubble;
+    s.localCalloutTimer = 3.2;
+    this.pushLocalTacticalPing(px, py, color, label, kind);
+
+    if (s.isCoop) {
+      const pkt: CoopNetMessage = {
+        type: 'cmd_ping',
+        ownerId: CoopManager.myPeerId,
+        x: Math.round(px),
+        y: Math.round(py),
+        color,
+        label,
+        kind,
+        bubble,
+      };
+      if (CoopManager.role === 'client') {
+        CoopManager.sendToHost(pkt);
+      } else if (CoopManager.role === 'host') {
+        CoopManager.broadcastToClients(pkt);
+      }
+    }
+    return true;
   }
 
   public sendCashAidToTeammate(targetPeerId: string, amount = 100): boolean {
@@ -7649,6 +7991,7 @@ export class GameEngine {
       slot: s.localSlot,
       callsign: s.localCallsign,
       color: SQUAD_SLOTS[s.localSlot]?.color || '#38bdf8',
+      classId: s.classId,
       x: Math.round(p.x * 10) / 10,
       y: Math.round(p.y * 10) / 10,
       vx: Math.round(this.localPlayerVx),
@@ -7671,7 +8014,7 @@ export class GameEngine {
       repairProgress: +p.repairProgress.toFixed(2),
       invuln: p.invulnTimer > 0,
       cash: Math.round(s.cash),
-      kills: s.kills,
+      kills: s.isCoop ? s.personalKills : s.kills,
     };
   }
 
@@ -7685,6 +8028,7 @@ export class GameEngine {
         slot: rp.slot,
         callsign: rp.callsign,
         color: rp.color,
+        classId: rp.classId,
         x: Math.round(rp.netTx * 10) / 10,
         y: Math.round(rp.netTy * 10) / 10,
         vx: Math.round(rp.vx),
@@ -8274,7 +8618,8 @@ export class GameEngine {
       }
     }
     rp.cash = ps.cash;
-    rp.kills = ps.kills;
+    if (ps.classId) rp.classId = ps.classId;
+    rp.kills = CoopManager.role === 'host' ? Math.max(rp.kills, ps.kills) : ps.kills;
   }
 
   private handleCoopMessage(msg: CoopNetMessage, _fromPeerId: string): void {
@@ -8316,6 +8661,8 @@ export class GameEngine {
         if (s.bullets.length >= 185) s.bullets.shift();
         s.bullets.push({
           ...b,
+          ownerId: msg.ownerId,
+          weaponId: rp?.activeWepId || 'pistol',
           hitIds: new Set(),
           localVisualOnly: CoopManager.role === 'client',
         });
@@ -8343,10 +8690,30 @@ export class GameEngine {
 
     if (msg.type === 'cmd_ping') {
       if (msg.ownerId === CoopManager.myPeerId) return;
+      if (msg.bubble) {
+        const rp = s.remotePlayers.find((item) => item.peerId === msg.ownerId);
+        if (rp) {
+          rp.calloutText = msg.bubble;
+          rp.calloutTimer = 3.2;
+        }
+      }
       this.pushLocalTacticalPing(msg.x, msg.y, msg.color, msg.label, msg.kind);
       if (CoopManager.role === 'host') {
         CoopManager.broadcastToClients(msg, msg.ownerId);
       }
+      return;
+    }
+
+    if (msg.type === 'cmd_team_skill' && CoopManager.role === 'host') {
+      const skillInfo = {
+        ownerId: msg.ownerId,
+        ownerName: msg.ownerName,
+        classId: msg.classId,
+        x: msg.x,
+        y: msg.y,
+      };
+      this.applyTeamSkillAuraLocal(skillInfo);
+      CoopManager.broadcastToClients({ type: 'evt_team_reward', teamSkill: skillInfo }, msg.ownerId);
       return;
     }
 
@@ -8371,7 +8738,7 @@ export class GameEngine {
 
     if (msg.type === 'cmd_grenade') {
       if (msg.ownerId === CoopManager.myPeerId) return;
-      s.grenadesThrown.push({ ...msg.g, spinAngle: 0 });
+      s.grenadesThrown.push({ ...msg.g, spinAngle: 0, ownerId: msg.ownerId });
       if (CoopManager.role === 'host') {
         CoopManager.broadcastToClients(msg, msg.ownerId);
       }
@@ -8382,6 +8749,7 @@ export class GameEngine {
       const win = s.windows.find((w) => w.id === msg.winId);
       if (win && win.planks < win.maxPlanks) {
         win.planks += 1;
+        this.bumpPeerMvp(msg.ownerId, 'repairs', 1);
         this.pushOutdoorZombiesOutsidePlanks(win);
         SoundFX.repair();
         const maxPaidRepairs = 6 * s.squadCount;
@@ -8549,6 +8917,20 @@ export class GameEngine {
       if (msg.grantChestRelic) {
         this.grantChestRelicInline(s.player.x, s.player.y);
       }
+      if (msg.killCredits && msg.killCredits > 0) {
+        s.personalKills += msg.killCredits;
+        this.applyLocalKillPerks(msg.killCredits);
+      }
+      if (msg.bossKills && msg.bossKills > 0) {
+        SaveManager.addDailyProgress('bosses', msg.bossKills);
+      }
+      if (msg.bossTechCore && msg.bossTechCore > 0 && !s.stage.isTutorial) {
+        SaveManager.addTechCores(msg.bossTechCore, false);
+        this.spawnFloatingText(s.player.x, s.player.y - 42, '💠 +1 Tech Core', '#38bdf8', 1.3);
+      }
+      if (msg.teamSkill) {
+        this.applyTeamSkillAuraLocal(msg.teamSkill);
+      }
       if (msg.powerUp) {
         const meta = POWERUP_META[msg.powerUp];
         const pName = I18n.powerupName(msg.powerUp, meta.name);
@@ -8564,10 +8946,15 @@ export class GameEngine {
     if (msg.type === 'evt_run_finished' && CoopManager.role === 'client') {
       if (s.waveState === 'ended') return;
       s.waveState = 'ended';
+      if (msg.squadStats) {
+        s.squadMvpStats = msg.squadStats;
+      }
+      const clearedTier = msg.tier || s.difficultyTier;
+      s.difficultyTier = clearedTier;
       PlatformSDK.gameplayStop();
       if (msg.victory) {
         PlatformSDK.happyTime();
-        SaveManager.markStageCleared(s.stage.id);
+        SaveManager.markStageCleared(s.stage.id, clearedTier);
         SaveManager.addDailyProgress('clear', 1);
       } else if (s.mode === 'endless') {
         SaveManager.recordEndlessWave(s.stage.id, s.wave);
@@ -8585,6 +8972,36 @@ export class GameEngine {
       s.isCoop = true;
       s.remotePlayers = s.remotePlayers.filter((rp) => !rp.isBot);
     }
+
+    // 优先检查是否有该队员掉线后由 SWAT AI 临时托管的原角色，实现断线重连 100% 无缝夺回控制权！
+    const takeoverBot =
+      s.remotePlayers.find((rp) => rp.isBot && rp.takeoverOriginCallsign === member.callsign) ||
+      s.remotePlayers.find((rp) => rp.isBot && rp.slot === member.slot);
+    if (takeoverBot) {
+      const oldBotId = takeoverBot.peerId;
+      takeoverBot.peerId = member.peerId;
+      takeoverBot.slot = member.slot;
+      takeoverBot.callsign = member.callsign;
+      takeoverBot.color = member.color;
+      takeoverBot.classId = member.classId || takeoverBot.classId || 'vanguard';
+      takeoverBot.isBot = false;
+      takeoverBot.takeoverOriginCallsign = undefined;
+      takeoverBot.lastSeq = 0;
+      takeoverBot.invulnTimer = 3.0;
+      const oldMvp = this.peerMvpCounters.get(oldBotId);
+      if (oldMvp) {
+        this.peerMvpCounters.delete(oldBotId);
+        this.peerMvpCounters.set(member.peerId, oldMvp);
+      }
+      s.remotePlayers.sort((a, b) => a.slot - b.slot);
+      s.squadCount = Math.max(1, 1 + s.remotePlayers.length);
+      const bTxt = I18n.t('bannerPeerReclaimed', { name: member.callsign });
+      SoundFX.fanfare();
+      this.showBanner(bTxt, 3.2);
+      CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bTxt, dur: 3.2 });
+      return;
+    }
+
     if (!s.remotePlayers.some((rp) => rp.peerId === member.peerId)) {
       const safe = this.snapToNearestWalkablePoint(s.player.x + 28, s.player.y + 18);
       s.remotePlayers.push({
@@ -8592,6 +9009,7 @@ export class GameEngine {
         slot: member.slot,
         callsign: member.callsign,
         color: member.color,
+        classId: member.classId || 'vanguard',
         x: safe.x,
         y: safe.y,
         netTx: safe.x,
@@ -8645,12 +9063,26 @@ export class GameEngine {
 
     const idx = s.remotePlayers.findIndex((rp) => rp.peerId === peerId);
     if (idx >= 0) {
-      const leftName = s.remotePlayers[idx].callsign;
-      s.remotePlayers.splice(idx, 1);
-      s.squadCount = Math.max(1, 1 + s.remotePlayers.length);
-      this.showBanner(I18n.t('bannerPeerLeft', { name: leftName }), 3.2);
+      const rp = s.remotePlayers[idx];
+      const leftName = rp.takeoverOriginCallsign || rp.callsign;
       if (CoopManager.role === 'host') {
+        // 队友中途切后台/网络闪断时，自动交由 SWAT AI 临时托管继续守窗输出，重连瞬间原位接回！
+        rp.isBot = true;
+        rp.takeoverOriginCallsign = leftName;
+        rp.callsign = `🤖${leftName.slice(0, 8)}`;
+        rp.botFireCd = 0.22;
+        rp.botOrbitSeed = rp.slot * 2.094;
+        if (rp.activeWepId === 'pistol' && s.wave >= 2) {
+          rp.activeWepId = 'smg';
+        }
+        const bTxt = I18n.t('bannerBotTakeover', { name: leftName });
+        this.showBanner(bTxt, 3.2);
+        CoopManager.broadcastToClients({ type: 'evt_fx', kind: 'banner', text: bTxt, dur: 3.2 });
         this.checkCoopSquadWipe();
+      } else {
+        s.remotePlayers.splice(idx, 1);
+        s.squadCount = Math.max(1, 1 + s.remotePlayers.length);
+        this.showBanner(I18n.t('bannerPeerLeft', { name: leftName }), 3.2);
       }
     }
   }

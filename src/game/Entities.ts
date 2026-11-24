@@ -13,7 +13,7 @@ import {
   WeaponInstance,
   WindowConfig,
 } from '../types';
-import { RemotePlayerState } from '../net/CoopProtocol';
+import { RemotePlayerState, SquadMvpEntry } from '../net/CoopProtocol';
 import { ZombieKind } from '../data/enemies';
 
 export type { ZombieKind };
@@ -116,6 +116,7 @@ export interface BulletEntity {
   sawblade: boolean;
   hitIds: Set<number>;
   life: number;
+  ownerId?: string;
   weaponId?: string;
   golden?: boolean;
   localVisualOnly?: boolean;
@@ -133,6 +134,7 @@ export interface GrenadeEntity {
   spinAngle: number;
   damage: number;
   radius: number;
+  ownerId?: string;
 }
 
 export interface ExplosionFX {
@@ -270,7 +272,7 @@ export interface TacticalPingFX {
   y: number;
   color: string;
   label: string;
-  kind: 'rally' | 'door' | 'sos' | 'evac';
+  kind: 'rally' | 'door' | 'sos' | 'evac' | 'chest' | 'nice';
   timer: number;
   maxTimer: number;
 }
@@ -299,6 +301,10 @@ export interface RunSnapshot {
   battleXp: number;
   battleXpNext: number;
   kills: number;
+  personalKills: number;
+  localCalloutText?: string;
+  localCalloutTimer?: number;
+  squadMvpStats?: SquadMvpEntry[];
   fever: number;
   feverTimer: number;
   electricFortifyWaves: number;

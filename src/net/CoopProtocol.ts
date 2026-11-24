@@ -1,4 +1,4 @@
-import { DifficultyTier, GameMode, PowerUpType } from '../types';
+import { AgentClassId, DifficultyTier, GameMode, PowerUpType } from '../types';
 import { ZombieKind } from '../game/Entities';
 
 export const SQUAD_SLOTS = [
@@ -56,6 +56,7 @@ export interface LobbyMember {
   color: string;
   ready: boolean;
   isHost: boolean;
+  classId?: AgentClassId;
 }
 
 export interface LobbyState {
@@ -63,8 +64,34 @@ export interface LobbyState {
   stageId: string;
   mode: GameMode;
   tier?: DifficultyTier;
+  isPublic?: boolean;
   members: LobbyMember[];
   inGame: boolean;
+}
+
+export interface PublicRoomAd {
+  roomCode: string;
+  hostName: string;
+  stageId: string;
+  mode: GameMode;
+  tier: DifficultyTier;
+  memberCount: number;
+  maxMembers: number;
+  inGame: boolean;
+  wave: number;
+  updatedAt: number;
+}
+
+export interface SquadMvpEntry {
+  peerId: string;
+  slot: number;
+  callsign: string;
+  color: string;
+  classId: AgentClassId;
+  kills: number;
+  revives: number;
+  repairs: number;
+  doorFunded: number;
 }
 
 export interface RemotePlayerState {
@@ -72,6 +99,7 @@ export interface RemotePlayerState {
   slot: number;
   callsign: string;
   color: string;
+  classId?: AgentClassId;
   x: number;
   y: number;
   netTx: number;
@@ -102,6 +130,9 @@ export interface RemotePlayerState {
   invulnTimer: number;
   cash: number;
   kills: number;
+  calloutText?: string;
+  calloutTimer?: number;
+  takeoverOriginCallsign?: string;
   isBot?: boolean;
   botFireCd?: number;
   botOrbitSeed?: number;
@@ -118,6 +149,7 @@ export interface PlayerSyncPayload {
   slot: number;
   callsign: string;
   color: string;
+  classId?: AgentClassId;
   x: number;
   y: number;
   vx: number;
@@ -324,11 +356,11 @@ export interface WorldSyncPayload {
 }
 
 export type CoopNetMessage =
-  | { type: 'join_req'; callsign: string }
+  | { type: 'join_req'; callsign: string; classId?: AgentClassId }
   | { type: 'join_ack'; ok: boolean; reason?: string; assignedPeerId?: string; slot?: number; lobby?: LobbyState }
   | { type: 'lobby_state'; lobby: LobbyState }
-  | { type: 'ready_toggle'; ready: boolean; callsign: string }
-  | { type: 'start_game'; stageId: string; mode: GameMode; lobby: LobbyState }
+  | { type: 'ready_toggle'; ready: boolean; callsign: string; classId?: AgentClassId }
+  | { type: 'start_game'; stageId: string; mode: GameMode; lobby: LobbyState; matchSeq?: number }
   | { type: 'player_sync'; p: PlayerSyncPayload }
   | { type: 'players_fast'; list: PlayerSyncPayload[] }
   | { type: 'world_sync'; w: WorldSyncPayload }
@@ -338,7 +370,17 @@ export type CoopNetMessage =
   | { type: 'cmd_fortify_win'; ownerId: string; winId: string }
   | { type: 'cmd_fund_door'; ownerId: string; doorId: string; amount: number }
   | { type: 'cmd_door_trap'; ownerId: string; doorId: string }
-  | { type: 'cmd_ping'; ownerId: string; x: number; y: number; color: string; label: string; kind: 'rally' | 'door' | 'sos' | 'evac' }
+  | {
+      type: 'cmd_ping';
+      ownerId: string;
+      x: number;
+      y: number;
+      color: string;
+      label: string;
+      kind: 'rally' | 'door' | 'sos' | 'evac' | 'chest' | 'nice';
+      bubble?: string;
+    }
+  | { type: 'cmd_team_skill'; ownerId: string; ownerName: string; classId: AgentClassId; x: number; y: number }
   | { type: 'cmd_gift_cash'; fromId: string; fromName: string; targetId: string; amount: number }
   | { type: 'cmd_use_station'; ownerId: string; stationId: string }
   | { type: 'cmd_open_chest'; ownerId: string; chestId: number }
@@ -367,6 +409,10 @@ export type CoopNetMessage =
       powerUp?: PowerUpType;
       grantChestRelic?: boolean;
       waveAutoRevive?: boolean;
+      killCredits?: number;
+      bossKills?: number;
+      bossTechCore?: number;
+      teamSkill?: { ownerId: string; ownerName: string; classId: AgentClassId; x: number; y: number };
     }
   | { type: 'evt_player_revived'; targetId: string; reviverId: string; reviverName: string }
-  | { type: 'evt_run_finished'; victory: boolean };
+  | { type: 'evt_run_finished'; victory: boolean; tier?: DifficultyTier; squadStats?: SquadMvpEntry[] };

@@ -1,16 +1,24 @@
 import { I18n } from '../i18n/I18n';
+import { SaveManager } from '../meta/SaveManager';
 import { PlatformSDK } from '../platform/PlatformSDK';
-import { DifficultyTier, GameMode } from '../types';
+import { AgentClassId, DifficultyTier, GameMode } from '../types';
 import {
   CoopNetMessage,
   LobbyMember,
   LobbyState,
+  PublicRoomAd,
   SQUAD_SLOTS,
 } from './CoopProtocol';
 import { MqttWsRoomBus, RoomWireEnvelope } from './MqttWsRoomBus';
 
 const ROOM_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CALLSIGN_KEY = 'czgame_coop_callsign_v1';
+const PUBLIC_HALL_ROOM_ID = '__PUBLIC_HALL__';
+
+type DirBusPayload =
+  | { type: 'dir_query' }
+  | { type: 'dir_announce'; ad: PublicRoomAd }
+  | { type: 'dir_close'; roomCode: string };
 
 type BusPayload =
   | CoopNetMessage
@@ -75,10 +83,19 @@ class CoopNetworkManager {
   private pendingClientWorldRaw: string | null = null;
   private pendingClientPlayersRaw: string | null = null;
   private pendingHostPlayerRaw = new Map<string, string>();
+  private hostMatchSeq = 1;
+  private lastClientMatchSeq = 0;
+  private hostCurrentWave = 1;
+
+  private dirBus: MqttWsRoomBus<DirBusPayload> | null = null;
+  private dirPeerId = `dir_${randomCode(6).toLowerCase()}`;
+  private dirAnnounceTimer = 0;
+  private publicRoomMap = new Map<string, PublicRoomAd>();
 
   private onLobbyChangeCb: (() => void) | null = null;
   private onMatchStartCb: ((stageId: string, mode: GameMode, lobby: LobbyState) => void) | null = null;
   private onNetStatsChangeCb: (() => void) | null = null;
+  private onPublicRoomsChangeCb: (() => void) | null = null;
   private onGameMessageCb: ((msg: CoopNetMessage, fromPeerId: string) => void) | null = null;
   private onPeerLeaveCb: ((peerId: string) => void) | null = null;
   private onPeerHotJoinCb: ((member: LobbyMember) => void) | null = null;
@@ -130,7 +147,163 @@ class CoopNetworkManager {
     this.bus.send(this.hostPeerId, {
       type: 'join_req',
       callsign: this.getCallsign(),
+      classId: SaveManager.get().selectedClass,
     });
+  }
+
+  public syncMyLobbyClass(classId: AgentClassId): void {
+    if (!this.lobby) return;
+    const me = this.lobby.members.find((m) => m.peerId === this.myPeerId);
+    if (!me) return;
+    me.classId = classId;
+    if (this.role === 'host') {
+      this.broadcastLobby();
+    } else if (this.role === 'client') {
+      this.sendToHost({
+        type: 'ready_toggle',
+        ready: me.ready,
+        callsign: me.callsign,
+        classId,
+      });
+    }
+    this.notifyLobby();
+  }
+
+  public ensurePublicDirectoryActive(): void {
+    if (this.dirBus) {
+      this.dirBus.wakeAndCheckLinks();
+      return;
+    }
+    this.dirBus = new MqttWsRoomBus<DirBusPayload>(
+      this.dirPeerId,
+      PUBLIC_HALL_ROOM_ID,
+      () => {
+        this.dirBus?.send('*', { type: 'dir_query' });
+        if (this.role === 'host' && this.lobby) {
+          this.publishHostDirectoryState();
+        }
+      },
+      (env) => {
+        const msg = env.msg;
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'dir_query') {
+          if (this.role === 'host' && this.lobby && this.lobby.isPublic !== false && this.lobby.members.length < 4) {
+            this.publishHostDirectoryState();
+          }
+          return;
+        }
+        if (msg.type === 'dir_announce' && msg.ad?.roomCode) {
+          if (this.lobby?.roomCode === msg.ad.roomCode) return;
+          if (msg.ad.memberCount >= msg.ad.maxMembers) {
+            this.publicRoomMap.delete(msg.ad.roomCode);
+          } else {
+            this.publicRoomMap.set(msg.ad.roomCode, {
+              ...msg.ad,
+              updatedAt: Date.now(),
+            });
+          }
+          this.onPublicRoomsChangeCb?.();
+          return;
+        }
+        if (msg.type === 'dir_close' && msg.roomCode) {
+          if (this.publicRoomMap.delete(msg.roomCode)) {
+            this.onPublicRoomsChangeCb?.();
+          }
+        }
+      },
+      () => {
+        // silent fallback if public hall unreachable
+      }
+    );
+
+    window.clearInterval(this.dirAnnounceTimer);
+    this.dirAnnounceTimer = window.setInterval(() => {
+      const now = Date.now();
+      let pruned = false;
+      for (const [rc, ad] of Array.from(this.publicRoomMap.entries())) {
+        if (now - ad.updatedAt > 12_500) {
+          this.publicRoomMap.delete(rc);
+          pruned = true;
+        }
+      }
+      if (pruned) {
+        this.onPublicRoomsChangeCb?.();
+      }
+      if (this.role === 'host' && this.lobby && this.lobby.isPublic !== false && this.lobby.members.length < 4) {
+        this.publishHostDirectoryState();
+      }
+    }, 3200);
+  }
+
+  public getPublicRooms(): PublicRoomAd[] {
+    const now = Date.now();
+    const list: PublicRoomAd[] = [];
+    for (const [rc, ad] of this.publicRoomMap.entries()) {
+      if (now - ad.updatedAt > 12_500) {
+        this.publicRoomMap.delete(rc);
+        continue;
+      }
+      if (this.lobby?.roomCode === rc) continue;
+      if (ad.memberCount < ad.maxMembers) {
+        list.push(ad);
+      }
+    }
+    list.sort((a, b) => {
+      if (a.inGame !== b.inGame) return a.inGame ? 1 : -1;
+      return b.memberCount - a.memberCount;
+    });
+    return list;
+  }
+
+  public publishHostDirectoryState(): void {
+    if (this.role !== 'host' || !this.lobby) return;
+    this.ensurePublicDirectoryActive();
+    if (this.lobby.isPublic === false || this.lobby.members.length >= 4) {
+      this.dirBus?.send('*', { type: 'dir_close', roomCode: this.lobby.roomCode });
+      return;
+    }
+    const hostMem = this.lobby.members.find((m) => m.isHost) || this.lobby.members[0];
+    this.dirBus?.send('*', {
+      type: 'dir_announce',
+      ad: {
+        roomCode: this.lobby.roomCode,
+        hostName: hostMem?.callsign || this.getCallsign(),
+        stageId: this.lobby.stageId,
+        mode: this.lobby.mode,
+        tier: this.lobby.tier || 1,
+        memberCount: this.lobby.members.length,
+        maxMembers: 4,
+        inGame: this.lobby.inGame,
+        wave: this.lobby.inGame ? Math.max(1, this.hostCurrentWave) : 1,
+        updatedAt: Date.now(),
+      },
+    });
+  }
+
+  public setHostWaveForDirectory(wave: number): void {
+    if (this.hostCurrentWave === wave) return;
+    this.hostCurrentWave = wave;
+    if (this.role === 'host' && this.lobby?.inGame) {
+      this.publishHostDirectoryState();
+    }
+  }
+
+  public toggleHostPublicRoom(): void {
+    if (this.role !== 'host' || !this.lobby) return;
+    this.lobby.isPublic = this.lobby.isPublic === false ? true : false;
+    this.broadcastLobby();
+    this.publishHostDirectoryState();
+    this.notifyLobby();
+  }
+
+  public quickMatchOrCreate(defaultStageId = 'stage_police', defaultMode: GameMode = 'standard'): void {
+    this.ensurePublicDirectoryActive();
+    const openRooms = this.getPublicRooms();
+    if (openRooms.length > 0) {
+      this.joinRoomByCode(openRooms[0].roomCode);
+      return;
+    }
+    this.createHostRoom(defaultStageId, defaultMode, true);
   }
 
   public getCallsign(): string {
@@ -165,11 +338,13 @@ class CoopNetworkManager {
   public bindUI(
     onLobbyChange: () => void,
     onMatchStart: (stageId: string, mode: GameMode, lobby: LobbyState) => void,
-    onNetStatsChange?: () => void
+    onNetStatsChange?: () => void,
+    onPublicRoomsChange?: () => void
   ): void {
     this.onLobbyChangeCb = onLobbyChange;
     this.onMatchStartCb = onMatchStart;
     this.onNetStatsChangeCb = onNetStatsChange || null;
+    this.onPublicRoomsChangeCb = onPublicRoomsChange || null;
   }
 
   public bindEngine(
@@ -215,6 +390,9 @@ class CoopNetworkManager {
 
   public disconnect(): void {
     PlatformSDK.hideInviteButton();
+    if (this.role === 'host' && this.lobby) {
+      this.dirBus?.send('*', { type: 'dir_close', roomCode: this.lobby.roomCode });
+    }
     window.clearInterval(this.heartbeatTimer);
     window.clearInterval(this.joinRetryTimer);
     this.closeAllRtcPeers();
@@ -230,6 +408,8 @@ class CoopNetworkManager {
     this.hostLastSeen = 0;
     this.rttMs = 0;
     this.inMatchTriggered = false;
+    this.lastClientMatchSeq = 0;
+    this.hostCurrentWave = 1;
     this.pendingClientWorldRaw = null;
     this.pendingClientPlayersRaw = null;
     this.pendingHostPlayerRaw.clear();
@@ -242,8 +422,14 @@ class CoopNetworkManager {
     this.notifyLobby();
   }
 
-  public createHostRoom(initialStageId = 'stage_police', initialMode: GameMode = 'standard'): void {
+  public createHostRoom(
+    initialStageId = 'stage_police',
+    initialMode: GameMode = 'standard',
+    isPublic = true,
+    initialTier: DifficultyTier = 1
+  ): void {
     this.disconnect();
+    this.ensurePublicDirectoryActive();
     this.role = 'host';
     this.status = 'connecting';
     this.errorMsg = '';
@@ -251,6 +437,7 @@ class CoopNetworkManager {
     const hostId = `host_${code}`;
     this.myPeerId = hostId;
     this.hostPeerId = hostId;
+    this.hostCurrentWave = 1;
     this.notifyLobby();
 
     this.bus = new MqttWsRoomBus<BusPayload>(
@@ -264,7 +451,8 @@ class CoopNetworkManager {
           roomCode: code,
           stageId: initialStageId,
           mode: initialMode,
-          tier: 1,
+          tier: initialTier,
+          isPublic,
           inGame: false,
           members: [
             {
@@ -274,11 +462,13 @@ class CoopNetworkManager {
               color: SQUAD_SLOTS[0].color,
               ready: true,
               isHost: true,
+              classId: SaveManager.get().selectedClass,
             },
           ],
         };
         PlatformSDK.showInviteButton(code, true);
         this.startHeartbeatLoop();
+        this.publishHostDirectoryState();
         this.notifyLobby();
       },
       (env) => this.handleHostEnvelope(env),
@@ -364,6 +554,7 @@ class CoopNetworkManager {
         color: SQUAD_SLOTS[slot]?.color || '#4ade80',
         ready: true,
         isHost: false,
+        classId: msg.classId || 'vanguard',
       };
       this.clientLastSeen.set(fromId, performance.now());
       this.lobby.members.push(member);
@@ -381,6 +572,7 @@ class CoopNetworkManager {
         this.onPeerHotJoinCb?.(member);
       }
       this.broadcastLobby();
+      this.publishHostDirectoryState();
       this.notifyLobby();
       return;
     }
@@ -390,6 +582,7 @@ class CoopNetworkManager {
       if (mem) {
         mem.ready = msg.ready;
         if (msg.callsign) mem.callsign = msg.callsign.slice(0, 10);
+        if (msg.classId) mem.classId = msg.classId;
         this.broadcastLobby();
         this.notifyLobby();
       }
@@ -410,6 +603,7 @@ class CoopNetworkManager {
       this.lobby.members = this.lobby.members.filter((m) => m.peerId !== peerId);
       if (this.lobby.members.length !== before) {
         this.broadcastLobby();
+        this.publishHostDirectoryState();
         this.notifyLobby();
       }
     }
@@ -596,7 +790,9 @@ class CoopNetworkManager {
       if (!msg.lobby.members.some((m) => m.peerId === this.myPeerId)) {
         return;
       }
-      if (this.inMatchTriggered) return;
+      const seq = msg.matchSeq || 1;
+      if (this.inMatchTriggered && seq === this.lastClientMatchSeq) return;
+      this.lastClientMatchSeq = seq;
       this.lobby = msg.lobby;
       this.lobby.inGame = true;
       this.inMatchTriggered = true;
@@ -664,6 +860,7 @@ class CoopNetworkManager {
       this.lobby.tier = tier;
     }
     this.broadcastLobby();
+    this.publishHostDirectoryState();
     this.notifyLobby();
   }
 
@@ -672,14 +869,32 @@ class CoopNetworkManager {
     const me = this.lobby.members.find((m) => m.peerId === this.myPeerId);
     if (!me) return;
     me.ready = !me.ready;
-    this.sendToHost({ type: 'ready_toggle', ready: me.ready, callsign: me.callsign });
+    this.sendToHost({
+      type: 'ready_toggle',
+      ready: me.ready,
+      callsign: me.callsign,
+      classId: SaveManager.get().selectedClass,
+    });
     this.notifyLobby();
+  }
+
+  public hostLaunchNextStage(stageId: string, mode: GameMode, tier: DifficultyTier): void {
+    if (this.role !== 'host' || !this.lobby) return;
+    this.lobby.stageId = stageId;
+    this.lobby.mode = mode;
+    this.lobby.tier = tier;
+    this.inMatchTriggered = false;
+    this.launchHostMatch();
   }
 
   public launchHostMatch(): void {
     if (this.role !== 'host' || !this.lobby) return;
+    this.hostMatchSeq += 1;
+    const curSeq = this.hostMatchSeq;
+    this.hostCurrentWave = 1;
     this.lobby.inGame = true;
     PlatformSDK.hideInviteButton(this.lobby.roomCode);
+    this.publishHostDirectoryState();
     const sendStartBurst = () => {
       if (this.role !== 'host' || !this.lobby || !this.lobby.inGame) return;
       const pkt: CoopNetMessage = {
@@ -687,6 +902,7 @@ class CoopNetworkManager {
         stageId: this.lobby.stageId,
         mode: this.lobby.mode,
         lobby: this.lobby,
+        matchSeq: curSeq,
       };
       this.bus?.send('*', pkt);
       const rtcWire = JSON.stringify({ f: this.myPeerId, m: pkt });
@@ -710,9 +926,11 @@ class CoopNetworkManager {
     if (!this.lobby) return;
     this.lobby.inGame = false;
     this.inMatchTriggered = false;
+    this.hostCurrentWave = 1;
     PlatformSDK.showInviteButton(this.lobby.roomCode, this.lobby.members.length < 4);
     if (this.role === 'host') {
       this.broadcastLobby();
+      this.publishHostDirectoryState();
     }
     this.notifyLobby();
   }

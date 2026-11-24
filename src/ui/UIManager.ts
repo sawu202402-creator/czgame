@@ -60,6 +60,7 @@ export class UIManager {
   private coopToast = '';
   private coopCodeDraft = '';
   private cleanupKeypadModal: (() => void) | null = null;
+  private calloutStripHideTimer = 0;
   private perkKeyHandler: ((e: KeyboardEvent) => void) | null = null;
   private ftue: {
     active: boolean;
@@ -95,6 +96,11 @@ export class UIManager {
       () => {
         if (!this.engine.state && this.hubTab === 'coop') {
           this.syncCoopLobbyNetBadge();
+        }
+      },
+      () => {
+        if (!this.engine.state && this.hubTab === 'coop') {
+          this.syncPublicRoomsInHub();
         }
       }
     );
@@ -448,6 +454,21 @@ export class UIManager {
       };
     });
 
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-stage-coop-host]').forEach((btn) => {
+      this.bindModalTap(btn, () => {
+        const sid = btn.dataset.stageCoopHost || STAGES[0].id;
+        const idx = STAGES.findIndex((item) => item.id === sid);
+        if (idx < 0) return;
+        const unlocked = idx === 0 || save.clearedStages.includes(STAGES[idx - 1].id);
+        if (!unlocked) return;
+        const tier = SaveManager.isTierUnlocked(sid, this.selectedTier) ? this.selectedTier : 1;
+        this.hubTab = 'coop';
+        this.coopToast = '';
+        CoopManager.createHostRoom(sid, this.selectedMode, true, tier);
+        this.showHomeHub();
+      });
+    });
+
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-gun-mastery]').forEach((btn) => {
       btn.onclick = () => {
         const wid = btn.dataset.gunMastery || '';
@@ -522,6 +543,7 @@ export class UIManager {
       btn.onclick = () => {
         const cid = btn.dataset.classPick as AgentClassId;
         if (SaveManager.unlockOrSelectClass(cid)) {
+          CoopManager.syncMyLobbyClass(cid);
           SoundFX.fanfare();
           this.showHomeHub();
         } else {
@@ -583,6 +605,65 @@ export class UIManager {
     if (!pill) return;
     pill.classList.toggle('is-p2p', CoopManager.hasDirectP2P());
     pill.textContent = CoopManager.getNetStatusLabel();
+  }
+
+  private buildPublicRoomsRowsHtml(): string {
+    const rooms = CoopManager.getPublicRooms();
+    if (rooms.length === 0) {
+      return `<div class="public-hall-empty">${I18n.t('publicHallEmpty')}</div>`;
+    }
+    return rooms
+      .slice(0, 6)
+      .map((ad) => {
+        const st = STAGES.find((item) => item.id === ad.stageId) || STAGES[0];
+        const stName = I18n.stageMeta(st.id, {
+          name: st.name,
+          subtitle: st.subtitle,
+          sector: '',
+          diffLabel: '',
+          tags: [],
+        }).name;
+        const stars = DIFFICULTY_TIERS[ad.tier || 1].stars;
+        const stBadge = ad.inGame
+          ? I18n.t('publicRoomInGame', { w: ad.wave, n: ad.memberCount })
+          : I18n.t('publicRoomWaiting', { n: ad.memberCount });
+        return `
+          <div class="public-room-row">
+            <div class="pub-room-meta">
+              <strong>👤 ${ad.hostName}</strong>
+              <span class="pub-room-stage">${stars} ${stName}</span>
+              <span class="pub-room-state ${ad.inGame ? 'in-game' : 'waiting'}">${stBadge}</span>
+            </div>
+            <button type="button" class="btn-cartoon btn-mini btn-green" data-pub-join="${ad.roomCode}">
+              ${I18n.t('publicJoinBtn')} (${ad.roomCode})
+            </button>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  private syncPublicRoomsInHub(): void {
+    const listBody = this.modalRoot.querySelector('#coop-public-rooms-body') as HTMLElement | null;
+    if (!listBody) return;
+    listBody.innerHTML = this.buildPublicRoomsRowsHtml();
+    this.bindPublicRoomJoinButtons();
+  }
+
+  private bindPublicRoomJoinButtons(): void {
+    const callInp = this.modalRoot.querySelector('#coop-callsign-inp') as HTMLInputElement | null;
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-pub-join]').forEach((btn) => {
+      this.bindModalTap(btn, () => {
+        const rc = btn.dataset.pubJoin || '';
+        if (!rc) return;
+        if (callInp && callInp.value.trim()) {
+          CoopManager.setCallsign(callInp.value);
+        }
+        this.coopToast = '';
+        SoundFX.reloadDone();
+        CoopManager.joinRoomByCode(rc);
+      });
+    });
   }
 
   private openInstallAppGuide(): void {
@@ -810,9 +891,16 @@ export class UIManager {
             <h3>${locMeta.name}</h3>
             <p>${locMeta.subtitle}</p>
             <div class="stage-tags">${tagsHtml}</div>
-            <button class="btn-cartoon ${btnClass} stage-go-btn" data-stage-go="${st.id}" ${!tierUnlocked ? 'disabled' : ''}>
-              ${btnLabel}
-            </button>
+            <div class="stage-card-actions">
+              <button class="btn-cartoon ${btnClass} stage-go-btn" data-stage-go="${st.id}" ${!tierUnlocked ? 'disabled' : ''}>
+                ${btnLabel}
+              </button>
+              ${
+                unlocked
+                  ? `<button class="btn-cartoon btn-blue stage-coop-host-btn" type="button" data-stage-coop-host="${st.id}">${I18n.t('stageCoopHostBtn')}</button>`
+                  : ''
+              }
+            </div>
           </div>
         </article>
       `;
@@ -1414,19 +1502,32 @@ export class UIManager {
             : '';
 
     if (!lobby || CoopManager.role === 'offline') {
+      CoopManager.ensurePublicDirectoryActive();
       const currentDraft = (this.coopCodeDraft || CoopManager.lastJoinCode || '').toUpperCase().slice(0, 5);
       return `
         <div class="coop-wrap">
           ${callsignBar}
-          ${rulesStrip}
           ${statusBanner}
+          <div class="public-hall-box" id="coop-public-rooms-box">
+            <div class="public-hall-head">
+              <strong>${I18n.t('publicHallTitle')}</strong>
+            </div>
+            <div class="public-hall-list" id="coop-public-rooms-body">
+              ${this.buildPublicRoomsRowsHtml()}
+            </div>
+          </div>
           <div class="coop-entry-grid">
             <div class="coop-panel-card">
               <h3>${I18n.t('createCardTitle')}</h3>
               <p>${I18n.t('createCardDesc')}</p>
-              <button class="btn-cartoon btn-green" id="btn-coop-create" ${status === 'connecting' ? 'disabled' : ''}>
-                ${I18n.t('createRoomBtn')}
-              </button>
+              <div class="coop-create-btn-row">
+                <button class="btn-cartoon btn-yellow" id="btn-coop-quick-match" type="button" ${status === 'connecting' ? 'disabled' : ''}>
+                  ${I18n.t('quickMatchBtn')}
+                </button>
+                <button class="btn-cartoon btn-green" id="btn-coop-create" type="button" ${status === 'connecting' ? 'disabled' : ''}>
+                  ${I18n.t('createRoomBtn')}
+                </button>
+              </div>
             </div>
 
             <div class="coop-panel-card">
@@ -1446,6 +1547,7 @@ export class UIManager {
               </div>
             </div>
           </div>
+          ${rulesStrip}
         </div>
       `;
     }
@@ -1463,6 +1565,7 @@ export class UIManager {
       tags: [],
     }).name;
     const me = lobby.members.find((m) => m.peerId === CoopManager.myPeerId);
+    const hostSave = SaveManager.get();
 
     const slotsHtml = SQUAD_SLOTS.map((sl) => {
       const mem = lobby.members.find((m) => m.slot === sl.slot);
@@ -1476,6 +1579,8 @@ export class UIManager {
           </div>
         `;
       }
+      const memCls = getAgentClassDef(mem.classId || (mem.peerId === CoopManager.myPeerId ? hostSave.selectedClass : 'vanguard'));
+      const clsTxt = getLocalizedClassText(memCls);
       return `
         <div class="coop-slot-card filled" style="border-color:${sl.color}">
           <div class="slot-head">
@@ -1483,14 +1588,34 @@ export class UIManager {
             <span class="slot-ready ${mem.ready ? 'ok' : ''}">${mem.isHost ? I18n.t('hostBadge') : mem.ready ? I18n.t('readyYes') : I18n.t('readyNo')}</span>
           </div>
           <div class="slot-player">
-            <img src="./assets/player_hero.png" alt="" />
-            <strong>${mem.callsign}${mem.peerId === CoopManager.myPeerId ? I18n.t('meSuffix') : ''}</strong>
+            <img src="${memCls.sprite}" alt="" />
+            <div class="slot-player-meta">
+              <strong>${mem.callsign}${mem.peerId === CoopManager.myPeerId ? I18n.t('meSuffix') : ''}</strong>
+              <small style="color:${memCls.color}">${clsTxt.name}</small>
+            </div>
           </div>
         </div>
       `;
     }).join('');
 
-    const hostSave = SaveManager.get();
+    const lobbyClassBarHtml = `
+      <div class="lobby-class-bar">
+        <span class="lobby-cls-lbl">${I18n.t('lobbyClassSwitchTip')}</span>
+        <div class="lobby-cls-pills">
+          ${AGENT_CLASSES.map((cls) => {
+            const owned = hostSave.unlockedClasses.includes(cls.id);
+            const active = hostSave.selectedClass === cls.id;
+            const cTxt = getLocalizedClassText(cls);
+            return `
+              <button type="button" class="lobby-cls-pill ${active ? 'active' : ''} ${!owned ? 'locked' : ''}" data-class-pick="${cls.id}">
+                <img src="${cls.sprite}" width="18" height="18" alt="" />
+                <span>${cTxt.name}${!owned ? ` ($${cls.unlockCost})` : ''}</span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
     const stageOptionsHtml = STAGES.map((st, idx) => {
       const unlocked = idx === 0 || hostSave.clearedStages.includes(STAGES[idx - 1].id);
       const sTitle = I18n.stageMeta(st.id, {
@@ -1563,12 +1688,19 @@ export class UIManager {
               <strong class="rc-val">${lobby.roomCode}</strong>
               <button class="btn-cartoon btn-mini btn-yellow" id="btn-copy-code" type="button">${I18n.t('copyCodeBtn')}</button>
               <button class="btn-cartoon btn-mini btn-blue" id="btn-copy-link" type="button">${I18n.t('copyLinkBtn')}</button>
+              ${
+                isHost
+                  ? `<button class="btn-cartoon btn-mini ${lobby.isPublic !== false ? 'btn-green' : 'btn-gray'}" id="btn-coop-public-toggle" type="button">${lobby.isPublic !== false ? I18n.t('roomPublicOn') : I18n.t('roomPrivateOn')}</button>`
+                  : ''
+              }
               <span class="coop-net-pill ${CoopManager.hasDirectP2P() ? 'is-p2p' : ''}">${CoopManager.getNetStatusLabel()}</span>
             </div>
             <button class="btn-cartoon btn-mini btn-gray" id="btn-coop-leave" type="button">${I18n.t('leaveRoomBtn')}</button>
           </div>
 
           <div class="coop-slots-grid">${slotsHtml}</div>
+
+          ${lobbyClassBarHtml}
 
           <div class="coop-scale-banner">⚖️ ${scaleInfo} · <span class="coop-midjoin-note">${I18n.t('coopMidJoinTip')}</span></div>
 
@@ -1897,6 +2029,24 @@ export class UIManager {
       };
     }
 
+    const quickMatchBtn = this.modalRoot.querySelector('#btn-coop-quick-match') as HTMLButtonElement | null;
+    if (quickMatchBtn) {
+      this.bindModalTap(quickMatchBtn, () => {
+        if (callInp) CoopManager.setCallsign(callInp.value);
+        this.coopToast = '';
+        CoopManager.quickMatchOrCreate(STAGES[0].id, this.selectedMode);
+      });
+    }
+
+    const pubToggleBtn = this.modalRoot.querySelector('#btn-coop-public-toggle') as HTMLButtonElement | null;
+    if (pubToggleBtn) {
+      this.bindModalTap(pubToggleBtn, () => {
+        CoopManager.toggleHostPublicRoom();
+      });
+    }
+
+    this.bindPublicRoomJoinButtons();
+
     const createBtn = this.modalRoot.querySelector('#btn-coop-create') as HTMLButtonElement | null;
     if (createBtn) {
       this.bindModalTap(createBtn, () => {
@@ -2132,6 +2282,13 @@ export class UIManager {
             <span id="hud-shop-label">${I18n.t('shopBtn')}</span>
           </button>
           <button class="hud-coop-ping-btn" id="btn-coop-ping" type="button" style="display:none">${I18n.t('coopPingBtn')}</button>
+          <div class="coop-callout-strip" id="coop-callout-strip" style="display:none">
+            <button type="button" class="coop-callout-pill" data-callout="sos">🆘</button>
+            <button type="button" class="coop-callout-pill" data-callout="door">💰</button>
+            <button type="button" class="coop-callout-pill" data-callout="chest">🎁</button>
+            <button type="button" class="coop-callout-pill" data-callout="nice">👍</button>
+          </div>
+          <button class="hud-remote-door-btn" id="btn-remote-door" type="button" style="display:none"></button>
           <button class="quick-ammo-btn" id="btn-quick-ammo" type="button" style="display:none">
             <img class="quick-ammo-gun" id="quick-ammo-icon" src="./assets/gun_smg.png" width="22" height="22" alt="" />
             <span class="quick-ammo-text" id="quick-ammo-label"></span>
@@ -2237,8 +2394,35 @@ export class UIManager {
     });
 
     const coopPingBtn = hud.querySelector('#btn-coop-ping') as HTMLButtonElement;
+    const calloutStrip = hud.querySelector('#coop-callout-strip') as HTMLElement;
     this.bindCombatTap(coopPingBtn, () => {
       this.engine.triggerTacticalPing();
+      if (this.engine.state?.isCoop) {
+        const isVis = calloutStrip.style.display !== 'none';
+        calloutStrip.style.display = isVis ? 'none' : 'inline-flex';
+        window.clearTimeout(this.calloutStripHideTimer);
+        if (!isVis) {
+          this.calloutStripHideTimer = window.setTimeout(() => {
+            calloutStrip.style.display = 'none';
+          }, 3800);
+        }
+      }
+    });
+
+    calloutStrip.querySelectorAll<HTMLButtonElement>('[data-callout]').forEach((cBtn) => {
+      this.bindCombatTap(cBtn, () => {
+        const preset = (cBtn.dataset.callout || 'nice') as 'sos' | 'door' | 'chest' | 'nice';
+        this.engine.sendQuickCallout(preset);
+        calloutStrip.style.display = 'none';
+        window.clearTimeout(this.calloutStripHideTimer);
+      });
+    });
+
+    const remoteDoorBtn = hud.querySelector('#btn-remote-door') as HTMLButtonElement;
+    this.bindCombatTap(remoteDoorBtn, () => {
+      if (this.engine.fundNextLockedDoorRemotely(100)) {
+        this.syncHUD();
+      }
     });
 
     const sqListEl = hud.querySelector('#hud-squad-list') as HTMLElement;
@@ -2822,6 +3006,10 @@ export class UIManager {
             <div class="sup-meta">${I18n.t('supTurretMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.cash >= 650 ? 'btn-yellow' : 'btn-disabled'}" data-tac="turret">${I18n.t('supTurretBtn')}</button>
           </div>
+          ${
+            isCoopShop
+              ? ''
+              : `
           <div class="supply-card support-highlight">
             <div class="sup-name"><img class="sup-inline-icon" src="./assets/drop_cash.png" width="22" height="22" alt="" /> ${I18n.t('supCashName')}</div>
             <div class="sup-meta">${I18n.t('supCashMeta')}</div>
@@ -2836,7 +3024,8 @@ export class UIManager {
             <div class="sup-name"><img class="sup-inline-icon" src="./assets/item_emp_grid.png" width="22" height="22" alt="" /> ${I18n.t('supElecName')}</div>
             <div class="sup-meta">${I18n.t('supElecMeta')}</div>
             <button class="btn-cartoon btn-mini ${s.electricFortifyWaves > 0 ? 'btn-disabled' : 'btn-blue'}" id="btn-sup-elec" ${s.electricFortifyWaves > 0 ? 'disabled' : ''}>${elecSupportText}</button>
-          </div>
+          </div>`
+          }
         </div>
       `;
     }
@@ -3082,6 +3271,9 @@ export class UIManager {
     });
 
     const coopNetKey = s.isCoop ? `${I18n.lang}:${CoopManager.hasDirectP2P() ? 1 : 0}:${CoopManager.rttMs}` : 'off';
+    setIfChanged('coopHudMode', s.isCoop ? 'coop' : 'solo', () => {
+      this.hudRoot!.classList.toggle('is-coop-hud', Boolean(s.isCoop));
+    });
     setIfChanged('coopNetHud', coopNetKey, () => {
       const netEl = this.hudRoot!.querySelector('#hud-coop-net') as HTMLElement;
       const pingBtn = this.hudRoot!.querySelector('#btn-coop-ping') as HTMLButtonElement;
@@ -3097,6 +3289,24 @@ export class UIManager {
       }
     });
 
+    const nextDoor = s.isCoop ? this.engine.getNextFundableDoor() : null;
+    const doorNeed = nextDoor ? Math.max(0, nextDoor.cost - nextDoor.paidAmount) : 0;
+    const showRemoteDoor = Boolean(
+      s.isCoop && nextDoor && doorNeed > 0 && (nextDoor.paidAmount > 0 || s.cash >= 100)
+    );
+    const canPayRemoteDoor = showRemoteDoor && s.cash >= Math.min(100, doorNeed);
+    const remoteDoorKey = showRemoteDoor ? `${I18n.lang}:${nextDoor!.id}:${doorNeed}:${canPayRemoteDoor ? 1 : 0}` : 'hide';
+    setIfChanged('remoteDoor', remoteDoorKey, () => {
+      const rBtn = this.hudRoot!.querySelector('#btn-remote-door') as HTMLButtonElement;
+      if (!showRemoteDoor) {
+        rBtn.style.display = 'none';
+      } else {
+        rBtn.style.display = 'inline-flex';
+        rBtn.disabled = !canPayRemoteDoor;
+        rBtn.textContent = I18n.t('remoteDoorBtn', { left: doorNeed });
+      }
+    });
+
     const canGift100 = s.isCoop && s.cash >= 100 ? 1 : 0;
     const squadSig =
       s.remotePlayers.length > 0
@@ -3104,7 +3314,7 @@ export class UIManager {
           s.remotePlayers
             .map(
               (rp) =>
-                `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}:${rp.isBot ? 1 : 0}`
+                `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}:${rp.kills}:${rp.isBot ? 1 : 0}`
             )
             .join('|')
         : '';
@@ -3123,7 +3333,7 @@ export class UIManager {
               ? I18n.t('squadSOS', { s: Math.ceil(rp.bleedoutTimer) })
               : rp.isBot
                 ? I18n.t('botRoleTag')
-                : `$${rp.cash}`;
+                : `$${rp.cash} · 💀${rp.kills}`;
           const giftBtnHtml =
             s.isCoop && !rp.isBot && !rp.spectating
               ? `<button class="sq-gift-btn" type="button" data-gift-peer="${rp.peerId}" ${canGift100 ? '' : 'disabled'}>+$100</button>`
@@ -3721,6 +3931,108 @@ export class UIManager {
     if (bonusCores > 0) {
       SaveManager.addTechCores(bonusCores);
     }
+    if (s.isCoop) {
+      // 联机模式立即入账奖励（防房主秒点“下一关”时队员漏领），并展示 4 人同屏 MVP 战绩榜与零广告无缝连战入口！
+      SaveManager.addRewards(baseGold, baseXp);
+      const mvpList = s.squadMvpStats && s.squadMvpStats.length > 0 ? s.squadMvpStats : this.engine.buildSquadMvpStats();
+      const topKills = Math.max(0, ...mvpList.map((m) => m.kills));
+      const topRevives = Math.max(0, ...mvpList.map((m) => m.revives));
+      const topDoor = Math.max(0, ...mvpList.map((m) => m.doorFunded));
+      const topRepairs = Math.max(0, ...mvpList.map((m) => m.repairs));
+
+      const mvpRowsHtml = mvpList
+        .map((m) => {
+          const cls = getAgentClassDef(m.classId || 'vanguard');
+          let badge = I18n.t('mvpOperative');
+          let badgeColor = '#64748b';
+          if (topKills > 0 && m.kills === topKills) {
+            badge = I18n.t('mvpWarGod');
+            badgeColor = '#eab308';
+          } else if (topRevives > 0 && m.revives === topRevives) {
+            badge = I18n.t('mvpMedic');
+            badgeColor = '#16a34a';
+          } else if (topDoor >= 100 && m.doorFunded === topDoor) {
+            badge = I18n.t('mvpSponsor');
+            badgeColor = '#0284c7';
+          } else if (topRepairs >= 3 && m.repairs === topRepairs) {
+            badge = I18n.t('mvpBuilder');
+            badgeColor = '#9333ea';
+          }
+          const isMe = m.peerId === CoopManager.myPeerId;
+          return `
+            <div class="mvp-row ${isMe ? 'is-me' : ''}" style="border-left-color:${m.color}">
+              <div class="mvp-agent">
+                <img src="${cls.sprite}" width="26" height="26" alt="" />
+                <div>
+                  <strong>${m.callsign}${isMe ? I18n.t('meSuffix') : ''}</strong>
+                  <span class="mvp-title-tag" style="background:${badgeColor}">${badge}</span>
+                </div>
+              </div>
+              <div class="mvp-metrics">
+                <span>💀 ${m.kills}</span>
+                <span>💉 ${m.revives}</span>
+                <span>🔨 ${m.repairs}</span>
+                <span>🚪 $${m.doorFunded}</span>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      const curStageIdx = STAGES.findIndex((item) => item.id === s.stage.id);
+      const nextStage = victory && curStageIdx >= 0 && curStageIdx + 1 < STAGES.length ? STAGES[curStageIdx + 1] : s.stage;
+      const isHost = CoopManager.role === 'host' && CoopManager.lobby !== null;
+
+      this.modalRoot.innerHTML = `
+        <div class="popup-backdrop">
+          <div class="popup-box coop-settle-modal">
+            <h2>${victory ? I18n.t('victoryTitle') : I18n.t('settleTitle')}</h2>
+            <p class="popup-sub">${I18n.t('downedSub', { w: s.wave, k: s.kills })}</p>
+
+            <div class="reward-preview compact">
+              <span><img class="inline-coin" src="./assets/ui_coin.png" alt="" /> <strong>+${baseGold}</strong></span>
+              <span><img class="inline-coin" src="./assets/drop_xp.png" alt="" /> <strong>+${baseXp} XP</strong></span>
+              ${bonusCores > 0 ? `<span><strong>💠 +${bonusCores}</strong></span>` : ''}
+            </div>
+
+            <div class="mvp-board-box">
+              <div class="mvp-board-head">${I18n.t('mvpBoardTitle')}</div>
+              <div class="mvp-rows-wrap">${mvpRowsHtml}</div>
+            </div>
+
+            <div class="popup-footer">
+              ${
+                isHost
+                  ? `<button class="btn-cartoon btn-green" id="btn-coop-next-stage" type="button">${victory && nextStage.id !== s.stage.id ? I18n.t('coopNextStageBtn') : I18n.t('coopRematchBtn')}</button>`
+                  : ''
+              }
+              <button class="btn-cartoon btn-blue" id="btn-coop-back-lobby" type="button">${I18n.t('normalClaimBtn')}</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const nextBtn = this.modalRoot.querySelector('#btn-coop-next-stage') as HTMLButtonElement | null;
+      if (nextBtn) {
+        this.bindModalTap(nextBtn, () => {
+          nextBtn.disabled = true;
+          const nextTier: DifficultyTier = nextStage.id === s.stage.id ? s.difficultyTier : 1;
+          CoopManager.hostLaunchNextStage(nextStage.id, s.mode, nextTier);
+        });
+      }
+
+      const backBtn = this.modalRoot.querySelector('#btn-coop-back-lobby') as HTMLButtonElement;
+      this.bindModalTap(backBtn, () => {
+        backBtn.disabled = true;
+        if (CoopManager.role !== 'offline' && CoopManager.lobby) {
+          CoopManager.returnSquadToLobby();
+          this.hubTab = 'coop';
+        }
+        this.showHomeHub();
+      });
+      return;
+    }
+
     const zones = [2, 3, 5, 3, 2];
 
     this.modalRoot.innerHTML = `

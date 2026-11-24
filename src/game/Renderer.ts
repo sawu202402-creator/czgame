@@ -158,6 +158,7 @@ export class CartoonRenderer {
     this.drawGrenades(ctx, state);
     this.drawBulletsAndFX(ctx, state);
     this.drawTacticalPings(ctx, state);
+    this.drawCalloutBubbles(ctx, state);
     this.drawExtractionHelicopterOverhead(ctx, state);
 
     ctx.restore();
@@ -3966,6 +3967,53 @@ export class CartoonRenderer {
     }
   }
 
+  private drawCalloutBubbles(ctx: CanvasRenderingContext2D, state: RunSnapshot): void {
+    const drawBubble = (x: number, y: number, text: string, accent: string, timer: number) => {
+      if (!this.inView(x, y, 160)) return;
+      const alpha = Math.min(1, timer / 0.4);
+      const pop = timer > 2.95 ? 1 + (timer - 2.95) * 0.6 : 1;
+      ctx.save();
+      ctx.translate(x, y - 56);
+      ctx.scale(pop, pop);
+      ctx.globalAlpha = alpha;
+
+      ctx.font = '900 12.5px system-ui, -apple-system, sans-serif';
+      const tw = Math.max(54, ctx.measureText(text).width + 18);
+      const th = 24;
+
+      ctx.fillStyle = 'rgba(9, 14, 23, 0.92)';
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(-tw / 2, -th / 2, tw, th, 10);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(-5, th / 2);
+      ctx.lineTo(5, th / 2);
+      ctx.lineTo(0, th / 2 + 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#fef08a';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 0, 0.5);
+      ctx.restore();
+    };
+
+    if (state.localCalloutText && state.localCalloutTimer && state.localCalloutTimer > 0 && !state.player.spectating) {
+      drawBubble(state.player.x, state.player.y, state.localCalloutText, '#38bdf8', state.localCalloutTimer);
+    }
+    for (const rp of state.remotePlayers) {
+      if (!rp.spectating && rp.calloutText && rp.calloutTimer && rp.calloutTimer > 0) {
+        drawBubble(rp.x, rp.y, rp.calloutText, rp.color, rp.calloutTimer);
+      }
+    }
+  }
+
   private drawOffscreenIndicators(
     ctx: CanvasRenderingContext2D,
     viewW: number,
@@ -3973,14 +4021,61 @@ export class CartoonRenderer {
     state: RunSnapshot
   ): void {
     const zoom = state.camera.zoom;
-    const targets: { x: number; y: number; sp: SpriteKey; color: string; tag?: string; urgent?: boolean }[] = [];
+    const targets: {
+      x: number;
+      y: number;
+      sp: SpriteKey;
+      color: string;
+      tag?: string;
+      urgent?: boolean;
+      progress?: number;
+    }[] = [];
     if (state.remotePlayers.length > 0) {
       for (const rp of state.remotePlayers) {
         if (rp.spectating) continue;
+        const distM = Math.max(2, Math.round(Math.hypot(rp.x - state.player.x, rp.y - state.player.y) / 56));
         if (rp.downed) {
-          targets.push({ x: rp.x, y: rp.y, sp: 'item_medkit', color: '#ef4444', tag: `SOS ${rp.callsign}`, urgent: true });
-        } else if (state.isCoop && !rp.isBot) {
-          targets.push({ x: rp.x, y: rp.y, sp: 'player_hero', color: rp.color, tag: rp.callsign });
+          targets.push({
+            x: rp.x,
+            y: rp.y,
+            sp: 'item_medkit',
+            color: '#ef4444',
+            tag: `🆘 ${rp.callsign} · ${distM}m`,
+            urgent: true,
+            progress: rp.reviveProgress,
+          });
+        } else if (state.isCoop) {
+          const clsSp: SpriteKey =
+            rp.classId === 'medic'
+              ? 'item_medkit'
+              : rp.classId === 'engineer'
+                ? 'prop_turret'
+                : rp.classId === 'demolisher'
+                  ? 'prop_grenade'
+                  : 'player_hero';
+          targets.push({
+            x: rp.x,
+            y: rp.y,
+            sp: clsSp,
+            color: rp.color,
+            tag: `${rp.callsign} · ${distM}m`,
+          });
+        }
+      }
+    }
+    if (state.isCoop) {
+      for (const d of state.doors) {
+        if (!d.unlocked && d.paidAmount > 0 && d.paidAmount < d.cost) {
+          const dcx = d.x + d.w * 0.5;
+          const dcy = d.y + d.h * 0.5;
+          const distM = Math.max(2, Math.round(Math.hypot(dcx - state.player.x, dcy - state.player.y) / 56));
+          targets.push({
+            x: dcx,
+            y: dcy,
+            sp: 'ui_coin',
+            color: '#facc15',
+            tag: `🚪 -$${d.cost - d.paidAmount} · ${distM}m`,
+          });
         }
       }
     }
@@ -3997,7 +4092,14 @@ export class CartoonRenderer {
       }
     }
     for (const c of state.chests) {
-      targets.push({ x: c.x, y: c.y, sp: 'prop_chest', color: '#f59e0b' });
+      const distM = Math.max(2, Math.round(Math.hypot(c.x - state.player.x, c.y - state.player.y) / 56));
+      targets.push({
+        x: c.x,
+        y: c.y,
+        sp: 'prop_chest',
+        color: '#f59e0b',
+        tag: state.isCoop ? `🎁 ${distM}m` : undefined,
+      });
     }
     for (const z of state.zombies) {
       if (z.kind === 'thief') targets.push({ x: z.x, y: z.y, sp: 'zombie_thief', color: '#fde047' });
@@ -4007,11 +4109,17 @@ export class CartoonRenderer {
       }
     }
     if (state.waveState === 'extraction') {
+      const distM = Math.max(
+        2,
+        Math.round(Math.hypot(state.stage.helipadPos.x - state.player.x, state.stage.helipadPos.y - state.player.y) / 56)
+      );
       targets.push({
         x: state.stage.helipadPos.x,
         y: state.stage.helipadPos.y,
         sp: 'prop_helipad',
         color: '#4ade80',
+        tag: `🚁 ${distM}m`,
+        urgent: true,
       });
     }
 
@@ -4023,7 +4131,7 @@ export class CartoonRenderer {
       const dy = t.y - state.camera.y;
       if (Math.abs(dx) <= halfW && Math.abs(dy) <= halfH) continue;
       const angle = Math.atan2(dy, dx);
-      const ix = viewW / 2 + Math.cos(angle) * Math.min(viewW / 2 - 52, 330);
+      const ix = viewW / 2 + Math.cos(angle) * Math.min(viewW / 2 - 54, 335);
       const iy = viewH / 2 + Math.sin(angle) * Math.min(viewH / 2 - 66, 200);
       ctx.save();
       ctx.translate(ix, iy);
@@ -4053,6 +4161,14 @@ export class CartoonRenderer {
       ctx.lineWidth = 2.4;
       ctx.strokeStyle = t.color;
       ctx.stroke();
+
+      if (t.progress && t.progress > 0.02) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 18.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, t.progress));
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#4ade80';
+        ctx.stroke();
+      }
 
       const spImg = Assets.getSprite(t.sp);
       if (spImg) {
