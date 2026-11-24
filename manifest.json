@@ -1,16 +1,34 @@
 {
-  "name": "Zombie Room Defense",
-  "short_name": "Zombie Defense",
-  "start_url": "./index.html",
+  "id": "./",
+  "name": "僵尸防线大作战 · Zombie Room Defense",
+  "short_name": "僵尸防线",
+  "description": "1~4人联机俯视角战术打僵尸防守射击游戏",
+  "start_url": "./",
+  "scope": "./",
   "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
   "orientation": "landscape",
   "background_color": "#090e17",
   "theme_color": "#090e17",
+  "categories": ["games", "action"],
   "icons": [
     {
-      "src": "./assets/player_hero.png",
+      "src": "./icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
