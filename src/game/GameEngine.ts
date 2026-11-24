@@ -541,13 +541,74 @@ export class GameEngine {
       }
     }
 
-    // 标记室内大型家具障碍物中心格不可穿过，让僵尸自动丝滑绕开桌子/车/喷泉！
-    for (const pr of s.props) {
+    // 自动封堵贴墙家具背后的超窄死角缝隙（< 62px，仅玩家能挤入而大体型僵尸进不去的“卡沙发Bug”缝隙），同时保留宽敞走道与门窗开口！
+    const hitsOpening = (sr: Rect): boolean => {
+      for (const d of s.doors) {
+        if (sr.x < d.x + d.w + 10 && sr.x + sr.w > d.x - 10 && sr.y < d.y + d.h + 10 && sr.y + sr.h > d.y - 10) {
+          return true;
+        }
+      }
+      for (const win of s.windows) {
+        if (sr.x < win.x + win.w + 10 && sr.x + sr.w > win.x - 10 && sr.y < win.y + win.h + 10 && sr.y + sr.h > win.y - 10) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const propRects: Rect[] = s.props.map((pr) => {
       const { ew, eh } = this.getEffectivePropDims(pr);
-      const x0 = Math.max(0, Math.floor((pr.x - ew * 0.36) / G));
-      const y0 = Math.max(0, Math.floor((pr.y - eh * 0.36) / G));
-      const x1 = Math.min(cols - 1, Math.floor((pr.x + ew * 0.36) / G));
-      const y1 = Math.min(rows - 1, Math.floor((pr.y + eh * 0.36) / G));
+      let rx0 = pr.x - ew * 0.42;
+      let rx1 = pr.x + ew * 0.42;
+      let ry0 = pr.y - eh * 0.42;
+      let ry1 = pr.y + eh * 0.42;
+      const sealSlitMax = 72;
+
+      for (const w of s.walls) {
+        const vOverlap = Math.min(ry1, w.y + w.h) - Math.max(ry0, w.y);
+        if (vOverlap > 6) {
+          const wx1 = w.x + w.w;
+          const gapLeft = rx0 - wx1;
+          if (gapLeft > 0 && gapLeft < sealSlitMax && !hitsOpening({ x: wx1, y: ry0, w: gapLeft, h: ry1 - ry0 })) {
+            // 直接并入墙体全厚度，防止碰撞推出方向把实体反向挤进墙壁内部！
+            rx0 = Math.min(rx0, w.x);
+          }
+          const wx0 = w.x;
+          const gapRight = wx0 - rx1;
+          if (gapRight > 0 && gapRight < sealSlitMax && !hitsOpening({ x: rx1, y: ry0, w: gapRight, h: ry1 - ry0 })) {
+            rx1 = Math.max(rx1, w.x + w.w);
+          }
+        }
+        const hOverlap = Math.min(rx1, w.x + w.w) - Math.max(rx0, w.x);
+        if (hOverlap > 6) {
+          const wy1 = w.y + w.h;
+          const gapTop = ry0 - wy1;
+          if (gapTop > 0 && gapTop < sealSlitMax && !hitsOpening({ x: rx0, y: wy1, w: rx1 - rx0, h: gapTop })) {
+            ry0 = Math.min(ry0, w.y);
+          }
+          const wy0 = w.y;
+          const gapBottom = wy0 - ry1;
+          if (gapBottom > 0 && gapBottom < sealSlitMax && !hitsOpening({ x: rx0, y: ry1, w: rx1 - rx0, h: gapBottom })) {
+            ry1 = Math.max(ry1, w.y + w.h);
+          }
+        }
+      }
+
+      return {
+        x: rx0,
+        y: ry0,
+        w: rx1 - rx0,
+        h: ry1 - ry0,
+      };
+    });
+
+    // 标记室内家具（含已封堵的贴墙沙发窄缝）网格不可穿过，让僵尸自动丝滑绕开家具两侧进攻！
+    for (const prRect of propRects) {
+      const pad = 4;
+      const x0 = Math.max(0, Math.floor((prRect.x + pad) / G));
+      const y0 = Math.max(0, Math.floor((prRect.y + pad) / G));
+      const x1 = Math.min(cols - 1, Math.floor((prRect.x + prRect.w - pad) / G));
+      const y1 = Math.min(rows - 1, Math.floor((prRect.y + prRect.h - pad) / G));
       for (let gy = y0; gy <= y1; gy++) {
         for (let gx = x0; gx <= x1; gx++) {
           this.walkableGrid[gy * cols + gx] = 0;
@@ -555,20 +616,12 @@ export class GameEngine {
       }
     }
 
-    const propRects: Rect[] = s.props.map((pr) => {
-      const { ew, eh } = this.getEffectivePropDims(pr);
-      return {
-        x: pr.x - ew * 0.42,
-        y: pr.y - eh * 0.42,
-        w: ew * 0.84,
-        h: eh * 0.84,
-      };
-    });
+    // 先推开室内家具碰撞，最后由实心墙与防爆门兜底裁决，100% 杜绝任何家具把角色挤进墙内或穿墙！
     this.staticBlockers = [
-      ...s.walls,
+      ...propRects,
       ...s.windows,
       ...s.doors.filter((d) => !d.unlocked),
-      ...propRects,
+      ...s.walls,
     ];
   }
 
@@ -1612,7 +1665,12 @@ export class GameEngine {
     const entries = Object.entries(stageEco.weights) as [ZombieKind, number][];
     const lateShift = Math.min(0.28, Math.max(0, wave - 2) * 0.035);
     const adjusted = entries.map(([k, w]) => {
-      const mult = k === 'walker' ? Math.max(0.35, 1 - lateShift * 1.6) : 1 + lateShift;
+      const mult =
+        k === 'walker'
+          ? Math.max(0.35, 1 - lateShift * 1.6)
+          : k === 'spitter' && wave === 1
+            ? 0.6
+            : 1 + lateShift;
       return [k, w * mult] as [ZombieKind, number];
     });
     const wSum = adjusted.reduce((acc, [, w]) => acc + w, 0) || 1;
@@ -1628,6 +1686,16 @@ export class GameEngine {
         }
       }
       queue.push(chosen);
+    }
+
+    // 保底远程喷毒丧尸配额（全关卡稳定压制卡掩体/蹲角落打法，第1波至少1只、第2波起至少占 ~16%）
+    const minSpitters = wave === 1 ? 1 : Math.max(2, Math.floor(totalCount * 0.16));
+    let curSpitters = queue.filter((k) => k === 'spitter').length;
+    for (let idx = queue.length - 1; idx >= 0 && curSpitters < minSpitters; idx--) {
+      if (queue[idx] === 'walker' || queue[idx] === 'runner') {
+        queue[idx] = 'spitter';
+        curSpitters++;
+      }
     }
 
     if (wave % 3 === 0 || (s.stage.id === 'stage_mall' && wave % 2 === 0)) {
@@ -2814,15 +2882,19 @@ export class GameEngine {
 
   private isZombieTargetableForAutoAim(z: ZombieEntity): boolean {
     if (z.insideBuilding) return true;
-    if (!z.targetWindowId) return false;
-    const win = this.state!.windows.find((w) => w.id === z.targetWindowId);
-    if (!win) return false;
-    const room = this.state!.rooms.find((r) => r.id === win.roomId);
-    if (!room?.unlocked) return false;
-    // 允许手机自动瞄准与哨戒炮透过已解锁房间的窗户射击洞口，主动清剿窗外逼近及扒窗的丧尸！
-    const wcx = win.x + win.w / 2;
-    const wcy = win.y + win.h / 2;
-    return Math.hypot(z.x - wcx, z.y - wcy) <= z.radius + 260;
+    const s = this.state!;
+    // 直接基于已解锁防区窗户几何距离判定（不依赖仅主机持有的 targetWindowId），确保联机所有队员与哨戒炮都能顺畅自动集火窗外丧尸！
+    for (let i = 0; i < s.windows.length; i++) {
+      const win = s.windows[i];
+      const room = s.rooms.find((r) => r.id === win.roomId);
+      if (!room?.unlocked) continue;
+      const wcx = win.x + win.w * 0.5;
+      const wcy = win.y + win.h * 0.5;
+      if (Math.hypot(z.x - wcx, z.y - wcy) <= z.radius + 285) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private findNearestTarget(x: number, y: number, maxRange: number): ZombieEntity | null {
@@ -4799,7 +4871,8 @@ export class GameEngine {
               z.attackStateTimer = 0.16;
               z.attackAnim = 1.0;
               const strikeDist = Math.hypot(targetP.x - z.x, targetP.y - z.y);
-              const strikeReach = targetP.radius + z.radius + 34;
+              const overLowCover = this.hasLowCoverPropBetween(z.x, z.y, targetP.x, targetP.y);
+              const strikeReach = targetP.radius + z.radius + (overLowCover ? 62 : 34);
               if (
                 strikeDist <= strikeReach &&
                 !this.isSegmentBlockedByWallOrDoor(z.x, z.y, targetP.x, targetP.y, 8)
@@ -4878,10 +4951,14 @@ export class GameEngine {
         }
 
         const standoffDist = targetP.radius + z.radius + 20;
+        const overLowProp =
+          pDist <= targetP.radius + z.radius + 60 &&
+          this.hasLowCoverPropBetween(z.x, z.y, targetP.x, targetP.y);
+        const meleeTriggerReach = targetP.radius + z.radius + (overLowProp ? 54 : 26);
         const clearMeleeSight =
-          pDist <= targetP.radius + z.radius + 30 &&
+          pDist <= meleeTriggerReach + 6 &&
           !this.isSegmentBlockedByWallOrDoor(z.x, z.y, targetP.x, targetP.y, 9);
-        if (z.damage > 0 && clearMeleeSight && pDist <= targetP.radius + z.radius + 26 && z.attackCd <= 0) {
+        if (z.damage > 0 && z.kind !== 'spitter' && clearMeleeSight && pDist <= meleeTriggerReach && z.attackCd <= 0) {
           z.attackState = 'windup';
           z.attackStateTimer =
             z.kind === 'runner' ? 0.16 : isBoss || z.kind === 'miniboss' ? 0.23 : 0.2;
@@ -4895,8 +4972,18 @@ export class GameEngine {
         const dx = goal.x - z.x;
         const dy = goal.y - z.y;
         const dist = Math.hypot(dx, dy) || 1;
+        const sameRoomClear = !this.isSegmentBlockedByWallOrDoor(z.x, z.y, targetP.x, targetP.y, 8);
 
-        if (clearMeleeSight && pDist < standoffDist && z.attackCd > 0) {
+        if (z.kind === 'spitter' && z.insideBuilding && sameRoomClear && pDist < 245) {
+          // 远程喷毒怪保持战术射程横向游走，不盲目贴脸送枪口，持续远程抛射酸液逼走位！
+          const awayAng = Math.atan2(z.y - targetP.y, z.x - targetP.x);
+          const strafeSign = z.id % 2 === 0 ? 1 : -1;
+          const backPush = pDist < 165 ? 0.55 : 0.12;
+          const orbitAng = awayAng + strafeSign * 1.32;
+          z.vx = Math.cos(orbitAng) * spd * 0.68 + Math.cos(awayAng) * spd * backPush;
+          z.vy = Math.sin(orbitAng) * spd * 0.68 + Math.sin(awayAng) * spd * backPush;
+          z.facingAngle = this.lerpAngle(z.facingAngle, Math.atan2(toPlayerY, toPlayerX), Math.min(1, dt * 11));
+        } else if (clearMeleeSight && pDist < standoffDist && z.attackCd > 0) {
           const awayAng = Math.atan2(z.y - targetP.y, z.x - targetP.x);
           const strafeSign = z.id % 2 === 0 ? 1 : -1;
           const orbitAng = awayAng + strafeSign * 1.15;
@@ -4924,24 +5011,24 @@ export class GameEngine {
           }
         }
 
-        // 分轴平滑贴墙滑行 + 拐角防卡死切向脱困（彻底消除大体型暴君/尸群挤在墙边和门框立柱动弹不得）
+        // 分轴平滑贴墙/绕家具滑行 + 拐角防卡死切向脱困（彻底消除大体型暴君/尸群挤在墙边、门框或沙发前动弹不得）
         z.x += z.vx * dt;
         this.resolveEntityInsideWalls(z);
         z.y += z.vy * dt;
         this.resolveEntityInsideWalls(z);
-        if (clearMeleeSight) {
+        if (clearMeleeSight && !overLowProp) {
           this.maintainZombiePlayerSeparation(z, targetP, targetP.radius + z.radius + 9);
           this.resolveEntityInsideWalls(z);
         }
 
         const stepMoved = Math.hypot(z.x - prevZx, z.y - prevZy);
-        if (spd > 20 && stepMoved < spd * dt * 0.26) {
+        if (spd > 20 && stepMoved < spd * dt * 0.28) {
           const tx1 = -dy / dist;
           const ty1 = dx / dist;
-          const nudge = spd * dt * 0.82;
+          const nudge = spd * dt * 0.88;
           const probeR = Math.min(18, z.radius * 0.72);
-          const open1 = !this.findBlockingWallOrLockedDoor(z.x + tx1 * 22, z.y + ty1 * 22, probeR);
-          const open2 = !this.findBlockingWallOrLockedDoor(z.x - tx1 * 22, z.y - ty1 * 22, probeR);
+          const open1 = !this.findStaticIndoorBlocker(z.x + tx1 * 24, z.y + ty1 * 24, probeR);
+          const open2 = !this.findStaticIndoorBlocker(z.x - tx1 * 24, z.y - ty1 * 24, probeR);
           const sign = open1 && !open2 ? 1 : open2 && !open1 ? -1 : z.id % 2 === 0 ? 1 : -1;
           z.x += tx1 * sign * nudge;
           z.y += ty1 * sign * nudge;
@@ -4955,19 +5042,25 @@ export class GameEngine {
 
         if (z.kind === 'spitter') {
           z.rangedCd -= dt;
-          if (z.rangedCd <= 0 && pDist < 420 && this.hasBulletLineOfSight(z.x, z.y, targetP.x, targetP.y)) {
-            z.rangedCd = Math.max(1.85, 2.65 - s.wave * 0.05);
+          const canLobOrShoot =
+            pDist < 500 &&
+            (z.insideBuilding
+              ? sameRoomClear
+              : this.hasBulletLineOfSight(z.x, z.y, targetP.x, targetP.y));
+          if (z.rangedCd <= 0 && canLobOrShoot) {
+            z.rangedCd = Math.max(1.75, 2.5 - s.wave * 0.05);
             const ang = Math.atan2(targetP.y - z.y, targetP.x - z.x);
-            z.attackAnim = 0.85;
+            const projSpd = 365;
+            z.attackAnim = 0.88;
             z.slashAngle = ang;
             s.spits.push({
               x: z.x,
               y: z.y,
-              vx: Math.cos(ang) * 355,
-              vy: Math.sin(ang) * 355,
+              vx: Math.cos(ang) * projSpd,
+              vy: Math.sin(ang) * projSpd,
               radius: 8,
               damage: z.damage,
-              life: 1.9,
+              life: Math.min(1.85, Math.max(0.35, (pDist + 26) / projSpd)),
               projKind: 'acid',
             });
           }
@@ -5324,7 +5417,11 @@ export class GameEngine {
       sp.life -= dt;
       const nx = sp.x + sp.vx * dt;
       const ny = sp.y + sp.vy * dt;
-      const blocked = this.findBulletBlocker(nx, ny, sp.radius);
+      // 酸液抛射物可在同房间内高抛越过箱柜/沙发等矮高掩体，仅受实心墙与未锁防爆门阻挡！
+      const blocked =
+        pk === 'acid'
+          ? this.findBlockingWallOrLockedDoor(nx, ny, sp.radius)
+          : this.findBulletBlocker(nx, ny, sp.radius);
       if (sp.life <= 0 || blocked) {
         if (blocked && sp.bouncesLeft && sp.bouncesLeft > 0 && sp.life > 0) {
           sp.bouncesLeft -= 1;
@@ -6863,6 +6960,39 @@ export class GameEngine {
       if (!d.unlocked && this.circleIntersectsRect(x, y, radius, d)) return d;
     }
     return null;
+  }
+
+  private findStaticIndoorBlocker(x: number, y: number, radius: number): Rect | null {
+    for (let i = 0; i < this.staticBlockers.length; i++) {
+      const b = this.staticBlockers[i];
+      if (this.circleIntersectsRect(x, y, radius, b)) return b;
+    }
+    return null;
+  }
+
+  private hasLowCoverPropBetween(x1: number, y1: number, x2: number, y2: number): boolean {
+    const s = this.state!;
+    const steps = 4;
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const mx = x1 + (x2 - x1) * t;
+      const my = y1 + (y2 - y1) * t;
+      for (const pr of s.props) {
+        if (pr.blocksBullets) continue;
+        const { ew, eh } = this.getEffectivePropDims(pr);
+        if (
+          this.circleIntersectsRect(mx, my, 8, {
+            x: pr.x - ew * 0.44,
+            y: pr.y - eh * 0.44,
+            w: ew * 0.88,
+            h: eh * 0.88,
+          })
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private findBulletBlocker(x: number, y: number, radius: number): Rect | null {
