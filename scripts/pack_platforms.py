@@ -7,7 +7,17 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 
 # Host-only files that should NOT be inside platform upload bundles
-EXCLUDED_ROOT_FILES = {".nojekyll", "_headers", "manifest.json", ".DS_Store"}
+EXCLUDED_ROOT_FILES = {
+    ".nojekyll",
+    "_headers",
+    "manifest.json",
+    "sw.js",
+    "icon-512.png",
+    "icon-192.png",
+    "apple-touch-icon.png",
+    "favicon-32.png",
+    ".DS_Store",
+}
 
 TARGETS = {
     "crazygames": {

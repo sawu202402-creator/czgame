@@ -106,6 +106,11 @@ declare global {
   }
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
 class PlatformAdapter {
   private initialized = false;
   private sdkActive = false;
@@ -116,6 +121,22 @@ class PlatformAdapter {
   private gdRewardEarned = false;
   private gdAdResumeResolver: (() => void) | null = null;
   private y8Instance: Y8SdkInstance | null = null;
+  private deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
+  private installStateChangeCb: (() => void) | null = null;
+
+  constructor() {
+    if (typeof window !== 'undefined' && __BUILD_PLATFORM__ === 'web') {
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        this.deferredInstallPrompt = e as BeforeInstallPromptEvent;
+        this.installStateChangeCb?.();
+      });
+      window.addEventListener('appinstalled', () => {
+        this.deferredInstallPrompt = null;
+        this.installStateChangeCb?.();
+      });
+    }
+  }
 
   public async init(onPauseChange: (paused: boolean) => void): Promise<void> {
     this.pauseHook = onPauseChange;
@@ -275,6 +296,73 @@ class PlatformAdapter {
         this.sdkActive = false;
       }
     }
+
+    if (
+      __BUILD_PLATFORM__ === 'web' &&
+      typeof navigator !== 'undefined' &&
+      'serviceWorker' in navigator &&
+      typeof location !== 'undefined' &&
+      (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  }
+
+  public onInstallStateChange(cb: () => void): void {
+    this.installStateChangeCb = cb;
+  }
+
+  public isStandaloneApp(): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+      if (window.matchMedia?.('(display-mode: standalone)').matches) return true;
+      if (window.matchMedia?.('(display-mode: fullscreen)').matches && !document.fullscreenElement) return true;
+      if ((navigator as Navigator & { standalone?: boolean }).standalone === true) return true;
+    } catch {
+      // ignore
+    }
+    return false;
+  }
+
+  public canShowHomeScreenShortcut(): boolean {
+    if (__BUILD_PLATFORM__ !== 'web') return false;
+    if (this.isStandaloneApp()) return false;
+    try {
+      if (window.self !== window.top) return false;
+    } catch {
+      return false;
+    }
+    return true;
+  }
+
+  public hasNativeInstallPrompt(): boolean {
+    return Boolean(this.deferredInstallPrompt);
+  }
+
+  public async triggerNativeInstallPrompt(): Promise<'accepted' | 'dismissed' | 'unavailable'> {
+    const promptEv = this.deferredInstallPrompt;
+    if (!promptEv) return 'unavailable';
+    this.deferredInstallPrompt = null;
+    try {
+      await promptEv.prompt();
+      const res = await promptEv.userChoice;
+      this.installStateChangeCb?.();
+      return res?.outcome === 'accepted' ? 'accepted' : 'dismissed';
+    } catch {
+      return 'unavailable';
+    }
+  }
+
+  public getInstallGuidePlatform(): 'wechat' | 'ios' | 'android' | 'desktop' {
+    if (typeof navigator === 'undefined') return 'desktop';
+    const ua = navigator.userAgent || '';
+    if (/MicroMessenger/i.test(ua)) return 'wechat';
+    const isIOS =
+      /iPhone|iPad|iPod/i.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) return 'ios';
+    if (/Android|HarmonyOS/i.test(ua)) return 'android';
+    return 'desktop';
   }
 
   public loadingStart(): void {

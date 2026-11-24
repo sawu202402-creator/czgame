@@ -107,6 +107,15 @@ export class UIManager {
       this.showHomeHub();
     });
 
+    PlatformSDK.onInstallStateChange(() => {
+      if (!this.engine.state && this.modalRoot.querySelector('.hub-screen')) {
+        const btn = this.modalRoot.querySelector('#btn-hub-install') as HTMLButtonElement | null;
+        if (btn && !PlatformSDK.canShowHomeScreenShortcut()) {
+          btn.style.display = 'none';
+        }
+      }
+    });
+
     const urlRoom = CoopManager.consumeUrlRoomParam();
     if (urlRoom) {
       this.hubTab = 'coop';
@@ -309,6 +318,7 @@ export class UIManager {
             <button class="hub-util-btn ${!musicMuted ? 'active' : ''}" id="btn-hub-music" title="${I18n.t('hubMusicTitle')}">${musicMuted ? '🔕' : '🎵'}</button>
             <button class="hub-util-btn" id="btn-hub-mute" title="${I18n.t('hubSoundTitle')}">${muted ? '🔇' : '🔊'}</button>
             ${fsSupported ? `<button class="hub-util-btn ${fsActive ? 'active' : ''}" id="btn-hub-fs" title="Fullscreen">⛶</button>` : ''}
+            ${PlatformSDK.canShowHomeScreenShortcut() ? `<button class="hub-install-btn" id="btn-hub-install" type="button"><img src="./assets/app_icon_ui.png" width="18" height="18" alt="" /><span>${I18n.t('installAppBtn')}</span></button>` : ''}
           </div>
         </header>
 
@@ -352,6 +362,22 @@ export class UIManager {
         await this.toggleFullscreen();
         this.showHomeHub();
       };
+    }
+
+    const installBtn = this.modalRoot.querySelector('#btn-hub-install') as HTMLButtonElement | null;
+    if (installBtn) {
+      this.bindModalTap(installBtn, async () => {
+        if (PlatformSDK.hasNativeInstallPrompt()) {
+          const outcome = await PlatformSDK.triggerNativeInstallPrompt();
+          if (outcome === 'accepted') {
+            SoundFX.fanfare();
+            installBtn.style.display = 'none';
+            return;
+          }
+          if (outcome === 'dismissed') return;
+        }
+        this.openInstallAppGuide();
+      });
     }
 
     this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-hub-tab]').forEach((btn) => {
@@ -556,6 +582,78 @@ export class UIManager {
     if (!pill) return;
     pill.classList.toggle('is-p2p', CoopManager.hasDirectP2P());
     pill.textContent = CoopManager.getNetStatusLabel();
+  }
+
+  private openInstallAppGuide(): void {
+    const hub = this.modalRoot.querySelector('.hub-screen') as HTMLElement | null;
+    if (!hub) return;
+    hub.querySelector('#install-guide-overlay')?.remove();
+
+    const plat = PlatformSDK.getInstallGuidePlatform();
+    const step1 =
+      plat === 'wechat'
+        ? I18n.t('installWechatStep1')
+        : plat === 'ios'
+          ? I18n.t('installIosStep1')
+          : plat === 'android'
+            ? I18n.t('installAndroidStep1')
+            : I18n.t('installDesktopStep1');
+    const step2 =
+      plat === 'wechat'
+        ? I18n.t('installWechatStep2')
+        : plat === 'ios'
+          ? I18n.t('installIosStep2')
+          : plat === 'android'
+            ? I18n.t('installAndroidStep2')
+            : I18n.t('installDesktopStep2');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'install-guide-overlay';
+    overlay.className = 'install-guide-overlay';
+    overlay.innerHTML = `
+      <div class="install-guide-card">
+        <div class="install-guide-top">
+          <div class="install-icon-preview">
+            <img src="./assets/app_icon_ui.png" width="58" height="58" alt="" />
+            <span>${I18n.isZh() ? '僵尸防线' : 'Zombie Def'}</span>
+          </div>
+          <div class="install-guide-head">
+            <span class="install-badge-pill">${I18n.t('installBadgeTag')}</span>
+            <h3>${I18n.t('installModalTitle')}</h3>
+            <p>${I18n.t('installModalSub')}</p>
+          </div>
+        </div>
+        <div class="install-steps-box">
+          <div class="install-step-item">${step1}</div>
+          <div class="install-step-item">${step2}</div>
+        </div>
+        <div class="install-guide-actions">
+          <button class="btn-cartoon btn-mini btn-blue" id="btn-install-copy-url" type="button">${I18n.t('installCopyUrlBtn')}</button>
+          <button class="btn-cartoon btn-mini btn-green" id="btn-install-close" type="button">${I18n.t('installGotItBtn')}</button>
+        </div>
+      </div>
+    `;
+    const openedAt = performance.now();
+    hub.appendChild(overlay);
+
+    overlay.onclick = (e) => {
+      if (e.target === overlay && performance.now() - openedAt > 380) {
+        overlay.remove();
+      }
+    };
+    const closeBtn = overlay.querySelector('#btn-install-close') as HTMLButtonElement;
+    this.bindModalTap(closeBtn, () => overlay.remove());
+
+    const copyUrlBtn = overlay.querySelector('#btn-install-copy-url') as HTMLButtonElement;
+    this.bindModalTap(copyUrlBtn, async () => {
+      const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+      try {
+        await navigator.clipboard.writeText(cleanUrl);
+        copyUrlBtn.textContent = I18n.t('installUrlCopied');
+      } catch {
+        copyUrlBtn.textContent = cleanUrl;
+      }
+    });
   }
 
   private buildStagesHubView(save: ReturnType<typeof SaveManager.get>): string {

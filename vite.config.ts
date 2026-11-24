@@ -78,6 +78,20 @@ export default defineConfig(() => {
               ].join('\n');
               return html.replace('</head>', y8Snippet);
             }
+            if (platform === 'web') {
+              const pwaSnippet = [
+                '    <meta name="theme-color" content="#090e17" />',
+                '    <meta name="mobile-web-app-capable" content="yes" />',
+                '    <meta name="apple-mobile-web-app-capable" content="yes" />',
+                '    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />',
+                '    <meta name="apple-mobile-web-app-title" content="僵尸防线" />',
+                '    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />',
+                '    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />',
+                '    <link rel="manifest" href="./manifest.json" />',
+                '  </head>',
+              ].join('\n');
+              return html.replace('</head>', pwaSnippet);
+            }
             return html;
           },
         },
