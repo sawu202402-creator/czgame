@@ -571,74 +571,24 @@ export class GameEngine {
       }
     }
 
-    // 自动封堵贴墙家具背后的超窄死角缝隙（< 62px，仅玩家能挤入而大体型僵尸进不去的“卡沙发Bug”缝隙），同时保留宽敞走道与门窗开口！
-    const hitsOpening = (sr: Rect): boolean => {
-      for (const d of s.doors) {
-        if (sr.x < d.x + d.w + 10 && sr.x + sr.w > d.x - 10 && sr.y < d.y + d.h + 10 && sr.y + sr.h > d.y - 10) {
-          return true;
-        }
-      }
-      for (const win of s.windows) {
-        if (sr.x < win.x + win.w + 10 && sr.x + sr.w > win.x - 10 && sr.y < win.y + win.h + 10 && sr.y + sr.h > win.y - 10) {
-          return true;
-        }
-      }
-      return false;
-    };
-
     const propRects: Rect[] = s.props.map((pr) => {
       const { ew, eh } = this.getEffectivePropDims(pr);
-      let rx0 = pr.x - ew * 0.42;
-      let rx1 = pr.x + ew * 0.42;
-      let ry0 = pr.y - eh * 0.42;
-      let ry1 = pr.y + eh * 0.42;
-      const sealSlitMax = 72;
-
-      for (const w of s.walls) {
-        const vOverlap = Math.min(ry1, w.y + w.h) - Math.max(ry0, w.y);
-        if (vOverlap > 6) {
-          const wx1 = w.x + w.w;
-          const gapLeft = rx0 - wx1;
-          if (gapLeft > 0 && gapLeft < sealSlitMax && !hitsOpening({ x: wx1, y: ry0, w: gapLeft, h: ry1 - ry0 })) {
-            // 直接并入墙体全厚度，防止碰撞推出方向把实体反向挤进墙壁内部！
-            rx0 = Math.min(rx0, w.x);
-          }
-          const wx0 = w.x;
-          const gapRight = wx0 - rx1;
-          if (gapRight > 0 && gapRight < sealSlitMax && !hitsOpening({ x: rx1, y: ry0, w: gapRight, h: ry1 - ry0 })) {
-            rx1 = Math.max(rx1, w.x + w.w);
-          }
-        }
-        const hOverlap = Math.min(rx1, w.x + w.w) - Math.max(rx0, w.x);
-        if (hOverlap > 6) {
-          const wy1 = w.y + w.h;
-          const gapTop = ry0 - wy1;
-          if (gapTop > 0 && gapTop < sealSlitMax && !hitsOpening({ x: rx0, y: wy1, w: rx1 - rx0, h: gapTop })) {
-            ry0 = Math.min(ry0, w.y);
-          }
-          const wy0 = w.y;
-          const gapBottom = wy0 - ry1;
-          if (gapBottom > 0 && gapBottom < sealSlitMax && !hitsOpening({ x: rx0, y: ry1, w: rx1 - rx0, h: gapBottom })) {
-            ry1 = Math.max(ry1, w.y + w.h);
-          }
-        }
-      }
-
       return {
-        x: rx0,
-        y: ry0,
-        w: rx1 - rx0,
-        h: ry1 - ry0,
+        x: pr.x - ew * 0.42,
+        y: pr.y - eh * 0.42,
+        w: ew * 0.84,
+        h: eh * 0.84,
       };
     });
 
-    // 标记室内家具（含已封堵的贴墙沙发窄缝）网格不可穿过，让僵尸自动丝滑绕开家具两侧进攻！
+    // 仅将家具主体核心占用的网格标为不可穿过，保留沙发与墙体之间的真实可走空隙（确保玩家走入沙发后时 BFS 流场依然连续有效，并由远程喷毒丧尸与隔矮掩体挥爪自然反制蹲点！）
     for (const prRect of propRects) {
-      const pad = 4;
-      const x0 = Math.max(0, Math.floor((prRect.x + pad) / G));
-      const y0 = Math.max(0, Math.floor((prRect.y + pad) / G));
-      const x1 = Math.min(cols - 1, Math.floor((prRect.x + prRect.w - pad) / G));
-      const y1 = Math.min(rows - 1, Math.floor((prRect.y + prRect.h - pad) / G));
+      const padX = Math.min(14, prRect.w * 0.28);
+      const padY = Math.min(14, prRect.h * 0.28);
+      const x0 = Math.max(0, Math.floor((prRect.x + padX) / G));
+      const y0 = Math.max(0, Math.floor((prRect.y + padY) / G));
+      const x1 = Math.min(cols - 1, Math.floor((prRect.x + prRect.w - padX) / G));
+      const y1 = Math.min(rows - 1, Math.floor((prRect.y + prRect.h - padY) / G));
       for (let gy = y0; gy <= y1; gy++) {
         for (let gx = x0; gx <= x1; gx++) {
           this.walkableGrid[gy * cols + gx] = 0;
@@ -1761,7 +1711,7 @@ export class GameEngine {
         k === 'walker'
           ? Math.max(0.35, 1 - lateShift * 1.6)
           : k === 'spitter' && wave === 1
-            ? 0.6
+            ? 0.85
             : 1 + lateShift;
       return [k, w * mult] as [ZombieKind, number];
     });
@@ -1780,8 +1730,8 @@ export class GameEngine {
       queue.push(chosen);
     }
 
-    // 保底远程喷毒丧尸配额（全关卡稳定压制卡掩体/蹲角落打法，第1波至少1只、第2波起至少占 ~16%）
-    const minSpitters = wave === 1 ? 1 : Math.max(2, Math.floor(totalCount * 0.16));
+    // 保底远程喷毒丧尸配额（保留沙发/掩体走位空间的同时，第1波起即派出远程喷毒丧尸高抛酸液克制死角蹲点！）
+    const minSpitters = wave === 1 ? Math.max(2, Math.floor(totalCount * 0.15)) : Math.max(3, Math.floor(totalCount * 0.2));
     let curSpitters = queue.filter((k) => k === 'spitter').length;
     for (let idx = queue.length - 1; idx >= 0 && curSpitters < minSpitters; idx--) {
       if (queue[idx] === 'walker' || queue[idx] === 'runner') {
