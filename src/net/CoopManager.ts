@@ -70,6 +70,7 @@ class CoopNetworkManager {
   public lobby: LobbyState | null = null;
   public lastJoinCode = '';
   public rttMs = 0;
+  public currentMatchSeq = 0;
 
   private bus: MqttWsRoomBus<BusPayload> | null = null;
   private rtcPeers = new Map<string, PeerRtcBundle>();
@@ -83,7 +84,7 @@ class CoopNetworkManager {
   private pendingClientWorldRaw: string | null = null;
   private pendingClientPlayersRaw: string | null = null;
   private pendingHostPlayerRaw = new Map<string, string>();
-  private hostMatchSeq = 1;
+  private hostMatchSeq = 0;
   private lastClientMatchSeq = 0;
   private hostCurrentWave = 1;
 
@@ -408,11 +409,10 @@ class CoopNetworkManager {
     this.hostLastSeen = 0;
     this.rttMs = 0;
     this.inMatchTriggered = false;
+    this.currentMatchSeq = 0;
     this.lastClientMatchSeq = 0;
     this.hostCurrentWave = 1;
-    this.pendingClientWorldRaw = null;
-    this.pendingClientPlayersRaw = null;
-    this.pendingHostPlayerRaw.clear();
+    this.clearMatchSnapshots();
     this.role = 'offline';
     this.status = 'idle';
     this.errorMsg = '';
@@ -453,6 +453,7 @@ class CoopNetworkManager {
           mode: initialMode,
           tier: initialTier,
           isPublic,
+          matchSeq: this.hostMatchSeq,
           inGame: false,
           members: [
             {
@@ -733,12 +734,14 @@ class CoopNetworkManager {
       this.mySlot = msg.slot ?? 1;
       this.lobby = msg.lobby;
       this.startHeartbeatLoop();
-      if (this.lobby.inGame && !this.inMatchTriggered) {
+      const ackSeq = this.lobby.matchSeq || 1;
+      if (this.lobby.inGame && !this.inMatchTriggered && ackSeq > this.lastClientMatchSeq) {
         // 支持开局后中途空降参战 & 掉线刷新秒重连回战场！
-        this.inMatchTriggered = true;
-        PlatformSDK.hideInviteButton(this.lobby.roomCode);
-        this.onMatchStartCb?.(this.lobby.stageId, this.lobby.mode, this.lobby);
+        this.acceptClientMatchStart(this.lobby.stageId, this.lobby.mode, this.lobby, ackSeq);
         return;
+      }
+      if (this.lobby.inGame && !this.inMatchTriggered) {
+        this.lobby = { ...this.lobby, inGame: false };
       }
       PlatformSDK.showInviteButton(this.lobby.roomCode, !this.lobby.inGame && this.lobby.members.length < 4);
       this.notifyLobby();
@@ -757,11 +760,13 @@ class CoopNetworkManager {
         if (wasConnecting) {
           this.startHeartbeatLoop();
         }
-        if (this.lobby.inGame && !this.inMatchTriggered) {
-          this.inMatchTriggered = true;
-          PlatformSDK.hideInviteButton(this.lobby.roomCode);
-          this.onMatchStartCb?.(this.lobby.stageId, this.lobby.mode, this.lobby);
+        const lobSeq = this.lobby.matchSeq || 1;
+        if (this.lobby.inGame && !this.inMatchTriggered && lobSeq > this.lastClientMatchSeq) {
+          this.acceptClientMatchStart(this.lobby.stageId, this.lobby.mode, this.lobby, lobSeq);
           return;
+        }
+        if (this.lobby.inGame && !this.inMatchTriggered) {
+          this.lobby = { ...this.lobby, inGame: false };
         }
         PlatformSDK.showInviteButton(this.lobby.roomCode, !this.lobby.inGame && this.lobby.members.length < 4);
         this.notifyLobby();
@@ -790,14 +795,12 @@ class CoopNetworkManager {
       if (!msg.lobby.members.some((m) => m.peerId === this.myPeerId)) {
         return;
       }
-      const seq = msg.matchSeq || 1;
-      if (this.inMatchTriggered && seq === this.lastClientMatchSeq) return;
-      this.lastClientMatchSeq = seq;
-      this.lobby = msg.lobby;
-      this.lobby.inGame = true;
-      this.inMatchTriggered = true;
-      PlatformSDK.hideInviteButton(this.lobby.roomCode);
-      this.onMatchStartCb?.(msg.stageId, msg.mode, msg.lobby);
+      this.acceptClientMatchStart(
+        msg.stageId,
+        msg.mode,
+        msg.lobby,
+        msg.matchSeq || msg.lobby.matchSeq || 1
+      );
       return;
     }
 
@@ -807,10 +810,15 @@ class CoopNetworkManager {
       !this.inMatchTriggered &&
       (msg.type === 'world_sync' || msg.type === 'players_fast')
     ) {
-      this.lobby.inGame = true;
-      this.inMatchTriggered = true;
-      PlatformSDK.hideInviteButton(this.lobby.roomCode);
-      this.onMatchStartCb?.(this.lobby.stageId, this.lobby.mode, this.lobby);
+      const pktMSeq =
+        msg.type === 'world_sync'
+          ? msg.w.waveState !== 'ended'
+            ? msg.w.mSeq || 0
+            : 0
+          : msg.mSeq || msg.list[0]?.mSeq || 0;
+      if (pktMSeq > this.lastClientMatchSeq) {
+        this.acceptClientMatchStart(this.lobby.stageId, this.lobby.mode, this.lobby, pktMSeq);
+      }
     }
 
     this.onGameMessageCb?.(msg, this.hostPeerId);
@@ -878,6 +886,38 @@ class CoopNetworkManager {
     this.notifyLobby();
   }
 
+  private acceptClientMatchStart(
+    stageId: string,
+    mode: GameMode,
+    lobby: LobbyState,
+    seq: number
+  ): void {
+    const effSeq = seq > 0 ? seq : lobby.matchSeq || 1;
+    if (this.inMatchTriggered && effSeq === this.lastClientMatchSeq) return;
+    if (effSeq < this.lastClientMatchSeq) return;
+    this.lastClientMatchSeq = effSeq;
+    this.currentMatchSeq = effSeq;
+    this.lobby = { ...lobby, inGame: true, matchSeq: effSeq };
+    this.inMatchTriggered = true;
+    this.clearMatchSnapshots();
+    PlatformSDK.hideInviteButton(this.lobby.roomCode);
+    this.onMatchStartCb?.(stageId, mode, this.lobby);
+  }
+
+  public clearMatchSnapshots(): void {
+    this.pendingClientWorldRaw = null;
+    this.pendingClientPlayersRaw = null;
+    this.pendingHostPlayerRaw.clear();
+  }
+
+  public markHostMatchEnded(): void {
+    this.clearMatchSnapshots();
+    if (this.role === 'host' && this.lobby) {
+      this.lobby.inGame = false;
+      this.publishHostDirectoryState();
+    }
+  }
+
   public hostLaunchNextStage(stageId: string, mode: GameMode, tier: DifficultyTier): void {
     if (this.role !== 'host' || !this.lobby) return;
     this.lobby.stageId = stageId;
@@ -891,12 +931,18 @@ class CoopNetworkManager {
     if (this.role !== 'host' || !this.lobby) return;
     this.hostMatchSeq += 1;
     const curSeq = this.hostMatchSeq;
+    this.currentMatchSeq = curSeq;
     this.hostCurrentWave = 1;
     this.lobby.inGame = true;
+    this.lobby.matchSeq = curSeq;
+    this.inMatchTriggered = true;
+    this.clearMatchSnapshots();
     PlatformSDK.hideInviteButton(this.lobby.roomCode);
     this.publishHostDirectoryState();
     const sendStartBurst = () => {
-      if (this.role !== 'host' || !this.lobby || !this.lobby.inGame) return;
+      if (this.role !== 'host' || !this.lobby || !this.lobby.inGame || this.currentMatchSeq !== curSeq) {
+        return;
+      }
       const pkt: CoopNetMessage = {
         type: 'start_game',
         stageId: this.lobby.stageId,
@@ -927,6 +973,7 @@ class CoopNetworkManager {
     this.lobby.inGame = false;
     this.inMatchTriggered = false;
     this.hostCurrentWave = 1;
+    this.clearMatchSnapshots();
     PlatformSDK.showInviteButton(this.lobby.roomCode, this.lobby.members.length < 4);
     if (this.role === 'host') {
       this.broadcastLobby();
@@ -1051,7 +1098,7 @@ class CoopNetworkManager {
             this.pendingClientPlayersRaw = raw;
             return;
           }
-        } else if (this.role === 'host' && this.clientLastSeen.has(peerId)) {
+        } else if (this.role === 'host' && this.lobby?.inGame && this.clientLastSeen.has(peerId)) {
           if (raw.includes('"player_sync"')) {
             this.clientLastSeen.set(peerId, now);
             this.pendingHostPlayerRaw.set(peerId, raw);
@@ -1091,12 +1138,12 @@ class CoopNetworkManager {
           this.hostLastSeen = now;
           if (parsed.m.type === 'start_game') {
             if (!parsed.m.lobby.members.some((m) => m.peerId === this.myPeerId)) return;
-            if (this.inMatchTriggered) return;
-            this.lobby = parsed.m.lobby;
-            this.lobby.inGame = true;
-            this.inMatchTriggered = true;
-            PlatformSDK.hideInviteButton(this.lobby.roomCode);
-            this.onMatchStartCb?.(parsed.m.stageId, parsed.m.mode, parsed.m.lobby);
+            this.acceptClientMatchStart(
+              parsed.m.stageId,
+              parsed.m.mode,
+              parsed.m.lobby,
+              parsed.m.matchSeq || parsed.m.lobby.matchSeq || 1
+            );
             return;
           }
           if (
@@ -1105,10 +1152,15 @@ class CoopNetworkManager {
             !this.inMatchTriggered &&
             (parsed.m.type === 'world_sync' || parsed.m.type === 'players_fast')
           ) {
-            this.lobby.inGame = true;
-            this.inMatchTriggered = true;
-            PlatformSDK.hideInviteButton(this.lobby.roomCode);
-            this.onMatchStartCb?.(this.lobby.stageId, this.lobby.mode, this.lobby);
+            const pktMSeq =
+              parsed.m.type === 'world_sync'
+                ? parsed.m.w.waveState !== 'ended'
+                  ? parsed.m.w.mSeq || 0
+                  : 0
+                : parsed.m.mSeq || parsed.m.list[0]?.mSeq || 0;
+            if (pktMSeq > this.lastClientMatchSeq) {
+              this.acceptClientMatchStart(this.lobby.stageId, this.lobby.mode, this.lobby, pktMSeq);
+            }
           }
           this.onGameMessageCb?.(parsed.m, this.hostPeerId);
         }

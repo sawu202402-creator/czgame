@@ -65,6 +65,7 @@ export interface LobbyState {
   mode: GameMode;
   tier?: DifficultyTier;
   isPublic?: boolean;
+  matchSeq?: number;
   members: LobbyMember[];
   inGame: boolean;
 }
@@ -145,6 +146,7 @@ export interface RemotePlayerState {
 
 export interface PlayerSyncPayload {
   seq: number;
+  mSeq?: number;
   peerId: string;
   slot: number;
   callsign: string;
@@ -327,6 +329,7 @@ export const HAZARD_KIND_NET_TABLE: ('cryo_vent' | 'bio_spore' | 'bomb_strike' |
 
 export interface WorldSyncPayload {
   seq: number;
+  mSeq?: number;
   wave: number;
   waveState: 'fighting' | 'intermission' | 'extraction' | 'ended';
   intermissionTimer: number;
@@ -362,10 +365,10 @@ export type CoopNetMessage =
   | { type: 'ready_toggle'; ready: boolean; callsign: string; classId?: AgentClassId }
   | { type: 'start_game'; stageId: string; mode: GameMode; lobby: LobbyState; matchSeq?: number }
   | { type: 'player_sync'; p: PlayerSyncPayload }
-  | { type: 'players_fast'; list: PlayerSyncPayload[] }
+  | { type: 'players_fast'; list: PlayerSyncPayload[]; mSeq?: number }
   | { type: 'world_sync'; w: WorldSyncPayload }
-  | { type: 'cmd_fire'; ownerId: string; bullets: (SerializedBulletTuple | SerializedBullet)[]; sfxKey: string; evolved: boolean }
-  | { type: 'cmd_grenade'; ownerId: string; g: SerializedGrenade }
+  | { type: 'cmd_fire'; ownerId: string; bullets: (SerializedBulletTuple | SerializedBullet)[]; sfxKey: string; evolved: boolean; mSeq?: number }
+  | { type: 'cmd_grenade'; ownerId: string; g: SerializedGrenade; mSeq?: number }
   | { type: 'cmd_repair_win'; ownerId: string; winId: string }
   | { type: 'cmd_fortify_win'; ownerId: string; winId: string }
   | { type: 'cmd_fund_door'; ownerId: string; doorId: string; amount: number }
@@ -399,9 +402,10 @@ export type CoopNetMessage =
       scale?: number;
       dur?: number;
     }
-  | { type: 'evt_player_hit'; targetId: string; damage: number }
+  | { type: 'evt_player_hit'; targetId: string; damage: number; mSeq?: number }
   | {
       type: 'evt_team_reward';
+      mSeq?: number;
       targetId?: string; // undefined = 全队生效
       cashDelta?: number;
       xpDelta?: number;
@@ -414,5 +418,5 @@ export type CoopNetMessage =
       bossTechCore?: number;
       teamSkill?: { ownerId: string; ownerName: string; classId: AgentClassId; x: number; y: number };
     }
-  | { type: 'evt_player_revived'; targetId: string; reviverId: string; reviverName: string }
-  | { type: 'evt_run_finished'; victory: boolean; tier?: DifficultyTier; squadStats?: SquadMvpEntry[] };
+  | { type: 'evt_player_revived'; targetId: string; reviverId: string; reviverName: string; mSeq?: number }
+  | { type: 'evt_run_finished'; victory: boolean; tier?: DifficultyTier; squadStats?: SquadMvpEntry[]; mSeq?: number };

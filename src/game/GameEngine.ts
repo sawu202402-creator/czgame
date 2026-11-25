@@ -161,7 +161,19 @@ export class GameEngine {
     }
   }
 
+  public stopRun(): void {
+    this.state = null;
+    this.pendingModals = [];
+    this.modalPaused = false;
+    this.paused = false;
+    this.pendingNetBullets = [];
+    this.pendingPeerKillCredits.clear();
+    this.reviveSyncGraceUntil.clear();
+    CoopManager.clearMatchSnapshots();
+  }
+
   public startRun(stage: StageDef, mode: GameMode, difficultyTier: DifficultyTier = 1): void {
+    CoopManager.clearMatchSnapshots();
     const pStats = SaveManager.getEffectivePlayerStats();
     const save = SaveManager.get();
     save.totalRuns += 1;
@@ -230,9 +242,9 @@ export class GameEngine {
                 legAngle: 0,
                 walkPhase: 0,
                 isMoving: false,
-                hp: 120,
-                maxHp: 120,
-                armor: 0,
+                hp: 100,
+                maxHp: 100,
+                armor: m.classId === 'engineer' ? 35 : 0,
                 maxArmor: 100,
                 downed: false,
                 spectating: false,
@@ -247,6 +259,8 @@ export class GameEngine {
                 invulnTimer: 1.5,
                 cash: pStats.startCash,
                 kills: 0,
+                isBot: false,
+                takeoverOriginCallsign: undefined,
               };
             })
         : Array.from({ length: soloBotCount }, (_, bIdx) => {
@@ -306,8 +320,7 @@ export class GameEngine {
     this.playerSyncTimer = 0;
     this.playersFastTimer = 0;
     this.worldSyncTimer = 0;
-    this.playerSyncSeq = 0;
-    this.worldSyncSeq = 0;
+    // 保持发送端 seq 在整次会话内严格单调递增，彻底杜绝跨局 seq 重置导致队友被旧高序号锁死！
     this.lastAppliedWorldSeq = 0;
     this.localPlayerVx = 0;
     this.localPlayerVy = 0;
@@ -526,6 +539,11 @@ export class GameEngine {
     }
     if (isCoop) {
       this.showBanner(I18n.t('bannerCoopStart', { n: squadCount, m: scaling.countMult }), 3.0);
+      if (CoopManager.role === 'client') {
+        CoopManager.sendToHost({ type: 'player_sync', p: this.buildLocalPlayerSync() });
+      } else if (CoopManager.role === 'host') {
+        CoopManager.broadcastToClients({ type: 'world_sync', w: this.buildWorldSyncPayload() });
+      }
     }
     PlatformSDK.gameplayStart();
   }
@@ -2103,11 +2121,13 @@ export class GameEngine {
       this.updateClientWorldVisuals(dt);
       this.updateFX(dt);
 
-      this.flushPendingNetFire(dt);
-      this.playerSyncTimer -= dt;
-      if (this.playerSyncTimer <= 0 && !CoopManager.isCongested()) {
-        this.playerSyncTimer = CoopManager.hasDirectP2P() ? 0.033 : 0.045;
-        CoopManager.sendToHost({ type: 'player_sync', p: this.buildLocalPlayerSync() });
+      if (s.waveState !== 'ended') {
+        this.flushPendingNetFire(dt);
+        this.playerSyncTimer -= dt;
+        if (this.playerSyncTimer <= 0 && !CoopManager.isCongested()) {
+          this.playerSyncTimer = CoopManager.hasDirectP2P() ? 0.033 : 0.045;
+          CoopManager.sendToHost({ type: 'player_sync', p: this.buildLocalPlayerSync() });
+        }
       }
     } else {
       // 单机或房主权威模式：完整物理、多源流场寻路、刷怪与战斗结算
@@ -2158,6 +2178,7 @@ export class GameEngine {
         this.flushPendingNetFire(dt);
         this.flushPendingPeerKillCredits(dt);
         this.checkCoopSquadWipe();
+        if (this.isRunHalted()) return;
         this.worldSyncTimer -= dt;
         this.playersFastTimer -= dt;
         if (!CoopManager.isCongested()) {
@@ -2170,7 +2191,11 @@ export class GameEngine {
             CoopManager.broadcastToClients({ type: 'world_sync', w: this.buildWorldSyncPayload() });
           } else if (this.playersFastTimer <= 0) {
             this.playersFastTimer = pInterval;
-            CoopManager.broadcastToClients({ type: 'players_fast', list: this.buildAllPlayersSync() });
+            CoopManager.broadcastToClients({
+              type: 'players_fast',
+              list: this.buildAllPlayersSync(),
+              mSeq: CoopManager.currentMatchSeq,
+            });
           }
         }
       }
@@ -2326,7 +2351,9 @@ export class GameEngine {
               victory: true,
               tier: s.difficultyTier,
               squadStats,
+              mSeq: CoopManager.currentMatchSeq,
             });
+            CoopManager.markHostMatchEnded();
           }
           this.callbacks.onRunFinished(true, s);
         }
@@ -3309,6 +3336,7 @@ export class GameEngine {
       bullets,
       sfxKey: this.pendingFireSfx,
       evolved: this.pendingFireEvolved,
+      mSeq: CoopManager.currentMatchSeq,
     };
     if (CoopManager.role === 'client') {
       CoopManager.sendToHost(fireMsg);
@@ -4260,6 +4288,7 @@ export class GameEngine {
       if (rec.kills > 0 || rec.bossKills > 0) {
         CoopManager.sendToClient(peerId, {
           type: 'evt_team_reward',
+          mSeq: CoopManager.currentMatchSeq,
           targetId: peerId,
           killCredits: rec.kills,
           bossKills: rec.bossKills > 0 ? rec.bossKills : undefined,
@@ -7449,7 +7478,9 @@ export class GameEngine {
         victory: false,
         tier: s.difficultyTier,
         squadStats,
+        mSeq: CoopManager.currentMatchSeq,
       });
+      CoopManager.markHostMatchEnded();
       this.callbacks.onRunFinished(false, s);
     }
   }
@@ -7987,6 +8018,7 @@ export class GameEngine {
     const activeWep = p.weapons[p.activeSlot] || p.weapons[0];
     return {
       seq: ++this.playerSyncSeq,
+      mSeq: CoopManager.currentMatchSeq,
       peerId: CoopManager.myPeerId,
       slot: s.localSlot,
       callsign: s.localCallsign,
@@ -8024,6 +8056,7 @@ export class GameEngine {
       this.buildLocalPlayerSync(),
       ...s.remotePlayers.map((rp) => ({
         seq: rp.lastSeq,
+        mSeq: CoopManager.currentMatchSeq,
         peerId: rp.peerId,
         slot: rp.slot,
         callsign: rp.callsign,
@@ -8062,6 +8095,7 @@ export class GameEngine {
 
     return {
       seq: ++this.worldSyncSeq,
+      mSeq: CoopManager.currentMatchSeq,
       wave: s.wave,
       waveState: s.waveState,
       intermissionTimer: +s.intermissionTimer.toFixed(1),
@@ -8513,6 +8547,9 @@ export class GameEngine {
   private upsertRemotePlayer(ps: PlayerSyncPayload): void {
     const s = this.state;
     if (!s) return;
+    if (ps.mSeq && CoopManager.currentMatchSeq > 0 && ps.mSeq !== CoopManager.currentMatchSeq) {
+      return;
+    }
     let rp = s.remotePlayers.find((item) => item.peerId === ps.peerId);
     if (!rp) {
       rp = {
@@ -8520,6 +8557,8 @@ export class GameEngine {
         slot: ps.slot,
         callsign: ps.callsign,
         color: ps.color,
+        classId: ps.classId || 'vanguard',
+        isBot: false,
         x: ps.x,
         y: ps.y,
         netTx: ps.x,
@@ -8556,13 +8595,20 @@ export class GameEngine {
       return;
     }
 
-    // 严格拒绝乱序旧包，彻底杜绝队友身位往返瞬移乱跳！
+    // 严格拒绝乱序旧包，彻底杜绝队友身位往返瞬移乱跳；若对端重连刷新重置了序号（差值 > 40）则自动放行接管！
     if (ps.seq && rp.lastSeq && ps.seq < rp.lastSeq) {
-      return;
+      if (rp.lastSeq - ps.seq > 40) {
+        rp.lastSeq = 0;
+      } else {
+        return;
+      }
     }
     if (CoopManager.role === 'host' && ps.seq && rp.lastSeq && ps.seq <= rp.lastSeq) {
       return;
     }
+
+    rp.isBot = false;
+    rp.takeoverOriginCallsign = undefined;
 
     const isFreshSample = !ps.seq || ps.seq > rp.lastSeq;
     if (ps.seq && ps.seq > rp.lastSeq) {
@@ -8625,6 +8671,25 @@ export class GameEngine {
   private handleCoopMessage(msg: CoopNetMessage, _fromPeerId: string): void {
     const s = this.state;
     if (!s || !s.isCoop) return;
+
+    const curMSeq = CoopManager.currentMatchSeq;
+    if (curMSeq > 0) {
+      if (msg.type === 'player_sync' && msg.p.mSeq && msg.p.mSeq !== curMSeq) return;
+      if (msg.type === 'players_fast' && msg.mSeq && msg.mSeq !== curMSeq) return;
+      if (msg.type === 'world_sync' && msg.w.mSeq && msg.w.mSeq !== curMSeq) return;
+      if (
+        (msg.type === 'cmd_fire' ||
+          msg.type === 'cmd_grenade' ||
+          msg.type === 'evt_player_hit' ||
+          msg.type === 'evt_team_reward' ||
+          msg.type === 'evt_player_revived' ||
+          msg.type === 'evt_run_finished') &&
+        msg.mSeq &&
+        msg.mSeq !== curMSeq
+      ) {
+        return;
+      }
+    }
 
     if (msg.type === 'player_sync' && CoopManager.role === 'host') {
       this.upsertRemotePlayer(msg.p);
@@ -8946,6 +9011,7 @@ export class GameEngine {
     if (msg.type === 'evt_run_finished' && CoopManager.role === 'client') {
       if (s.waveState === 'ended') return;
       s.waveState = 'ended';
+      CoopManager.clearMatchSnapshots();
       if (msg.squadStats) {
         s.squadMvpStats = msg.squadStats;
       }

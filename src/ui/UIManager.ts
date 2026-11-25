@@ -245,7 +245,7 @@ export class UIManager {
     this.engine.paused = false;
     this.hudRoot?.remove();
     this.hudRoot = null;
-    this.engine.state = null;
+    this.engine.stopRun();
 
     if (!CoopManager.lobby) {
       PlatformSDK.hideInviteButton();
@@ -2185,8 +2185,13 @@ export class UIManager {
     isFirstTutorial = false,
     difficultyTier: DifficultyTier = 1
   ): void {
+    this.clearPerkKeyHandler();
+    cancelAnimationFrame(this.needleAnimId);
+    this.cleanupKeypadModal?.();
     this.armoryOpen = false;
     this.pauseOpen = false;
+    this.engine.modalPaused = false;
+    this.engine.paused = false;
     this.armoryTab = 'guns';
     this.modalRoot.innerHTML = '';
     SoundFX.setBgmMode('combat');
