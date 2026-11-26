@@ -59,6 +59,7 @@ export class UIManager {
   private hudCache: Record<string, string> = {};
   private coopToast = '';
   private coopCodeDraft = '';
+  private hallFilter: 'all' | 'waiting' | 'ingame' = 'all';
   private cleanupKeypadModal: (() => void) | null = null;
   private calloutStripHideTimer = 0;
   private perkKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -99,8 +100,11 @@ export class UIManager {
         }
       },
       () => {
-        if (!this.engine.state && this.hubTab === 'coop') {
-          this.syncPublicRoomsInHub();
+        if (!this.engine.state) {
+          this.syncCoopTabHallBadge();
+          if (this.hubTab === 'coop') {
+            this.syncPublicRoomsInHub();
+          }
         }
       }
     );
@@ -255,6 +259,7 @@ export class UIManager {
         !CoopManager.lobby.inGame && CoopManager.lobby.members.length < 4
       );
     }
+    CoopManager.ensurePublicDirectoryActive();
 
     const save = SaveManager.get();
     const hasAffordableUpgrade =
@@ -279,10 +284,7 @@ export class UIManager {
               ? this.buildLeaderboardHubView(save)
               : this.buildUpgradesHubView(save);
 
-    const coopCountBadge =
-      CoopManager.lobby && CoopManager.role !== 'offline'
-        ? ` (${CoopManager.lobby.members.length}/4)`
-        : '';
+    const coopCountBadge = `<span id="hub-coop-tab-badge">${this.buildCoopTabBadgeHtml()}</span>`;
 
     const langOptsHtml = LANG_OPTIONS.map(
       (o) => `<option value="${o.code}" ${o.code === I18n.lang ? 'selected' : ''}>🌐 ${o.label}</option>`
@@ -607,13 +609,97 @@ export class UIManager {
     pill.textContent = CoopManager.getNetStatusLabel();
   }
 
-  private buildPublicRoomsRowsHtml(): string {
-    const rooms = CoopManager.getPublicRooms();
-    if (rooms.length === 0) {
-      return `<div class="public-hall-empty">${I18n.t('publicHallEmpty')}</div>`;
+  private buildCoopTabBadgeHtml(): string {
+    if (CoopManager.lobby && CoopManager.role !== 'offline') {
+      return ` (${CoopManager.lobby.members.length}/4)`;
     }
+    const openCount = CoopManager.getPublicRooms().length;
+    if (openCount > 0) {
+      return `<span class="hall-nav-badge">${I18n.t('hallTabRoomsUnit', { n: openCount })}</span>`;
+    }
+    return '';
+  }
+
+  private syncCoopTabHallBadge(): void {
+    const badgeEl = this.modalRoot.querySelector('#hub-coop-tab-badge') as HTMLElement | null;
+    if (badgeEl) {
+      badgeEl.innerHTML = this.buildCoopTabBadgeHtml();
+    }
+  }
+
+  private getStageHallSprite(stageId: string): string {
+    const map: Record<string, string> = {
+      stage_police: './assets/prop_police_car.png',
+      stage_mall: './assets/prop_arcade.png',
+      stage_lab: './assets/prop_cryo_pod.png',
+      stage_hospital: './assets/prop_ambulance.png',
+      stage_harbor: './assets/prop_container.png',
+      stage_subway: './assets/prop_subway_car.png',
+      stage_airbase: './assets/prop_military_truck.png',
+      stage_bunker: './assets/prop_missile_pod.png',
+    };
+    return map[stageId] || './assets/prop_police_car.png';
+  }
+
+  private buildInRoomOtherHallHtml(): string {
+    const lobby = CoopManager.lobby;
+    if (!lobby || CoopManager.role !== 'host' || lobby.members.length !== 1 || lobby.inGame) {
+      return '';
+    }
+    const otherRooms = CoopManager.getPublicRooms();
+    if (otherRooms.length === 0) return '';
+    return `
+      <div class="inroom-other-hall-alert">
+        <span>${I18n.t('hallOtherRoomsBanner', { n: otherRooms.length })}</span>
+        <button type="button" class="btn-cartoon btn-mini btn-yellow" id="btn-switch-to-hall">${I18n.t('hallSwitchToHallBtn')}</button>
+      </div>
+    `;
+  }
+
+  private buildHallFilterBarHtml(allRooms = CoopManager.getPublicRooms()): string {
+    const waitCount = allRooms.filter((r) => !r.inGame).length;
+    const liveCount = allRooms.filter((r) => r.inGame).length;
+    return `
+      <div class="hall-filter-pills">
+        <button type="button" class="hall-filter-btn ${this.hallFilter === 'all' ? 'active' : ''}" data-hall-filter="all">
+          ${I18n.t('hallFilterAll')} <b>${allRooms.length}</b>
+        </button>
+        <button type="button" class="hall-filter-btn ${this.hallFilter === 'waiting' ? 'active' : ''}" data-hall-filter="waiting">
+          ${I18n.t('hallFilterWait')} <b>${waitCount}</b>
+        </button>
+        <button type="button" class="hall-filter-btn ${this.hallFilter === 'ingame' ? 'active' : ''}" data-hall-filter="ingame">
+          ${I18n.t('hallFilterLive')} <b>${liveCount}</b>
+        </button>
+      </div>
+    `;
+  }
+
+  private buildPublicRoomsRowsHtml(): string {
+    const allRooms = CoopManager.getPublicRooms();
+    const rooms =
+      this.hallFilter === 'waiting'
+        ? allRooms.filter((r) => !r.inGame)
+        : this.hallFilter === 'ingame'
+          ? allRooms.filter((r) => r.inGame)
+          : allRooms;
+
+    if (rooms.length === 0) {
+      return `
+        <div class="public-hall-empty-card">
+          <div class="hall-empty-main">
+            <strong>${I18n.t('hallEmptyTitle')}</strong>
+            <p>${I18n.t('hallEmptySub')}</p>
+          </div>
+          <div class="hall-empty-actions">
+            <button type="button" class="btn-cartoon btn-mini btn-green" id="btn-hall-empty-create">${I18n.t('hallCreateRoomBtn')}</button>
+            <button type="button" class="btn-cartoon btn-mini btn-yellow" id="btn-hall-empty-code">⌨️ ${I18n.t('joinCardTitle')}</button>
+          </div>
+        </div>
+      `;
+    }
+
     return rooms
-      .slice(0, 6)
+      .slice(0, 12)
       .map((ad) => {
         const st = STAGES.find((item) => item.id === ad.stageId) || STAGES[0];
         const stName = I18n.stageMeta(st.id, {
@@ -624,19 +710,39 @@ export class UIManager {
           tags: [],
         }).name;
         const stars = DIFFICULTY_TIERS[ad.tier || 1].stars;
+        const modeShort =
+          ad.mode === 'endless' ? I18n.t('hallModeEndlessShort') : I18n.t('hallModeStandardShort');
         const stBadge = ad.inGame
           ? I18n.t('publicRoomInGame', { w: ad.wave, n: ad.memberCount })
           : I18n.t('publicRoomWaiting', { n: ad.memberCount });
+        const hostCls = getAgentClassDef(ad.hostClassId || 'vanguard');
+        const stageIcon = this.getStageHallSprite(ad.stageId);
+        const seatDots = [0, 1, 2, 3]
+          .map((idx) => `<i class="seat-pip ${idx < ad.memberCount ? 'filled' : ''}"></i>`)
+          .join('');
         return `
-          <div class="public-room-row">
-            <div class="pub-room-meta">
-              <strong>👤 ${ad.hostName}</strong>
-              <span class="pub-room-stage">${stars} ${stName}</span>
-              <span class="pub-room-state ${ad.inGame ? 'in-game' : 'waiting'}">${stBadge}</span>
+          <div class="public-room-row public-room-card ${ad.inGame ? 'is-live' : 'is-waiting'}">
+            <div class="pub-room-thumb">
+              <img src="${stageIcon}" alt="" />
+              <span class="pub-room-stars">${stars}</span>
             </div>
-            <button type="button" class="btn-cartoon btn-mini btn-green" data-pub-join="${ad.roomCode}">
-              ${I18n.t('publicJoinBtn')} (${ad.roomCode})
-            </button>
+            <div class="pub-room-meta">
+              <div class="pub-room-top">
+                <strong class="pub-stage-title">${stName}</strong>
+                <span class="pub-mode-chip">${modeShort}</span>
+                <span class="pub-code-chip">#${ad.roomCode}</span>
+              </div>
+              <div class="pub-room-sub">
+                <span class="pub-host-chip"><img src="${hostCls.sprite}" width="16" height="16" alt="" /> ${ad.hostName}</span>
+                <span class="pub-room-state ${ad.inGame ? 'in-game' : 'waiting'}">${stBadge}</span>
+              </div>
+            </div>
+            <div class="pub-room-cta">
+              <div class="pub-seat-pips" title="${ad.memberCount}/4">${seatDots}<span>${ad.memberCount}/4</span></div>
+              <button type="button" class="btn-cartoon btn-mini btn-green pub-join-btn" data-pub-join="${ad.roomCode}">
+                🚀 ${I18n.t('publicJoinBtn')}
+              </button>
+            </div>
           </div>
         `;
       })
@@ -644,10 +750,43 @@ export class UIManager {
   }
 
   private syncPublicRoomsInHub(): void {
+    const allRooms = CoopManager.getPublicRooms();
+    const onlinePill = this.modalRoot.querySelector('#hall-online-pill') as HTMLElement | null;
+    if (onlinePill) {
+      onlinePill.textContent = I18n.t('hallOnlineCount', { n: allRooms.length });
+      onlinePill.classList.toggle('has-rooms', allRooms.length > 0);
+    }
+    const filterWrap = this.modalRoot.querySelector('#hall-filter-wrap') as HTMLElement | null;
+    if (filterWrap) {
+      filterWrap.innerHTML = this.buildHallFilterBarHtml(allRooms);
+      this.bindHallFilterButtons();
+    }
     const listBody = this.modalRoot.querySelector('#coop-public-rooms-body') as HTMLElement | null;
-    if (!listBody) return;
-    listBody.innerHTML = this.buildPublicRoomsRowsHtml();
-    this.bindPublicRoomJoinButtons();
+    if (listBody) {
+      listBody.innerHTML = this.buildPublicRoomsRowsHtml();
+      this.bindPublicRoomJoinButtons();
+    }
+    const inRoomBar = this.modalRoot.querySelector('#inroom-other-hall-bar') as HTMLElement | null;
+    if (inRoomBar) {
+      inRoomBar.innerHTML = this.buildInRoomOtherHallHtml();
+      const swBtn = inRoomBar.querySelector('#btn-switch-to-hall') as HTMLButtonElement | null;
+      if (swBtn) {
+        this.bindModalTap(swBtn, () => {
+          this.coopToast = '';
+          CoopManager.disconnect();
+        });
+      }
+    }
+  }
+
+  private bindHallFilterButtons(): void {
+    this.modalRoot.querySelectorAll<HTMLButtonElement>('[data-hall-filter]').forEach((btn) => {
+      this.bindModalTap(btn, () => {
+        this.hallFilter = (btn.dataset.hallFilter as 'all' | 'waiting' | 'ingame') || 'all';
+        SoundFX.xp();
+        this.syncPublicRoomsInHub();
+      });
+    });
   }
 
   private bindPublicRoomJoinButtons(): void {
@@ -664,6 +803,20 @@ export class UIManager {
         CoopManager.joinRoomByCode(rc);
       });
     });
+    const emptyCreateBtn = this.modalRoot.querySelector('#btn-hall-empty-create') as HTMLButtonElement | null;
+    if (emptyCreateBtn) {
+      this.bindModalTap(emptyCreateBtn, () => {
+        if (callInp) CoopManager.setCallsign(callInp.value);
+        this.coopToast = '';
+        CoopManager.createHostRoom(STAGES[0].id, this.selectedMode, true);
+      });
+    }
+    const emptyCodeBtn = this.modalRoot.querySelector('#btn-hall-empty-code') as HTMLButtonElement | null;
+    if (emptyCodeBtn) {
+      this.bindModalTap(emptyCodeBtn, () => {
+        this.openRoomCodeKeypadModal();
+      });
+    }
   }
 
   private openInstallAppGuide(): void {
@@ -1504,47 +1657,51 @@ export class UIManager {
     if (!lobby || CoopManager.role === 'offline') {
       CoopManager.ensurePublicDirectoryActive();
       const currentDraft = (this.coopCodeDraft || CoopManager.lastJoinCode || '').toUpperCase().slice(0, 5);
+      const allRooms = CoopManager.getPublicRooms();
       return `
         <div class="coop-wrap">
-          ${callsignBar}
+          <div class="coop-top-strip">
+            <div class="coop-callsign-left">
+              <span>${I18n.t('callsignLabel')}</span>
+              <input id="coop-callsign-inp" class="coop-inp callsign-inp" type="text" maxlength="10" enterkeyhint="done" value="${callsign}" placeholder="${I18n.t('callsignPlaceholder')}" />
+              <button class="btn-cartoon btn-mini btn-gray" id="btn-rand-callsign" type="button" title="Random Callsign">${I18n.t('randCallsignBtn')}</button>
+              <button class="btn-cartoon btn-mini btn-blue" id="btn-save-callsign" type="button">${I18n.t('saveCallsign')}</button>
+            </div>
+            <div class="coop-code-mini-bar">
+              <button type="button" id="coop-code-inp" class="coop-inp code-inp code-trigger-btn ${currentDraft ? 'has-val' : ''}" data-code="${currentDraft}" ${status === 'connecting' ? 'disabled' : ''}>
+                <span class="code-trigger-val">${currentDraft || I18n.t('codeTapPlaceholder')}</span>
+                <span class="code-trigger-kbd">⌨️</span>
+              </button>
+              <button type="button" class="btn-cartoon btn-mini btn-blue coop-paste-quick-btn" id="btn-coop-paste-join" ${status === 'connecting' ? 'disabled' : ''}>
+                ${I18n.t('pasteCodeQuickBtn')}
+              </button>
+              <button type="button" class="btn-cartoon btn-mini btn-yellow" id="btn-coop-join" ${status === 'connecting' ? 'disabled' : ''}>
+                ${I18n.t('joinRoomBtn')}
+              </button>
+            </div>
+          </div>
           ${statusBanner}
-          <div class="public-hall-box" id="coop-public-rooms-box">
+          <div class="public-hall-box is-hero-hall" id="coop-public-rooms-box">
             <div class="public-hall-head">
-              <strong>${I18n.t('publicHallTitle')}</strong>
+              <div class="public-hall-title-group">
+                <strong>${I18n.t('hallPanelTitle')}</strong>
+                <span class="hall-online-pill ${allRooms.length > 0 ? 'has-rooms' : ''}" id="hall-online-pill">${I18n.t('hallOnlineCount', { n: allRooms.length })}</span>
+                <div id="hall-filter-wrap">${this.buildHallFilterBarHtml(allRooms)}</div>
+              </div>
+              <div class="public-hall-actions">
+                <button class="btn-cartoon btn-mini btn-gray" id="btn-hall-refresh" type="button" ${status === 'connecting' ? 'disabled' : ''}>
+                  ${I18n.t('hallRefreshBtn')}
+                </button>
+                <button class="btn-cartoon btn-mini btn-yellow" id="btn-coop-quick-match" type="button" ${status === 'connecting' ? 'disabled' : ''}>
+                  ${I18n.t('quickMatchBtn')}
+                </button>
+                <button class="btn-cartoon btn-mini btn-green" id="btn-coop-create" type="button" ${status === 'connecting' ? 'disabled' : ''}>
+                  ${I18n.t('hallCreateRoomBtn')}
+                </button>
+              </div>
             </div>
             <div class="public-hall-list" id="coop-public-rooms-body">
               ${this.buildPublicRoomsRowsHtml()}
-            </div>
-          </div>
-          <div class="coop-entry-grid">
-            <div class="coop-panel-card">
-              <h3>${I18n.t('createCardTitle')}</h3>
-              <p>${I18n.t('createCardDesc')}</p>
-              <div class="coop-create-btn-row">
-                <button class="btn-cartoon btn-yellow" id="btn-coop-quick-match" type="button" ${status === 'connecting' ? 'disabled' : ''}>
-                  ${I18n.t('quickMatchBtn')}
-                </button>
-                <button class="btn-cartoon btn-green" id="btn-coop-create" type="button" ${status === 'connecting' ? 'disabled' : ''}>
-                  ${I18n.t('createRoomBtn')}
-                </button>
-              </div>
-            </div>
-
-            <div class="coop-panel-card">
-              <h3>${I18n.t('joinCardTitle')}</h3>
-              <p>${I18n.t('joinCardDesc')}</p>
-              <div class="coop-join-row">
-                <button type="button" id="coop-code-inp" class="coop-inp code-inp code-trigger-btn ${currentDraft ? 'has-val' : ''}" data-code="${currentDraft}" ${status === 'connecting' ? 'disabled' : ''}>
-                  <span class="code-trigger-val">${currentDraft || I18n.t('codeTapPlaceholder')}</span>
-                  <span class="code-trigger-kbd">⌨️</span>
-                </button>
-                <button type="button" class="btn-cartoon btn-mini btn-blue coop-paste-quick-btn" id="btn-coop-paste-join" ${status === 'connecting' ? 'disabled' : ''}>
-                  ${I18n.t('pasteCodeQuickBtn')}
-                </button>
-                <button class="btn-cartoon btn-yellow" id="btn-coop-join" ${status === 'connecting' ? 'disabled' : ''}>
-                  ${I18n.t('joinRoomBtn')}
-                </button>
-              </div>
             </div>
           </div>
           ${rulesStrip}
@@ -1680,6 +1837,7 @@ export class UIManager {
       <div class="coop-wrap in-room">
         ${callsignBar}
         ${statusBanner}
+        <div id="inroom-other-hall-bar">${this.buildInRoomOtherHallHtml()}</div>
 
         <div class="coop-lobby-box">
           <div class="coop-lobby-head">
@@ -1695,7 +1853,7 @@ export class UIManager {
               }
               <span class="coop-net-pill ${CoopManager.hasDirectP2P() ? 'is-p2p' : ''}">${CoopManager.getNetStatusLabel()}</span>
             </div>
-            <button class="btn-cartoon btn-mini btn-gray" id="btn-coop-leave" type="button">${I18n.t('leaveRoomBtn')}</button>
+            <button class="btn-cartoon btn-mini btn-gray" id="btn-coop-leave" type="button">${I18n.t('hallBackBtn')}</button>
           </div>
 
           <div class="coop-slots-grid">${slotsHtml}</div>
@@ -2045,6 +2203,25 @@ export class UIManager {
       });
     }
 
+    const hallRefreshBtn = this.modalRoot.querySelector('#btn-hall-refresh') as HTMLButtonElement | null;
+    if (hallRefreshBtn) {
+      this.bindModalTap(hallRefreshBtn, () => {
+        SoundFX.xp();
+        CoopManager.refreshPublicDirectory();
+        this.coopToast = I18n.t('hallRefreshedToast');
+        this.showHomeHub();
+      });
+    }
+
+    const switchToHallBtn = this.modalRoot.querySelector('#btn-switch-to-hall') as HTMLButtonElement | null;
+    if (switchToHallBtn) {
+      this.bindModalTap(switchToHallBtn, () => {
+        this.coopToast = '';
+        CoopManager.disconnect();
+      });
+    }
+
+    this.bindHallFilterButtons();
     this.bindPublicRoomJoinButtons();
 
     const createBtn = this.modalRoot.querySelector('#btn-coop-create') as HTMLButtonElement | null;

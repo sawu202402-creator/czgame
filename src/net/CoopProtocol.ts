@@ -73,6 +73,7 @@ export interface LobbyState {
 export interface PublicRoomAd {
   roomCode: string;
   hostName: string;
+  hostClassId?: AgentClassId;
   stageId: string;
   mode: GameMode;
   tier: DifficultyTier;

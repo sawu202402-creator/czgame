@@ -14,6 +14,7 @@ import { MqttWsRoomBus, RoomWireEnvelope } from './MqttWsRoomBus';
 const ROOM_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CALLSIGN_KEY = 'czgame_coop_callsign_v1';
 const PUBLIC_HALL_ROOM_ID = '__PUBLIC_HALL__';
+const PUBLIC_ROOM_TTL_MS = 45_000;
 
 type DirBusPayload =
   | { type: 'dir_query' }
@@ -104,12 +105,21 @@ class CoopNetworkManager {
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('pagehide', () => {
+        if (this.role === 'host' && this.lobby) {
+          this.dirBus?.send('*', { type: 'dir_close', roomCode: this.lobby.roomCode });
+        }
         if (this.bus && this.role !== 'offline') {
           this.bus.send('*', { type: '__bye' });
         }
       });
       const onForegroundWake = () => {
         if (typeof document !== 'undefined' && document.hidden) return;
+        this.dirBus?.wakeAndCheckLinks();
+        if (this.role === 'host' && this.lobby && this.lobby.isPublic !== false && this.lobby.members.length < 4) {
+          this.publishHostDirectoryState();
+        } else {
+          this.dirBus?.send('*', { type: 'dir_query' });
+        }
         if (!this.bus || this.role === 'offline') return;
         const now = performance.now();
         // 切回前台时给予心跳宽限期，防止手机切微信发链接归来瞬间误判超时踢人！
@@ -159,6 +169,7 @@ class CoopNetworkManager {
     me.classId = classId;
     if (this.role === 'host') {
       this.broadcastLobby();
+      this.publishHostDirectoryState();
     } else if (this.role === 'client') {
       this.sendToHost({
         type: 'ready_toggle',
@@ -175,15 +186,16 @@ class CoopNetworkManager {
       this.dirBus.wakeAndCheckLinks();
       return;
     }
+    const syncHallOnLinkReady = () => {
+      this.dirBus?.send('*', { type: 'dir_query' });
+      if (this.role === 'host' && this.lobby) {
+        this.publishHostDirectoryState();
+      }
+    };
     this.dirBus = new MqttWsRoomBus<DirBusPayload>(
       this.dirPeerId,
       PUBLIC_HALL_ROOM_ID,
-      () => {
-        this.dirBus?.send('*', { type: 'dir_query' });
-        if (this.role === 'host' && this.lobby) {
-          this.publishHostDirectoryState();
-        }
-      },
+      syncHallOnLinkReady,
       (env) => {
         const msg = env.msg;
         if (!msg || typeof msg !== 'object') return;
@@ -214,7 +226,8 @@ class CoopNetworkManager {
       },
       () => {
         // silent fallback if public hall unreachable
-      }
+      },
+      syncHallOnLinkReady
     );
 
     window.clearInterval(this.dirAnnounceTimer);
@@ -222,7 +235,7 @@ class CoopNetworkManager {
       const now = Date.now();
       let pruned = false;
       for (const [rc, ad] of Array.from(this.publicRoomMap.entries())) {
-        if (now - ad.updatedAt > 12_500) {
+        if (now - ad.updatedAt > PUBLIC_ROOM_TTL_MS) {
           this.publicRoomMap.delete(rc);
           pruned = true;
         }
@@ -233,14 +246,35 @@ class CoopNetworkManager {
       if (this.role === 'host' && this.lobby && this.lobby.isPublic !== false && this.lobby.members.length < 4) {
         this.publishHostDirectoryState();
       }
-    }, 3200);
+    }, 3000);
+  }
+
+  public refreshPublicDirectory(): void {
+    this.ensurePublicDirectoryActive();
+    const now = Date.now();
+    for (const [rc, ad] of Array.from(this.publicRoomMap.entries())) {
+      if (now - ad.updatedAt > PUBLIC_ROOM_TTL_MS) {
+        this.publicRoomMap.delete(rc);
+      }
+    }
+    this.dirBus?.send('*', { type: 'dir_query' });
+    if (this.role === 'host' && this.lobby && this.lobby.isPublic !== false && this.lobby.members.length < 4) {
+      this.publishHostDirectoryState();
+    }
+    this.onPublicRoomsChangeCb?.();
+  }
+
+  public removeStalePublicRoom(roomCode: string): void {
+    if (this.publicRoomMap.delete(roomCode)) {
+      this.onPublicRoomsChangeCb?.();
+    }
   }
 
   public getPublicRooms(): PublicRoomAd[] {
     const now = Date.now();
     const list: PublicRoomAd[] = [];
     for (const [rc, ad] of this.publicRoomMap.entries()) {
-      if (now - ad.updatedAt > 12_500) {
+      if (now - ad.updatedAt > PUBLIC_ROOM_TTL_MS) {
         this.publicRoomMap.delete(rc);
         continue;
       }
@@ -269,6 +303,7 @@ class CoopNetworkManager {
       ad: {
         roomCode: this.lobby.roomCode,
         hostName: hostMem?.callsign || this.getCallsign(),
+        hostClassId: hostMem?.classId || SaveManager.get().selectedClass,
         stageId: this.lobby.stageId,
         mode: this.lobby.mode,
         tier: this.lobby.tier || 1,
@@ -470,6 +505,8 @@ class CoopNetworkManager {
         PlatformSDK.showInviteButton(code, true);
         this.startHeartbeatLoop();
         this.publishHostDirectoryState();
+        window.setTimeout(() => this.publishHostDirectoryState(), 550);
+        window.setTimeout(() => this.publishHostDirectoryState(), 1600);
         this.notifyLobby();
       },
       (env) => this.handleHostEnvelope(env),
@@ -654,6 +691,7 @@ class CoopNetworkManager {
           // 留足约 16.5s 寻房窗口，兼容房主刚切去微信发链接尚未切回浏览器的等待期
           if (attempts >= 22) {
             window.clearInterval(this.joinRetryTimer);
+            this.removeStalePublicRoom(code);
             this.status = 'error';
             this.errorMsg = I18n.t('errRoomNotFound', { code });
             this.notifyLobby();
@@ -725,6 +763,7 @@ class CoopNetworkManager {
     if (msg.type === 'join_ack') {
       window.clearInterval(this.joinRetryTimer);
       if (!msg.ok || !msg.lobby) {
+        if (this.lastJoinCode) this.removeStalePublicRoom(this.lastJoinCode);
         this.status = 'error';
         this.errorMsg = msg.reason || 'Failed to join';
         this.notifyLobby();
