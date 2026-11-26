@@ -60,6 +60,7 @@ export class UIManager {
   private coopToast = '';
   private coopCodeDraft = '';
   private hallFilter: 'all' | 'waiting' | 'ingame' = 'all';
+  private hudStatsOpen = false;
   private cleanupKeypadModal: (() => void) | null = null;
   private calloutStripHideTimer = 0;
   private perkKeyHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -136,6 +137,16 @@ export class UIManager {
       this.hubTab = 'coop';
       setTimeout(() => CoopManager.createHostRoom(STAGES[0].id, this.selectedMode), 60);
     }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Tab' && this.engine.state && this.engine.state.waveState !== 'ended') {
+        if (!this.pauseOpen && !this.armoryOpen) {
+          e.preventDefault();
+          this.hudStatsOpen = !this.hudStatsOpen;
+          this.syncHUD();
+        }
+      }
+    });
   }
 
   private getAgentRankTitle(level: number): string {
@@ -243,6 +254,7 @@ export class UIManager {
     SoundFX.setBgmMode('hub');
     document.body.classList.remove('pc-combat-cursor');
     this.ftue = null;
+    this.hudStatsOpen = false;
     this.armoryOpen = false;
     this.pauseOpen = false;
     this.engine.modalPaused = false;
@@ -2365,6 +2377,7 @@ export class UIManager {
     this.clearPerkKeyHandler();
     cancelAnimationFrame(this.needleAnimId);
     this.cleanupKeypadModal?.();
+    this.hudStatsOpen = false;
     this.armoryOpen = false;
     this.pauseOpen = false;
     this.engine.modalPaused = false;
@@ -2424,7 +2437,9 @@ export class UIManager {
             <span class="sector-chip" id="hud-sector-chip" style="display:none"></span>
           </div>
           <div class="relic-row" id="hud-relics"></div>
+          <button class="hud-my-stats-pill" id="hud-my-stats" type="button"></button>
           <div class="hud-squad-list" id="hud-squad-list"></div>
+          <div class="hud-stats-drawer" id="hud-stats-drawer" style="display:none"></div>
 
           <div class="hud-ftue-card" id="hud-ftue-card" style="display:none">
             <div class="ftue-head">
@@ -2605,6 +2620,12 @@ export class UIManager {
       if (this.engine.fundNextLockedDoorRemotely(100)) {
         this.syncHUD();
       }
+    });
+
+    const myStatsBtn = hud.querySelector('#hud-my-stats') as HTMLButtonElement;
+    this.bindCombatTap(myStatsBtn, () => {
+      this.hudStatsOpen = !this.hudStatsOpen;
+      this.syncHUD();
     });
 
     const sqListEl = hud.querySelector('#hud-squad-list') as HTMLElement;
@@ -2871,6 +2892,108 @@ export class UIManager {
     this.renderPauseMenu();
   }
 
+  private getLivePersonalCombatSummary(s: RunSnapshot) {
+    const extraRooms = this.engine.getUnlockedExtraRoomsCount();
+    const activeWep = s.player.weapons[s.player.activeSlot] || s.player.weapons[0];
+    const mBonuses = getWeaponMasteryBonuses(SaveManager.getWeaponMastery(activeWep.defId));
+    const dmgPct = Math.round(
+      (s.modifiers.damageMult * mBonuses.damageMult * (1 + extraRooms * 0.1) - 1) * 100
+    );
+    const rofPct = Math.round(
+      (s.modifiers.fireRateMult * (s.powerUpTimers.overdrive > 0 ? 1.45 : 1) - 1) * 100
+    );
+    const critPct = Math.min(95, Math.round((s.modifiers.critChance + mBonuses.bonusCrit) * 100));
+    const spdPct = Math.round((s.modifiers.moveSpeedMult - 1) * 100);
+    const rldPct = Math.round((1 / Math.max(0.25, s.modifiers.reloadMult) - 1) * 100);
+    const pierceBonus = s.modifiers.extraPierce + mBonuses.bonusPierce;
+    const myKills = s.isCoop ? s.personalKills : s.kills;
+    const myMvp = this.engine.getPlayerMvpCounters(CoopManager.myPeerId);
+    return {
+      dmgPct,
+      rofPct,
+      critPct,
+      spdPct,
+      rldPct,
+      pierceBonus,
+      myKills,
+      myMvp,
+    };
+  }
+
+  private buildLiveStatsDrawerHtml(s: RunSnapshot): string {
+    const st = this.getLivePersonalCombatSummary(s);
+    const fmtPct = (v: number) => `${v >= 0 ? '+' : ''}${v}%`;
+
+    const allPlayers = [
+      {
+        peerId: CoopManager.myPeerId,
+        callsign: s.localCallsign || 'Agent',
+        color: SQUAD_SLOTS[s.localSlot]?.color || '#38bdf8',
+        isMe: true,
+        cash: Math.round(s.cash),
+        kills: st.myKills,
+        revives: st.myMvp.revives,
+        repairs: st.myMvp.repairs,
+        doorFunded: st.myMvp.doorFunded,
+      },
+      ...s.remotePlayers.map((rp) => {
+        const c = this.engine.getPlayerMvpCounters(rp.peerId);
+        return {
+          peerId: rp.peerId,
+          callsign: rp.callsign,
+          color: rp.color,
+          isMe: false,
+          cash: Math.round(rp.cash),
+          kills: rp.kills,
+          revives: rp.revives ?? c.revives,
+          repairs: rp.repairs ?? c.repairs,
+          doorFunded: rp.doorFunded ?? c.doorFunded,
+        };
+      }),
+    ].sort((a, b) => b.kills - a.kills);
+
+    const boardHtml =
+      allPlayers.length > 1 || s.isCoop
+        ? `
+          <div class="live-squad-mini-table">
+            <div class="lst-row lst-head">
+              <span>${I18n.t('hudBoardAgent')}</span>
+              <span>${I18n.t('hudBoardCash')}</span>
+              <span>${I18n.t('hudBoardKills')}</span>
+              <span>${I18n.t('hudBoardTeam')}</span>
+            </div>
+            ${allPlayers
+              .map(
+                (pl) => `
+                <div class="lst-row ${pl.isMe ? 'is-me' : ''}">
+                  <span class="lst-name"><i class="sq-dot" style="background:${pl.color}"></i>${pl.callsign}${pl.isMe ? `(${I18n.t('hudMyStatsTag')})` : ''}</span>
+                  <span class="lst-cash">$${pl.cash}</span>
+                  <span class="lst-kills">💀${pl.kills}</span>
+                  <span class="lst-sup">💉${pl.revives}·🔨${pl.repairs}·🚪$${pl.doorFunded}</span>
+                </div>
+              `
+              )
+              .join('')}
+          </div>
+        `
+        : '';
+
+    return `
+      <div class="live-stats-head">
+        <strong>${I18n.t('hudStatsPanelTitle')}</strong>
+      </div>
+      <div class="live-mods-grid">
+        <span><em>${I18n.t('hudStatDmg')}</em><b>${fmtPct(st.dmgPct)}</b></span>
+        <span><em>${I18n.t('hudStatFire')}</em><b>${fmtPct(st.rofPct)}</b></span>
+        <span><em>${I18n.t('hudStatCrit')}</em><b>${st.critPct}%</b></span>
+        <span><em>${I18n.t('hudStatSpd')}</em><b>${fmtPct(st.spdPct)}</b></span>
+        <span><em>${I18n.t('hudStatReload')}</em><b>${fmtPct(st.rldPct)}</b></span>
+        <span><em>${I18n.t('hudStatPierce')}</em><b>+${st.pierceBonus}</b></span>
+      </div>
+      ${boardHtml}
+    `;
+  }
+
   private renderPauseMenu(): void {
     const s = this.engine.state;
     if (!s) return;
@@ -2879,12 +3002,17 @@ export class UIManager {
     const musicMuted = SoundFX.isMusicMuted();
     const fsSupported = this.isFullscreenSupported();
     const fsActive = this.isFullscreenActive();
+    const myKills = s.isCoop ? s.personalKills : s.kills;
+    const pauseSubTxt = s.isCoop
+      ? I18n.t('pauseCoopSub', { w: s.wave, mk: myKills, k: s.kills, lv: s.battleLevel })
+      : I18n.t('pauseSub', { w: s.wave, k: s.kills, lv: s.battleLevel });
 
     this.modalRoot.innerHTML = `
       <div class="popup-backdrop" id="pause-backdrop">
         <div class="popup-box compact-modal">
           <h2>${I18n.t('pauseTitle')}</h2>
-          <p class="popup-sub">${I18n.t('pauseSub', { w: s.wave, k: s.kills, lv: s.battleLevel })}</p>
+          <p class="popup-sub">${pauseSubTxt}</p>
+          <div class="pause-live-stats-wrap">${this.buildLiveStatsDrawerHtml(s)}</div>
           <div class="pause-btn-stack">
             <button class="btn-cartoon btn-green" id="btn-resume">${I18n.t('resumeBtn')}</button>
             <button class="btn-cartoon ${autoOn ? 'btn-blue' : 'btn-gray'}" id="btn-toggle-auto">
@@ -3489,6 +3617,30 @@ export class UIManager {
       }
     });
 
+    const myLive = this.getLivePersonalCombatSummary(s);
+    const mySlotColor = SQUAD_SLOTS[s.localSlot]?.color || '#38bdf8';
+    const myStatsSig = `${I18n.lang}:${s.isCoop ? 1 : 0}:${myLive.myKills}:${s.kills}:${myLive.dmgPct}:${myLive.critPct}:${myLive.myMvp.revives}:${myLive.myMvp.repairs}:${myLive.myMvp.doorFunded}:${this.hudStatsOpen ? 1 : 0}`;
+    setIfChanged('myStatsHud', myStatsSig, () => {
+      const myEl = this.hudRoot!.querySelector('#hud-my-stats') as HTMLButtonElement;
+      const killsTxt = s.isCoop ? `${myLive.myKills}/${s.kills}` : `${myLive.myKills}`;
+      const dmgTxt = `${myLive.dmgPct >= 0 ? '+' : ''}${myLive.dmgPct}%`;
+      const supHtml = [
+        myLive.myMvp.revives > 0 ? `<span>💉${myLive.myMvp.revives}</span>` : '',
+        myLive.myMvp.repairs > 0 ? `<span>🔨${myLive.myMvp.repairs}</span>` : '',
+        myLive.myMvp.doorFunded > 0 ? `<span>🚪$${myLive.myMvp.doorFunded}</span>` : '',
+      ].join('');
+      myEl.classList.toggle('is-open', this.hudStatsOpen);
+      myEl.innerHTML = `
+        <span class="sq-dot" style="background:${mySlotColor}"></span>
+        <span class="my-stat-tag">${I18n.t('hudMyStatsTag')}</span>
+        <span class="my-stat-kills">💀${killsTxt}</span>
+        <span class="my-stat-buff">⚔️${dmgTxt}</span>
+        <span class="my-stat-buff">💥${myLive.critPct}%</span>
+        ${supHtml}
+        <span class="my-stat-caret">${this.hudStatsOpen ? '▴' : '▾'}</span>
+      `;
+    });
+
     const canGift100 = s.isCoop && s.cash >= 100 ? 1 : 0;
     const squadSig =
       s.remotePlayers.length > 0
@@ -3496,7 +3648,7 @@ export class UIManager {
           s.remotePlayers
             .map(
               (rp) =>
-                `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}:${rp.kills}:${rp.isBot ? 1 : 0}`
+                `${rp.peerId}:${rp.callsign}:${rp.hp}/${rp.maxHp}:${rp.downed ? 1 : 0}:${rp.spectating ? 1 : 0}:${Math.ceil(rp.bleedoutTimer)}:${rp.cash}:${rp.kills}:${rp.revives || 0}:${rp.repairs || 0}:${rp.doorFunded || 0}:${rp.isBot ? 1 : 0}`
             )
             .join('|')
         : '';
@@ -3514,7 +3666,7 @@ export class UIManager {
             : rp.downed
               ? I18n.t('squadSOS', { s: Math.ceil(rp.bleedoutTimer) })
               : rp.isBot
-                ? I18n.t('botRoleTag')
+                ? `${I18n.t('botRoleTag')} · 💀${rp.kills}`
                 : `$${rp.cash} · 💀${rp.kills}`;
           const giftBtnHtml =
             s.isCoop && !rp.isBot && !rp.spectating
@@ -3531,6 +3683,19 @@ export class UIManager {
           `;
         })
         .join('');
+    });
+
+    const drawerSig = this.hudStatsOpen
+      ? `${myStatsSig}|${Math.round(s.cash)}|${myLive.rofPct}|${myLive.spdPct}|${myLive.rldPct}|${myLive.pierceBonus}|${squadSig}`
+      : 'closed';
+    setIfChanged('statsDrawer', drawerSig, () => {
+      const drEl = this.hudRoot!.querySelector('#hud-stats-drawer') as HTMLElement;
+      if (!this.hudStatsOpen) {
+        drEl.style.display = 'none';
+        return;
+      }
+      drEl.style.display = 'flex';
+      drEl.innerHTML = this.buildLiveStatsDrawerHtml(s);
     });
 
     const readyTrap = this.engine.getNearestReadyDoorTrap();

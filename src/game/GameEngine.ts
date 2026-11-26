@@ -4233,18 +4233,35 @@ export class GameEngine {
     this.killCreditFlushTimer -= dt;
     if (this.killCreditFlushTimer > 0) return;
     this.killCreditFlushTimer = 0.18;
+    const s = this.state;
     for (const [peerId, rec] of Array.from(this.pendingPeerKillCredits.entries())) {
       this.pendingPeerKillCredits.delete(peerId);
       if (rec.kills > 0 || rec.bossKills > 0) {
+        const rp = s?.remotePlayers.find((r) => r.peerId === peerId);
         CoopManager.sendToClient(peerId, {
           type: 'evt_team_reward',
           mSeq: CoopManager.currentMatchSeq,
           targetId: peerId,
           killCredits: rec.kills,
+          totalPersonalKills: rp ? rp.kills : undefined,
           bossKills: rec.bossKills > 0 ? rec.bossKills : undefined,
         });
       }
     }
+  }
+
+  public getPlayerMvpCounters(peerId = CoopManager.myPeerId): {
+    revives: number;
+    repairs: number;
+    doorFunded: number;
+  } {
+    return (
+      this.peerMvpCounters.get(peerId) || {
+        revives: 0,
+        repairs: 0,
+        doorFunded: 0,
+      }
+    );
   }
 
   private bumpPeerMvp(peerId: string, field: 'revives' | 'repairs' | 'doorFunded', amount = 1): void {
@@ -7997,6 +8014,7 @@ export class GameEngine {
       invuln: p.invulnTimer > 0,
       cash: Math.round(s.cash),
       kills: s.isCoop ? s.personalKills : s.kills,
+      ...this.getPlayerMvpCounters(CoopManager.myPeerId),
     };
   }
 
@@ -8004,38 +8022,44 @@ export class GameEngine {
     const s = this.state!;
     return [
       this.buildLocalPlayerSync(),
-      ...s.remotePlayers.map((rp) => ({
-        seq: rp.lastSeq,
-        mSeq: CoopManager.currentMatchSeq,
-        peerId: rp.peerId,
-        slot: rp.slot,
-        callsign: rp.callsign,
-        color: rp.color,
-        classId: rp.classId,
-        x: Math.round(rp.netTx * 10) / 10,
-        y: Math.round(rp.netTy * 10) / 10,
-        vx: Math.round(rp.vx),
-        vy: Math.round(rp.vy),
-        angle: +rp.netAngle.toFixed(2),
-        legAngle: +rp.legAngle.toFixed(2),
-        walkPhase: +rp.walkPhase.toFixed(2),
-        isMoving: rp.isMoving,
-        hp: Math.round(rp.hp),
-        maxHp: Math.round(rp.maxHp),
-        armor: Math.round(rp.armor),
-        downed: rp.downed,
-        spectating: rp.spectating,
-        bleedoutTimer: +rp.bleedoutTimer.toFixed(1),
-        reviveProgress: +rp.reviveProgress.toFixed(2),
-        activeWepId: rp.activeWepId,
-        evolved: rp.evolved,
-        muzzleFlash: rp.muzzleFlashTimer > 0,
-        recoilOffset: +rp.recoilOffset.toFixed(1),
-        repairProgress: +rp.repairProgress.toFixed(2),
-        invuln: rp.invulnTimer > 0,
-        cash: Math.round(rp.cash),
-        kills: rp.kills,
-      })),
+      ...s.remotePlayers.map((rp) => {
+        const mvp = this.getPlayerMvpCounters(rp.peerId);
+        return {
+          seq: rp.lastSeq,
+          mSeq: CoopManager.currentMatchSeq,
+          peerId: rp.peerId,
+          slot: rp.slot,
+          callsign: rp.callsign,
+          color: rp.color,
+          classId: rp.classId,
+          x: Math.round(rp.netTx * 10) / 10,
+          y: Math.round(rp.netTy * 10) / 10,
+          vx: Math.round(rp.vx),
+          vy: Math.round(rp.vy),
+          angle: +rp.netAngle.toFixed(2),
+          legAngle: +rp.legAngle.toFixed(2),
+          walkPhase: +rp.walkPhase.toFixed(2),
+          isMoving: rp.isMoving,
+          hp: Math.round(rp.hp),
+          maxHp: Math.round(rp.maxHp),
+          armor: Math.round(rp.armor),
+          downed: rp.downed,
+          spectating: rp.spectating,
+          bleedoutTimer: +rp.bleedoutTimer.toFixed(1),
+          reviveProgress: +rp.reviveProgress.toFixed(2),
+          activeWepId: rp.activeWepId,
+          evolved: rp.evolved,
+          muzzleFlash: rp.muzzleFlashTimer > 0,
+          recoilOffset: +rp.recoilOffset.toFixed(1),
+          repairProgress: +rp.repairProgress.toFixed(2),
+          invuln: rp.invulnTimer > 0,
+          cash: Math.round(rp.cash),
+          kills: rp.kills,
+          revives: mvp.revives,
+          repairs: mvp.repairs,
+          doorFunded: mvp.doorFunded,
+        };
+      }),
     ];
   }
 
@@ -8482,16 +8506,35 @@ export class GameEngine {
       };
     });
 
-    // 同步所有队友状态（含本机被救援进度）
+    // 同步所有队友状态（含本机被救援进度与实时个人战绩计数）
     for (const ps of w.players) {
       if (ps.peerId === CoopManager.myPeerId) {
-        if (s.player.downed) {
-          s.player.reviveProgress = ps.reviveProgress;
-        }
+        this.applyAuthoritativeSelfStatsFromHost(ps);
         continue;
       }
       this.upsertRemotePlayer(ps);
     }
+  }
+
+  private applyAuthoritativeSelfStatsFromHost(ps: PlayerSyncPayload): void {
+    const s = this.state;
+    if (!s || CoopManager.role !== 'client') return;
+    if (ps.mSeq && CoopManager.currentMatchSeq > 0 && ps.mSeq !== CoopManager.currentMatchSeq) {
+      return;
+    }
+    if (s.player.downed) {
+      s.player.reviveProgress = ps.reviveProgress;
+    }
+    if (ps.kills > s.personalKills) {
+      const gained = ps.kills - s.personalKills;
+      s.personalKills = ps.kills;
+      this.applyLocalKillPerks(gained);
+    }
+    this.peerMvpCounters.set(CoopManager.myPeerId, {
+      revives: ps.revives || 0,
+      repairs: ps.repairs || 0,
+      doorFunded: ps.doorFunded || 0,
+    });
   }
 
   private upsertRemotePlayer(ps: PlayerSyncPayload): void {
@@ -8539,7 +8582,17 @@ export class GameEngine {
         invulnTimer: ps.invuln ? 0.2 : 0,
         cash: ps.cash,
         kills: ps.kills,
+        revives: ps.revives || 0,
+        repairs: ps.repairs || 0,
+        doorFunded: ps.doorFunded || 0,
       };
+      if (CoopManager.role === 'client') {
+        this.peerMvpCounters.set(ps.peerId, {
+          revives: rp.revives || 0,
+          repairs: rp.repairs || 0,
+          doorFunded: rp.doorFunded || 0,
+        });
+      }
       s.remotePlayers.push(rp);
       s.remotePlayers.sort((a, b) => a.slot - b.slot);
       return;
@@ -8616,6 +8669,16 @@ export class GameEngine {
     rp.cash = ps.cash;
     if (ps.classId) rp.classId = ps.classId;
     rp.kills = CoopManager.role === 'host' ? Math.max(rp.kills, ps.kills) : ps.kills;
+    if (CoopManager.role === 'client') {
+      rp.revives = ps.revives || 0;
+      rp.repairs = ps.repairs || 0;
+      rp.doorFunded = ps.doorFunded || 0;
+      this.peerMvpCounters.set(rp.peerId, {
+        revives: rp.revives,
+        repairs: rp.repairs,
+        doorFunded: rp.doorFunded,
+      });
+    }
   }
 
   private handleCoopMessage(msg: CoopNetMessage, _fromPeerId: string): void {
@@ -8649,9 +8712,7 @@ export class GameEngine {
     if (msg.type === 'players_fast' && CoopManager.role === 'client') {
       for (const ps of msg.list) {
         if (ps.peerId === CoopManager.myPeerId) {
-          if (s.player.downed) {
-            s.player.reviveProgress = ps.reviveProgress;
-          }
+          this.applyAuthoritativeSelfStatsFromHost(ps);
           continue;
         }
         this.upsertRemotePlayer(ps);
@@ -8932,7 +8993,13 @@ export class GameEngine {
       if (msg.grantChestRelic) {
         this.grantChestRelicInline(s.player.x, s.player.y);
       }
-      if (msg.killCredits && msg.killCredits > 0) {
+      if (msg.totalPersonalKills !== undefined) {
+        if (msg.totalPersonalKills > s.personalKills) {
+          const gained = msg.totalPersonalKills - s.personalKills;
+          s.personalKills = msg.totalPersonalKills;
+          this.applyLocalKillPerks(gained);
+        }
+      } else if (msg.killCredits && msg.killCredits > 0) {
         s.personalKills += msg.killCredits;
         this.applyLocalKillPerks(msg.killCredits);
       }

@@ -132,6 +132,9 @@ export interface RemotePlayerState {
   invulnTimer: number;
   cash: number;
   kills: number;
+  revives?: number;
+  repairs?: number;
+  doorFunded?: number;
   calloutText?: string;
   calloutTimer?: number;
   takeoverOriginCallsign?: string;
@@ -176,6 +179,9 @@ export interface PlayerSyncPayload {
   invuln: boolean;
   cash: number;
   kills: number;
+  revives?: number;
+  repairs?: number;
+  doorFunded?: number;
 }
 
 export interface SerializedBullet {
@@ -415,6 +421,7 @@ export type CoopNetMessage =
       grantChestRelic?: boolean;
       waveAutoRevive?: boolean;
       killCredits?: number;
+      totalPersonalKills?: number;
       bossKills?: number;
       bossTechCore?: number;
       teamSkill?: { ownerId: string; ownerName: string; classId: AgentClassId; x: number; y: number };
